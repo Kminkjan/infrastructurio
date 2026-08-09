@@ -49,6 +49,7 @@ This is a direction, not a permanent technology commitment. Architecture decisio
 - [Technical architecture](docs/technical-architecture.md)
 - [Performance strategy](docs/performance-strategy.md)
 - [Roadmap](ROADMAP.md)
+- [Initial issue backlog](docs/initial-backlog.md)
 - [Glossary](docs/glossary.md)
 - [Contributing](CONTRIBUTING.md)
 
@@ -57,4 +58,3 @@ This is a direction, not a permanent technology commitment. Architecture decisio
 **M0 — Simulation Toy:** draw a small map, place a road connection, route representative freight through it, and inspect the resulting flow.
 
 The roadmap describes outcomes rather than dates. Issues describe the concrete work needed to reach each outcome.
-
