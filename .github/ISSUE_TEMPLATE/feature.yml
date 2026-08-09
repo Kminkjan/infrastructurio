@@ -1,0 +1,35 @@
+name: Feature
+description: Propose a bounded player-visible or enabling capability
+title: "[Feature]: "
+labels: ["type: feature"]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What observable outcome should this work create?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why it matters
+      description: Which product promise or milestone does this validate?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: Describe what is included and explicitly excluded.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List observable, testable completion conditions.
+      placeholder: "- [ ] The player can…"
+    validations:
+      required: true
+

@@ -1,0 +1,32 @@
+name: Research
+description: Run a bounded experiment that produces evidence or a decision
+title: "[Research]: "
+labels: ["type: research"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: State the question so that the result could change a decision.
+    validations:
+      required: true
+  - type: textarea
+    id: method
+    attributes:
+      label: Method
+      description: What is the smallest experiment or investigation that can answer it?
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Expected output
+      description: Describe the evidence, prototype, benchmark, or decision record this should produce.
+    validations:
+      required: true
+  - type: textarea
+    id: limits
+    attributes:
+      label: Timebox and exclusions
+      description: What will this research deliberately not attempt?
+
