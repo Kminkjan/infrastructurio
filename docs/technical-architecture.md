@@ -107,7 +107,19 @@ src/
 
 Start with readable maps, arrays, and adjacency lists. Introduce entity-component systems, typed-array storage, WebAssembly, or GPU compute only after profiling identifies a relevant bottleneck.
 
+## Current foundation
+
+The web scaffold establishes four public module entry points:
+
+| Module | Responsibility | Allowed foundation dependencies |
+| --- | --- | --- |
+| `src/shared` | Commands and serializable snapshots | None |
+| `src/simulation` | Authoritative deterministic state transitions | `shared` |
+| `src/rendering` | PixiJS canvas and snapshot presentation | `shared` |
+| `src/app` | React composition, controls, and orchestration | `simulation`, `rendering`, `shared` |
+
+The browser application currently runs the simulation on the main thread through the typed command/snapshot interface. This keeps the initial scaffold small while preserving the seam that will move behind a Web Worker when simulation processing warrants it. The simulation test suite runs in a Node environment and does not construct browser, React, or PixiJS objects.
+
 ## Save format
 
 Saved games contain a format version, seed, simulation time, world state, and scenario metadata. IndexedDB provides automatic local storage; explicit file export provides player-controlled backup and portability.
-

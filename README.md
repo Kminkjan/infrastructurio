@@ -8,7 +8,7 @@ Successful infrastructure attracts development. Development creates traffic, lan
 
 ## Status
 
-The project is in pre-production. The current goal is a small web-based simulation toy that proves one loop:
+The project is in pre-production. A runnable web foundation is in place, and the current goal is a small simulation toy that proves one loop:
 
 1. Connect a resource to a market.
 2. Observe private traffic using the connection.
@@ -40,6 +40,34 @@ The intended prototype stack is:
 - Vitest for behavioral simulation tests
 
 This is a direction, not a permanent technology commitment. Architecture decisions are recorded in [`docs/decisions`](docs/decisions).
+
+## Run locally
+
+Requires Node.js 20.19 or newer.
+
+Install dependencies once:
+
+```sh
+npm install
+```
+
+Then start the application with one command:
+
+```sh
+npm run dev
+```
+
+Vite prints the local URL to open. The page renders a PixiJS world canvas and a React control overlay.
+
+## Repository checks
+
+```sh
+npm test
+npm run typecheck
+npm run build
+```
+
+Vitest uses its Node environment for simulation tests, so the simulation can be exercised without a DOM, React, or PixiJS renderer.
 
 ## Project documentation
 
