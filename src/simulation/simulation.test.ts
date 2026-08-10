@@ -108,4 +108,88 @@ describe("headless simulation", () => {
       links: [],
     });
   });
+
+  it("assigns bounded daily freight only across the connected quarry route", () => {
+    const simulation = createSimulation("quarry-freight");
+    const initial = simulation.getSnapshot();
+    const quarry = initial.geography.quarry.position;
+    const market = initial.geography.externalMarketConnection.position;
+
+    expect(initial.quarryMarketFreight).toMatchObject({
+      producerId: initial.geography.quarry.id,
+      marketId: initial.geography.externalMarketConnection.id,
+      productionTonsPerDay: 120,
+      demandTonsPerDay: 100,
+      shippedTonsPerDay: 0,
+      route: null,
+      limitingFactor: "no-route",
+    });
+
+    const connected = simulation.dispatch({
+      type: "build-road",
+      start: quarry,
+      end: market,
+    });
+    expect(connected.quarryMarketFreight).toMatchObject({
+      shippedTonsPerDay: 100,
+      limitingFactor: "demand",
+    });
+    expect(connected.quarryMarketFreight.route?.linkIds).toEqual([
+      "road-segment-1:link-1",
+    ]);
+    expect(connected.quarryMarketFreight.shippedTonsPerDay).toBeLessThanOrEqual(
+      connected.quarryMarketFreight.productionTonsPerDay,
+    );
+
+    const afterManyDays = simulation.dispatch({
+      type: "advance",
+      ticks: 24 * 30,
+    });
+    expect(afterManyDays.quarryMarketFreight).toEqual(
+      connected.quarryMarketFreight,
+    );
+
+    const disconnected = simulation.dispatch({
+      type: "remove-road",
+      roadSegmentId: "road-segment-1",
+    });
+    expect(disconnected.quarryMarketFreight).toMatchObject({
+      shippedTonsPerDay: 0,
+      route: null,
+      limitingFactor: "no-route",
+    });
+  });
+
+  it("ships less freight over a more expensive connected route", () => {
+    const direct = createSimulation("route-cost-freight");
+    const directGeography = direct.getSnapshot().geography;
+    direct.dispatch({
+      type: "build-road",
+      start: directGeography.quarry.position,
+      end: directGeography.externalMarketConnection.position,
+    });
+
+    const indirect = createSimulation("route-cost-freight");
+    const indirectGeography = indirect.getSnapshot().geography;
+    indirect.dispatch({
+      type: "build-road",
+      start: indirectGeography.quarry.position,
+      end: { x: 0, y: 0 },
+    });
+    const indirectSnapshot = indirect.dispatch({
+      type: "build-road",
+      start: { x: 0, y: 0 },
+      end: indirectGeography.externalMarketConnection.position,
+    });
+
+    const directFreight = direct.getSnapshot().quarryMarketFreight;
+    const indirectFreight = indirectSnapshot.quarryMarketFreight;
+    expect(indirectFreight.routeCost).toBeGreaterThan(
+      directFreight.routeCost ?? 0,
+    );
+    expect(indirectFreight.shippedTonsPerDay).toBeLessThan(
+      directFreight.shippedTonsPerDay,
+    );
+    expect(indirectFreight.limitingFactor).toBe("route-cost");
+  });
 });

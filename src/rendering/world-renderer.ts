@@ -104,6 +104,7 @@ export async function createWorldRenderer(
   const roadLayer = new Container();
   const geographyHitLayer = new Container();
   const roadHitLayer = new Container();
+  const priorityGeographyHitLayer = new Container();
   const selectionLayer = new Graphics();
   const constructionPreviewLayer = new Graphics();
   selectionLayer.eventMode = "none";
@@ -113,6 +114,7 @@ export async function createWorldRenderer(
     roadLayer,
     geographyHitLayer,
     roadHitLayer,
+    priorityGeographyHitLayer,
     selectionLayer,
     constructionPreviewLayer,
   );
@@ -224,6 +226,7 @@ export async function createWorldRenderer(
     const isInitialDraw = renderedGeography === undefined;
     destroyChildren(geographyLayer);
     destroyChildren(geographyHitLayer);
+    destroyChildren(priorityGeographyHitLayer);
     renderedGeography = snapshot.geography;
     mapBounds = snapshot.geography.bounds;
     geographyFeatures = getSelectableMapFeatures(snapshot.geography);
@@ -300,7 +303,11 @@ export async function createWorldRenderer(
       hitTarget.on("pointertap", (event) =>
         handleFeatureSelection(feature, event),
       );
-      geographyHitLayer.addChild(hitTarget);
+      const hitLayer =
+        feature.geometry.type === "polygon"
+          ? geographyHitLayer
+          : priorityGeographyHitLayer;
+      hitLayer.addChild(hitTarget);
     }
 
     if (isInitialDraw) {
@@ -391,6 +398,20 @@ export async function createWorldRenderer(
     const tolerance = 14 / camera.scale;
     let nearest = position;
     let nearestDistance = tolerance;
+
+    for (const terminal of [
+      currentSnapshot.geography.quarry.position,
+      currentSnapshot.geography.externalMarketConnection.position,
+    ]) {
+      const distance = Math.hypot(
+        position.x - terminal.x,
+        position.y - terminal.y,
+      );
+      if (distance <= nearestDistance) {
+        nearest = terminal;
+        nearestDistance = distance;
+      }
+    }
 
     for (const node of currentSnapshot.roadNetwork.nodes) {
       const distance = Math.hypot(

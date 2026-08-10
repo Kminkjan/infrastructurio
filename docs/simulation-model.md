@@ -92,6 +92,22 @@ Deleting a player-authored segment removes all links derived from it and rebuild
 the remaining topology. The M0 graph intentionally does not model collinear
 overlaps, grade-separated crossings, curved roads, or configurable junctions.
 
+### M0 aggregate quarry freight
+
+The Millford Valley quarry-to-market flow is a daily aggregate rate rather than
+an inventory or a collection of persistent shipments. The quarry offers at most
+120 tons of granite per day, while the external market requests at most 100 tons
+per day. No freight is assigned unless the road graph contains a route whose
+end nodes coincide with the quarry and market terminals.
+
+For this first proof, generalized route cost equals geometric route length. A
+route at or below 1,000 cost units can carry all otherwise available freight.
+Between 1,000 and 2,000 units, shipped volume declines linearly; at 2,000 units
+the route becomes unviable. These explicit scenario values are balancing inputs,
+not a capacity or congestion model. The freight snapshot records the route and
+the same production, demand, cost, and limiting-factor values shown by the
+inspector.
+
 ## Private operators
 
 Vehicles belong to simulated operators. Operators respond to demand, infrastructure compatibility, operating cost, capacity, and policy.

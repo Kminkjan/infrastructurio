@@ -233,6 +233,40 @@ button.secondary {
   line-height: 1.45;
 }
 
+.freight-details {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.85rem 0 0;
+}
+
+.freight-details div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  border-top: 1px solid rgb(255 255 255 / 10%);
+  padding-top: 0.45rem;
+}
+
+.freight-details dt {
+  color: #b8c5bb;
+  font-size: 0.78rem;
+}
+
+.freight-details dd {
+  margin: 0;
+  color: #fffdf7;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.limiting-factor {
+  margin: 0.8rem 0 0;
+  color: #e5c985;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
 .controls {
   display: flex;
   flex-wrap: wrap;

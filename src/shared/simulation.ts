@@ -1,4 +1,5 @@
 import type { Point, ScenarioGeography } from "./geography";
+import type { AggregateFreightSnapshot } from "./economy";
 import type { RoadNetwork } from "./roads";
 
 export const TICKS_PER_DAY = 24;
@@ -19,4 +20,5 @@ export interface SimulationSnapshot {
   readonly elapsedDays: number;
   readonly geography: ScenarioGeography;
   readonly roadNetwork: RoadNetwork;
+  readonly quarryMarketFreight: AggregateFreightSnapshot;
 }

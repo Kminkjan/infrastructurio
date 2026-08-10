@@ -1,5 +1,9 @@
 export { TICKS_PER_DAY } from "./simulation";
 export type {
+  AggregateFreightSnapshot,
+  FreightLimitingFactor,
+} from "./economy";
+export type {
   CrossingAreaGeography,
   ExternalMarketConnectionGeography,
   FertileLandGeography,

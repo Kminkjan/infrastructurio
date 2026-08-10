@@ -149,6 +149,12 @@ search using geometric link length. Collinear overlapping segments are rejected
 because lanes, parallel links, bridges, tunnels, and junction configuration are
 outside the issue's simple-road scope.
 
+The M0 quarry freight assignment is a pure simulation-core calculation derived
+from scenario terminals and the authoritative road graph. Its serializable
+snapshot contains daily production, market demand, the selected route and cost,
+shipped volume, and a limiting-factor explanation. React formats those values for
+the quarry and market inspector but does not recalculate economic outcomes.
+
 ## Save format
 
 Saved games contain a format version, seed, simulation time, world state, and scenario metadata. IndexedDB provides automatic local storage; explicit file export provides player-controlled backup and portability.

@@ -62,8 +62,13 @@ geography in a PixiJS world canvas with a React control overlay. Drag the map
 to pan, use the mouse wheel or map controls to zoom, and select a crossing,
 market connection, resource, or settlement to inspect it. The **Fit** control
 returns the complete map to view. Choose **Build road** and drag across the map
-to construct a segment; endpoints snap to nearby roads and junctions. Choose
-**Remove road** and select a player-built segment to delete it.
+to construct a segment; endpoints snap to the quarry, market, nearby roads, and
+junctions. Choose **Remove road** and select a player-built segment to delete it.
+
+The quarry produces up to 120 tons of granite per day and the external market
+demands up to 100 tons. Select either location to inspect production, demand,
+the assigned road route, shipped volume, and the current limiting factor.
+Freight remains at zero until the terminals are connected by a viable route.
 
 ## Repository checks
 

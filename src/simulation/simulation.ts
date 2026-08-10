@@ -9,6 +9,7 @@ import {
   type SimulationSnapshot,
 } from "../shared";
 import { generateMillfordValley } from "../scenarios";
+import { createQuarryMarketFreight } from "./economy/quarry-market-freight";
 import { createRoadNetwork, findRoadRoute } from "./transport/road-network";
 
 interface SimulationState {
@@ -26,12 +27,22 @@ export interface Simulation {
 }
 
 function snapshot(state: SimulationState): SimulationSnapshot {
+  const quarryMarketRoute = findRoadRoute(
+    state.roadNetwork,
+    state.geography.quarry.position,
+    state.geography.externalMarketConnection.position,
+  );
+
   return Object.freeze({
     seed: state.seed,
     tick: state.tick,
     elapsedDays: state.tick / TICKS_PER_DAY,
     geography: state.geography,
     roadNetwork: state.roadNetwork,
+    quarryMarketFreight: createQuarryMarketFreight(
+      state.geography,
+      quarryMarketRoute,
+    ),
   });
 }
 

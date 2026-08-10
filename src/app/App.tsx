@@ -6,10 +6,56 @@ import {
   type WorldRenderer,
 } from "../rendering";
 import { createSimulation } from "../simulation";
-import type { Point, SimulationSnapshot } from "../shared";
+import type {
+  AggregateFreightSnapshot,
+  Point,
+  SimulationSnapshot,
+} from "../shared";
 import "./app.css";
 
 const SCENARIO_SEED = "millford-valley-foundation";
+
+function formatTons(value: number): string {
+  return `${value.toLocaleString()} t/day`;
+}
+
+function FreightInspector({
+  freight,
+}: {
+  readonly freight: AggregateFreightSnapshot;
+}) {
+  const routeDescription = freight.route
+    ? `${Math.round(freight.routeCost ?? 0).toLocaleString()} cost units · ${
+        freight.route.linkIds.length
+      } ${freight.route.linkIds.length === 1 ? "link" : "links"}`
+    : "No connected road route";
+
+  return (
+    <>
+      <dl className="freight-details">
+        <div>
+          <dt>Production</dt>
+          <dd>{formatTons(freight.productionTonsPerDay)}</dd>
+        </div>
+        <div>
+          <dt>Market demand</dt>
+          <dd>{formatTons(freight.demandTonsPerDay)}</dd>
+        </div>
+        <div>
+          <dt>Shipped</dt>
+          <dd>{formatTons(freight.shippedTonsPerDay)}</dd>
+        </div>
+        <div>
+          <dt>Route</dt>
+          <dd>{routeDescription}</dd>
+        </div>
+      </dl>
+      <p className="limiting-factor">
+        <strong>Limiting factor:</strong> {freight.limitingReason}
+      </p>
+    </>
+  );
+}
 
 interface WorldViewProps {
   readonly snapshot: SimulationSnapshot;
@@ -150,6 +196,10 @@ export function App() {
     setConstructionMessage(undefined);
   }
 
+  const selectionShowsFreight =
+    selection?.id === snapshot.quarryMarketFreight.producerId ||
+    selection?.id === snapshot.quarryMarketFreight.marketId;
+
   return (
     <main className="prototype-shell">
       <WorldView
@@ -208,6 +258,9 @@ export function App() {
               <h2>{selection.name}</h2>
               <p className="selection-kind">{selection.kind}</p>
               <p className="selection-description">{selection.description}</p>
+              {selectionShowsFreight ? (
+                <FreightInspector freight={snapshot.quarryMarketFreight} />
+              ) : null}
             </>
           ) : (
             <>
@@ -229,7 +282,7 @@ export function App() {
         </div>
         <p className="hint">
           {roadTool === "build"
-            ? "Drag across the map to draw a road. Endpoints snap to nearby roads and junctions."
+            ? "Drag across the map to draw a road. Endpoints snap to the quarry, market, nearby roads, and junctions."
             : roadTool === "remove"
               ? "Select a player-built road segment to remove it. Drag empty map space to pan."
               : "Drag the map to pan, scroll to zoom, and select a marked feature to inspect it."}
