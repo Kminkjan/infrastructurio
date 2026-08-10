@@ -24,43 +24,78 @@ export async function createWorldRenderer(
   application.canvas.setAttribute("aria-label", "PixiJS world view");
   host.append(application.canvas);
 
-  const terrain = new Graphics()
-    .roundRect(80, 70, 800, 480, 32)
-    .fill({ color: 0x78966e })
-    .moveTo(90, 360)
-    .bezierCurveTo(300, 250, 560, 460, 870, 300)
-    .stroke({ color: 0x77b8d1, width: 58 })
-    .moveTo(150, 455)
-    .bezierCurveTo(360, 390, 570, 270, 810, 185)
-    .stroke({ color: 0x3b4540, width: 16 });
+  let geographyLayer: Graphics | undefined;
+  let renderedGeography: SimulationSnapshot["geography"] | undefined;
 
-  const market = new Graphics()
-    .rect(778, 147, 64, 64)
-    .fill({ color: 0xd9b26f })
-    .rect(792, 162, 10, 49)
-    .fill({ color: 0x675343 });
+  function drawGeography(snapshot: SimulationSnapshot): void {
+    if (renderedGeography === snapshot.geography) {
+      return;
+    }
 
-  const quarry = new Graphics()
-    .circle(150, 455, 38)
-    .fill({ color: 0x616b65 })
-    .circle(132, 443, 8)
-    .fill({ color: 0xaab1aa });
+    geographyLayer?.destroy();
+    renderedGeography = snapshot.geography;
 
-  const vehicle = new Graphics()
-    .roundRect(-12, -7, 24, 14, 4)
-    .fill({ color: 0xffd166 });
+    const geography = snapshot.geography;
+    const layer = new Graphics()
+      .rect(0, 0, geography.bounds.width, geography.bounds.height)
+      .fill({ color: 0x78966e });
 
-  application.stage.addChild(terrain, market, quarry, vehicle);
+    layer
+      .poly(
+        geography.fertileLand.boundary.flatMap(({ x, y }) => [x, y]),
+      )
+      .fill({ color: 0x9dae62 });
 
-  function update(snapshot: SimulationSnapshot): void {
-    const progress = (snapshot.tick % 96) / 96;
-    vehicle.position.set(150 + progress * 660, 455 - progress * 270);
+    const [riverStart, ...riverPoints] = geography.river.path;
+    if (riverStart) {
+      layer.moveTo(riverStart.x, riverStart.y);
+      for (const riverPoint of riverPoints) {
+        layer.lineTo(riverPoint.x, riverPoint.y);
+      }
+      layer.stroke({ color: 0x77b8d1, width: geography.river.width });
+    }
+
+    const crossing = geography.crossingArea;
+    layer
+      .roundRect(
+        crossing.center.x - crossing.width / 2,
+        crossing.center.y - crossing.height / 2,
+        crossing.width,
+        crossing.height,
+        18,
+      )
+      .stroke({ color: 0xf3c969, width: 5, alpha: 0.9 });
+
+    for (const settlement of geography.settlementSeeds) {
+      layer
+        .circle(settlement.position.x, settlement.position.y, 22)
+        .fill({ color: 0xe7dec3 })
+        .circle(settlement.position.x, settlement.position.y, 7)
+        .fill({ color: 0x80684f });
+    }
+
+    const quarry = geography.quarry.position;
+    layer
+      .circle(quarry.x, quarry.y, 38)
+      .fill({ color: 0x616b65 })
+      .circle(quarry.x - 16, quarry.y - 12, 8)
+      .fill({ color: 0xaab1aa });
+
+    const market = geography.externalMarketConnection.position;
+    layer
+      .rect(market.x - 60, market.y - 32, 60, 64)
+      .fill({ color: 0xd9b26f })
+      .rect(market.x - 46, market.y - 18, 10, 50)
+      .fill({ color: 0x675343 });
+
+    geographyLayer = layer;
+    application.stage.addChild(layer);
   }
 
-  update(initialSnapshot);
+  drawGeography(initialSnapshot);
 
   return {
-    update,
+    update: drawGeography,
     destroy() {
       application.destroy({ removeView: true }, { children: true });
     },

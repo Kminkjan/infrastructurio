@@ -57,7 +57,8 @@ Then start the application with one command:
 npm run dev
 ```
 
-Vite prints the local URL to open. The page renders a PixiJS world canvas and a React control overlay.
+Vite prints the local URL to open. The page renders the seeded Millford Valley
+geography in a PixiJS world canvas with a React control overlay.
 
 ## Repository checks
 

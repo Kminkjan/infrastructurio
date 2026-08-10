@@ -1,12 +1,15 @@
 import {
   TICKS_PER_DAY,
+  type ScenarioGeography,
   type SimulationCommand,
   type SimulationSnapshot,
 } from "../shared";
+import { generateMillfordValley } from "../scenarios";
 
 interface SimulationState {
   readonly seed: string;
   readonly tick: number;
+  readonly geography: ScenarioGeography;
 }
 
 export interface Simulation {
@@ -19,6 +22,7 @@ function snapshot(state: SimulationState): SimulationSnapshot {
     seed: state.seed,
     tick: state.tick,
     elapsedDays: state.tick / TICKS_PER_DAY,
+    geography: state.geography,
   });
 }
 
@@ -31,7 +35,11 @@ function advance(state: SimulationState, ticks: number): SimulationState {
 }
 
 export function createSimulation(seed: string): Simulation {
-  const initialState: SimulationState = Object.freeze({ seed, tick: 0 });
+  const initialState: SimulationState = Object.freeze({
+    seed,
+    tick: 0,
+    geography: generateMillfordValley(seed),
+  });
   let state = initialState;
 
   return {

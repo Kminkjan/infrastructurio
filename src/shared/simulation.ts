@@ -1,3 +1,5 @@
+import type { ScenarioGeography } from "./geography";
+
 export const TICKS_PER_DAY = 24;
 
 export type SimulationCommand =
@@ -8,4 +10,5 @@ export interface SimulationSnapshot {
   readonly seed: string;
   readonly tick: number;
   readonly elapsedDays: number;
+  readonly geography: ScenarioGeography;
 }

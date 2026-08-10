@@ -114,11 +114,18 @@ The web scaffold establishes four public module entry points:
 | Module | Responsibility | Allowed foundation dependencies |
 | --- | --- | --- |
 | `src/shared` | Commands and serializable snapshots | None |
-| `src/simulation` | Authoritative deterministic state transitions | `shared` |
+| `src/scenarios` | Deterministic scenario geography generation | `shared` types only |
+| `src/simulation` | Authoritative deterministic state transitions | `shared`, `scenarios` |
 | `src/rendering` | PixiJS canvas and snapshot presentation | `shared` |
 | `src/app` | React composition, controls, and orchestration | `simulation`, `rendering`, `shared` |
 
 The browser application currently runs the simulation on the main thread through the typed command/snapshot interface. This keeps the initial scaffold small while preserving the seam that will move behind a Web Worker when simulation processing warrants it. The simulation test suite runs in a Node environment and does not construct browser, React, or PixiJS objects.
+
+Millford Valley geography is generated from an authored scenario template plus
+bounded seeded variation in `src/scenarios`. The simulation owns the generated
+geography and includes it in its serializable snapshot; the renderer only applies
+presentation styles to those snapshot features. A scenario seed therefore changes
+geography without placing scenario coordinates or generation rules in PixiJS code.
 
 ## Save format
 

@@ -19,7 +19,7 @@ describe("headless simulation", () => {
     const secondSnapshots = commands.map((command) => second.dispatch(command));
 
     expect(firstSnapshots).toEqual(secondSnapshots);
-    expect(first.getSnapshot()).toEqual({
+    expect(first.getSnapshot()).toMatchObject({
       seed: "millford-valley",
       tick: 72,
       elapsedDays: 3,
@@ -28,13 +28,10 @@ describe("headless simulation", () => {
 
   it("resets to the initial deterministic state", () => {
     const simulation = createSimulation("millford-valley");
+    const initialSnapshot = simulation.getSnapshot();
     simulation.dispatch({ type: "advance", ticks: 24 });
 
-    expect(simulation.dispatch({ type: "reset" })).toEqual({
-      seed: "millford-valley",
-      tick: 0,
-      elapsedDays: 0,
-    });
+    expect(simulation.dispatch({ type: "reset" })).toEqual(initialSnapshot);
   });
 
   it("rejects invalid time steps", () => {
