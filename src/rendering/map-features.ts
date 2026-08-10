@@ -1,4 +1,4 @@
-import type { Point, ScenarioGeography } from "../shared";
+import type { Point, RoadNetwork, ScenarioGeography } from "../shared";
 
 export type MapFeatureKind = "infrastructure" | "resource" | "settlement";
 
@@ -9,7 +9,7 @@ export interface MapSelection {
   readonly description: string;
 }
 
-type FeatureGeometry =
+export type FeatureGeometry =
   | {
       readonly type: "point";
       readonly position: Point;
@@ -24,6 +24,11 @@ type FeatureGeometry =
   | {
       readonly type: "polygon";
       readonly boundary: readonly Point[];
+    }
+  | {
+      readonly type: "line";
+      readonly start: Point;
+      readonly end: Point;
     };
 
 export interface SelectableMapFeature extends MapSelection {
@@ -95,4 +100,25 @@ export function getSelectableMapFeatures(
 export function toMapSelection(feature: SelectableMapFeature): MapSelection {
   const { id, name, kind, description } = feature;
   return { id, name, kind, description };
+}
+
+export function getSelectableRoadFeatures(
+  roadNetwork: RoadNetwork,
+): readonly SelectableMapFeature[] {
+  return roadNetwork.segments.map((segment) => ({
+    id: segment.id,
+    name: "Road segment",
+    kind: "infrastructure" as const,
+    description: `${Math.round(
+      Math.hypot(
+        segment.end.x - segment.start.x,
+        segment.end.y - segment.start.y,
+      ),
+    )} map units · player-built road`,
+    geometry: {
+      type: "line" as const,
+      start: segment.start,
+      end: segment.end,
+    },
+  }));
 }

@@ -10,4 +10,11 @@ export type {
   ScenarioGeography,
   SettlementSeedGeography,
 } from "./geography";
+export type {
+  RoadLink,
+  RoadNetwork,
+  RoadNode,
+  RoadRoute,
+  RoadSegment,
+} from "./roads";
 export type { SimulationCommand, SimulationSnapshot } from "./simulation";

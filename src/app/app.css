@@ -73,6 +73,15 @@ button.secondary {
   cursor: grabbing;
 }
 
+.world-canvas.road-tool-build,
+.world-canvas.road-tool-build.is-building {
+  cursor: crosshair;
+}
+
+.world-canvas.road-tool-remove {
+  cursor: not-allowed;
+}
+
 .map-controls {
   position: absolute;
   top: clamp(1rem, 3vw, 2rem);
@@ -130,6 +139,47 @@ button.secondary {
 .hint,
 .status {
   margin: 0;
+}
+
+.road-tools {
+  margin-top: 1.15rem;
+}
+
+.tool-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+}
+
+.tool-button {
+  border-color: rgb(255 255 255 / 20%);
+  padding: 0.48rem 0.72rem;
+  color: #e8eee9;
+  background: rgb(255 255 255 / 7%);
+  font-size: 0.78rem;
+}
+
+.tool-button:hover {
+  background: rgb(255 255 255 / 14%);
+}
+
+.tool-button[aria-pressed="true"] {
+  border-color: #f3c969;
+  color: #17251f;
+  background: #f3c969;
+}
+
+.tool-button.danger[aria-pressed="true"] {
+  border-color: #f09b83;
+  background: #f09b83;
+}
+
+.construction-message {
+  margin: 0.65rem 0 0;
+  color: #f3b7a7;
+  font-size: 0.8rem;
+  line-height: 1.4;
 }
 
 .eyebrow {

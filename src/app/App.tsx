@@ -2,26 +2,42 @@ import { useEffect, useRef, useState } from "react";
 import {
   createWorldRenderer,
   type MapSelection,
+  type RoadTool,
   type WorldRenderer,
 } from "../rendering";
 import { createSimulation } from "../simulation";
-import type { SimulationSnapshot } from "../shared";
+import type { Point, SimulationSnapshot } from "../shared";
 import "./app.css";
 
 const SCENARIO_SEED = "millford-valley-foundation";
 
 interface WorldViewProps {
   readonly snapshot: SimulationSnapshot;
+  readonly roadTool: RoadTool;
   readonly onSelectionChange: (selection: MapSelection | undefined) => void;
+  readonly onBuildRoad: (start: Point, end: Point) => void;
+  readonly onRemoveRoad: (roadSegmentId: string) => void;
 }
 
-function WorldView({ snapshot, onSelectionChange }: WorldViewProps) {
+function WorldView({
+  snapshot,
+  roadTool,
+  onSelectionChange,
+  onBuildRoad,
+  onRemoveRoad,
+}: WorldViewProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<WorldRenderer | null>(null);
   const latestSnapshotRef = useRef(snapshot);
+  const latestRoadToolRef = useRef(roadTool);
   const selectionCallbackRef = useRef(onSelectionChange);
+  const buildRoadCallbackRef = useRef(onBuildRoad);
+  const removeRoadCallbackRef = useRef(onRemoveRoad);
   latestSnapshotRef.current = snapshot;
+  latestRoadToolRef.current = roadTool;
   selectionCallbackRef.current = onSelectionChange;
+  buildRoadCallbackRef.current = onBuildRoad;
+  removeRoadCallbackRef.current = onRemoveRoad;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -34,6 +50,12 @@ function WorldView({ snapshot, onSelectionChange }: WorldViewProps) {
       onSelectionChange(selection) {
         selectionCallbackRef.current(selection);
       },
+      onBuildRoad(start, end) {
+        buildRoadCallbackRef.current(start, end);
+      },
+      onRemoveRoad(roadSegmentId) {
+        removeRoadCallbackRef.current(roadSegmentId);
+      },
     }).then((renderer) => {
       if (disposed) {
         renderer.destroy();
@@ -42,6 +64,7 @@ function WorldView({ snapshot, onSelectionChange }: WorldViewProps) {
 
       rendererRef.current = renderer;
       renderer.update(latestSnapshotRef.current);
+      renderer.setRoadTool(latestRoadToolRef.current);
     });
 
     return () => {
@@ -54,6 +77,10 @@ function WorldView({ snapshot, onSelectionChange }: WorldViewProps) {
   useEffect(() => {
     rendererRef.current?.update(snapshot);
   }, [snapshot]);
+
+  useEffect(() => {
+    rendererRef.current?.setRoadTool(roadTool);
+  }, [roadTool]);
 
   return (
     <div className="world">
@@ -93,6 +120,8 @@ export function App() {
   const [simulation] = useState(() => createSimulation(SCENARIO_SEED));
   const [snapshot, setSnapshot] = useState(() => simulation.getSnapshot());
   const [selection, setSelection] = useState<MapSelection>();
+  const [roadTool, setRoadTool] = useState<RoadTool>("inspect");
+  const [constructionMessage, setConstructionMessage] = useState<string>();
 
   function advanceDay(): void {
     setSnapshot(simulation.dispatch({ type: "advance", ticks: 24 }));
@@ -100,15 +129,78 @@ export function App() {
 
   function reset(): void {
     setSnapshot(simulation.dispatch({ type: "reset" }));
+    setConstructionMessage(undefined);
+  }
+
+  function buildRoad(start: Point, end: Point): void {
+    try {
+      setSnapshot(simulation.dispatch({ type: "build-road", start, end }));
+      setConstructionMessage(undefined);
+    } catch (error) {
+      setConstructionMessage(
+        error instanceof Error ? error.message : "Road construction failed",
+      );
+    }
+  }
+
+  function removeRoad(roadSegmentId: string): void {
+    setSnapshot(
+      simulation.dispatch({ type: "remove-road", roadSegmentId }),
+    );
+    setConstructionMessage(undefined);
   }
 
   return (
     <main className="prototype-shell">
-      <WorldView snapshot={snapshot} onSelectionChange={setSelection} />
+      <WorldView
+        snapshot={snapshot}
+        roadTool={roadTool}
+        onSelectionChange={setSelection}
+        onBuildRoad={buildRoad}
+        onRemoveRoad={removeRoad}
+      />
       <section className="overlay" aria-label="Simulation controls">
         <p className="eyebrow">Millford Valley · Foundation</p>
         <h1>Infrastructurio</h1>
-        <p className="status">Simulation day {snapshot.elapsedDays}</p>
+        <p className="status">
+          Simulation day {snapshot.elapsedDays} ·{" "}
+          {snapshot.roadNetwork.segments.length} road{" "}
+          {snapshot.roadNetwork.segments.length === 1 ? "segment" : "segments"}
+        </p>
+        <section className="road-tools" aria-label="Road construction tools">
+          <p className="eyebrow">Map tool</p>
+          <div className="tool-buttons">
+            <button
+              className="tool-button"
+              type="button"
+              aria-pressed={roadTool === "inspect"}
+              onClick={() => setRoadTool("inspect")}
+            >
+              Inspect
+            </button>
+            <button
+              className="tool-button"
+              type="button"
+              aria-pressed={roadTool === "build"}
+              onClick={() => setRoadTool("build")}
+            >
+              Build road
+            </button>
+            <button
+              className="tool-button danger"
+              type="button"
+              aria-pressed={roadTool === "remove"}
+              onClick={() => setRoadTool("remove")}
+            >
+              Remove road
+            </button>
+          </div>
+          {constructionMessage ? (
+            <p className="construction-message" role="status">
+              {constructionMessage}
+            </p>
+          ) : null}
+        </section>
         <section className="inspector" aria-live="polite">
           <p className="eyebrow">Inspector</p>
           {selection ? (
@@ -121,7 +213,8 @@ export function App() {
             <>
               <h2>Nothing selected</h2>
               <p className="selection-description">
-                Select a crossing, market connection, resource, or settlement.
+                Select a road, crossing, market connection, resource, or
+                settlement.
               </p>
             </>
           )}
@@ -135,8 +228,11 @@ export function App() {
           </button>
         </div>
         <p className="hint">
-          Drag the map to pan, scroll to zoom, and select a marked feature to
-          inspect it.
+          {roadTool === "build"
+            ? "Drag across the map to draw a road. Endpoints snap to nearby roads and junctions."
+            : roadTool === "remove"
+              ? "Select a player-built road segment to remove it. Drag empty map space to pan."
+              : "Drag the map to pan, scroll to zoom, and select a marked feature to inspect it."}
         </p>
       </section>
     </main>

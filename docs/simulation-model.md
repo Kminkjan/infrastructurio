@@ -80,6 +80,18 @@ Travel demand is generated between zones or economic actors. Routes minimize gen
 
 Traffic assignment may update less frequently than rendered vehicle motion. Representative vehicles are sampled from assigned flows.
 
+### M0 road topology
+
+The authoritative road network distinguishes player-authored segments from the
+graph links derived from them. Segment endpoints and at-grade intersections form
+nodes; intersections split every affected segment into routable links. Queries
+currently minimize geometric distance because road class, speed, capacity,
+congestion, tolls, and restrictions belong to later milestones.
+
+Deleting a player-authored segment removes all links derived from it and rebuilds
+the remaining topology. The M0 graph intentionally does not model collinear
+overlaps, grade-separated crossings, curved roads, or configurable junctions.
+
 ## Private operators
 
 Vehicles belong to simulated operators. Operators respond to demand, infrastructure compatibility, operating cost, capacity, and policy.
@@ -115,4 +127,3 @@ Different systems use different clocks:
 - Development evaluation: weekly
 - Migration and land values: monthly
 - Regional economy: quarterly
-

@@ -15,20 +15,26 @@ import {
 } from "./map-camera";
 import {
   getSelectableMapFeatures,
+  getSelectableRoadFeatures,
   toMapSelection,
   type MapSelection,
   type SelectableMapFeature,
 } from "./map-features";
 
+export type RoadTool = "inspect" | "build" | "remove";
+
 export interface WorldRenderer {
   update(snapshot: SimulationSnapshot): void;
   resetView(): void;
   zoomBy(factor: number): void;
+  setRoadTool(tool: RoadTool): void;
   destroy(): void;
 }
 
 export interface WorldRendererOptions {
   readonly onSelectionChange?: (selection: MapSelection | undefined) => void;
+  readonly onBuildRoad?: (start: Point, end: Point) => void;
+  readonly onRemoveRoad?: (roadSegmentId: string) => void;
 }
 
 function drawFeatureShape(
@@ -57,7 +63,17 @@ function drawFeatureShape(
       return graphics.poly(
         geometry.boundary.flatMap(({ x, y }) => [x, y]),
       );
+    case "line":
+      return graphics
+        .moveTo(geometry.start.x, geometry.start.y)
+        .lineTo(geometry.end.x, geometry.end.y);
   }
+}
+
+function destroyChildren(container: Container): void {
+  container
+    .removeChildren()
+    .forEach((child) => child.destroy({ children: true }));
 }
 
 export async function createWorldRenderer(
@@ -79,17 +95,37 @@ export async function createWorldRenderer(
   canvas.className = "world-canvas";
   canvas.setAttribute(
     "aria-label",
-    "Interactive map of Millford Valley. Drag to pan and use the mouse wheel to zoom.",
+    "Interactive map of Millford Valley. Drag to pan, scroll to zoom, or choose a road tool.",
   );
   host.append(canvas);
 
   const world = new Container();
+  const geographyLayer = new Container();
+  const roadLayer = new Container();
+  const geographyHitLayer = new Container();
+  const roadHitLayer = new Container();
+  const selectionLayer = new Graphics();
+  const constructionPreviewLayer = new Graphics();
+  selectionLayer.eventMode = "none";
+  constructionPreviewLayer.eventMode = "none";
+  world.addChild(
+    geographyLayer,
+    roadLayer,
+    geographyHitLayer,
+    roadHitLayer,
+    selectionLayer,
+    constructionPreviewLayer,
+  );
   application.stage.addChild(world);
 
+  let currentSnapshot = initialSnapshot;
   let renderedGeography: SimulationSnapshot["geography"] | undefined;
+  let renderedRoadNetwork: SimulationSnapshot["roadNetwork"] | undefined;
+  let geographyFeatures: readonly SelectableMapFeature[] = [];
+  let roadFeatures: readonly SelectableMapFeature[] = [];
   let selectableFeatures: readonly SelectableMapFeature[] = [];
   let selectedFeatureId: string | undefined;
-  let selectionLayer: Graphics | undefined;
+  let roadTool: RoadTool = "inspect";
   let mapBounds = initialSnapshot.geography.bounds;
   let viewport: ViewportSize = {
     width: application.renderer.screen.width,
@@ -99,6 +135,8 @@ export async function createWorldRenderer(
   let pointerId: number | undefined;
   let lastPointer: Point | undefined;
   let dragDistance = 0;
+  let constructionStart: Point | undefined;
+  let constructionEnd: Point | undefined;
   let suppressNextSelection = false;
   let selectionSuppressionTimer: number | undefined;
 
@@ -108,15 +146,25 @@ export async function createWorldRenderer(
   }
 
   function drawSelection(): void {
-    if (!selectionLayer) {
-      return;
-    }
-
     selectionLayer.clear();
     const selectedFeature = selectableFeatures.find(
       ({ id }) => id === selectedFeatureId,
     );
     if (!selectedFeature) {
+      return;
+    }
+
+    if (selectedFeature.geometry.type === "line") {
+      drawFeatureShape(selectionLayer, selectedFeature).stroke({
+        color: 0xffffff,
+        width: 19,
+        alpha: 0.98,
+      });
+      drawFeatureShape(selectionLayer, selectedFeature).stroke({
+        color: 0xf3c969,
+        width: 13,
+        alpha: 0.96,
+      });
       return;
     }
 
@@ -142,15 +190,27 @@ export async function createWorldRenderer(
     options.onSelectionChange?.(undefined);
   }
 
+  function refreshSelectableFeatures(): void {
+    selectableFeatures = [...geographyFeatures, ...roadFeatures];
+    if (!selectableFeatures.some(({ id }) => id === selectedFeatureId)) {
+      const hadSelection = selectedFeatureId !== undefined;
+      selectedFeatureId = undefined;
+      if (hadSelection) {
+        options.onSelectionChange?.(undefined);
+      }
+    }
+    drawSelection();
+  }
+
   function handleFeatureSelection(
     feature: SelectableMapFeature,
     event: FederatedPointerEvent,
   ): void {
-    event.stopPropagation();
-    if (suppressNextSelection) {
+    if (roadTool !== "inspect" || suppressNextSelection) {
       return;
     }
 
+    event.stopPropagation();
     selectedFeatureId = feature.id;
     drawSelection();
     options.onSelectionChange?.(toMapSelection(feature));
@@ -161,39 +221,43 @@ export async function createWorldRenderer(
       return;
     }
 
-    world.removeChildren().forEach((child) => child.destroy({ children: true }));
+    const isInitialDraw = renderedGeography === undefined;
+    destroyChildren(geographyLayer);
+    destroyChildren(geographyHitLayer);
     renderedGeography = snapshot.geography;
     mapBounds = snapshot.geography.bounds;
-    selectableFeatures = getSelectableMapFeatures(snapshot.geography);
+    geographyFeatures = getSelectableMapFeatures(snapshot.geography);
 
     const geography = snapshot.geography;
-    const geographyLayer = new Graphics()
+    const geographyGraphics = new Graphics()
       .rect(0, 0, geography.bounds.width, geography.bounds.height)
       .fill({ color: 0x78966e });
-
-    geographyLayer.eventMode = "static";
-    geographyLayer.cursor = "grab";
-    geographyLayer.on("pointertap", () => {
-      if (!suppressNextSelection) {
+    geographyGraphics.eventMode = "static";
+    geographyGraphics.cursor = "grab";
+    geographyGraphics.on("pointertap", () => {
+      if (roadTool === "inspect" && !suppressNextSelection) {
         clearSelection();
       }
     });
 
-    geographyLayer
+    geographyGraphics
       .poly(geography.fertileLand.boundary.flatMap(({ x, y }) => [x, y]))
       .fill({ color: 0x9dae62 });
 
     const [riverStart, ...riverPoints] = geography.river.path;
     if (riverStart) {
-      geographyLayer.moveTo(riverStart.x, riverStart.y);
+      geographyGraphics.moveTo(riverStart.x, riverStart.y);
       for (const riverPoint of riverPoints) {
-        geographyLayer.lineTo(riverPoint.x, riverPoint.y);
+        geographyGraphics.lineTo(riverPoint.x, riverPoint.y);
       }
-      geographyLayer.stroke({ color: 0x77b8d1, width: geography.river.width });
+      geographyGraphics.stroke({
+        color: 0x77b8d1,
+        width: geography.river.width,
+      });
     }
 
     const crossing = geography.crossingArea;
-    geographyLayer
+    geographyGraphics
       .roundRect(
         crossing.center.x - crossing.width / 2,
         crossing.center.y - crossing.height / 2,
@@ -204,7 +268,7 @@ export async function createWorldRenderer(
       .stroke({ color: 0xf3c969, width: 5, alpha: 0.9 });
 
     for (const settlement of geography.settlementSeeds) {
-      geographyLayer
+      geographyGraphics
         .circle(settlement.position.x, settlement.position.y, 22)
         .fill({ color: 0xe7dec3 })
         .circle(settlement.position.x, settlement.position.y, 7)
@@ -212,21 +276,21 @@ export async function createWorldRenderer(
     }
 
     const quarry = geography.quarry.position;
-    geographyLayer
+    geographyGraphics
       .circle(quarry.x, quarry.y, 38)
       .fill({ color: 0x616b65 })
       .circle(quarry.x - 16, quarry.y - 12, 8)
       .fill({ color: 0xaab1aa });
 
     const market = geography.externalMarketConnection.position;
-    geographyLayer
+    geographyGraphics
       .rect(market.x - 60, market.y - 32, 60, 64)
       .fill({ color: 0xd9b26f })
       .rect(market.x - 46, market.y - 18, 10, 50)
       .fill({ color: 0x675343 });
+    geographyLayer.addChild(geographyGraphics);
 
-    const hitTargetLayer = new Container();
-    for (const feature of selectableFeatures) {
+    for (const feature of geographyFeatures) {
       const hitTarget = drawFeatureShape(new Graphics(), feature).fill({
         color: 0xffffff,
         alpha: 0.001,
@@ -236,29 +300,139 @@ export async function createWorldRenderer(
       hitTarget.on("pointertap", (event) =>
         handleFeatureSelection(feature, event),
       );
-      hitTargetLayer.addChild(hitTarget);
+      geographyHitLayer.addChild(hitTarget);
     }
 
-    selectionLayer = new Graphics();
-    selectionLayer.eventMode = "none";
-    world.addChild(geographyLayer, hitTargetLayer, selectionLayer);
+    if (isInitialDraw) {
+      camera = fitCamera(mapBounds, viewport);
+      applyCamera();
+    }
+    refreshSelectableFeatures();
+  }
 
-    if (!selectableFeatures.some(({ id }) => id === selectedFeatureId)) {
-      const hadSelection = selectedFeatureId !== undefined;
-      selectedFeatureId = undefined;
-      if (hadSelection) {
-        options.onSelectionChange?.(undefined);
+  function drawRoads(snapshot: SimulationSnapshot): void {
+    if (renderedRoadNetwork === snapshot.roadNetwork) {
+      return;
+    }
+
+    destroyChildren(roadLayer);
+    destroyChildren(roadHitLayer);
+    renderedRoadNetwork = snapshot.roadNetwork;
+    roadFeatures = getSelectableRoadFeatures(snapshot.roadNetwork);
+
+    for (const feature of roadFeatures) {
+      if (feature.geometry.type !== "line") {
+        continue;
       }
+      const { start, end } = feature.geometry;
+      const visual = new Graphics()
+        .moveTo(start.x, start.y)
+        .lineTo(end.x, end.y)
+        .stroke({ color: 0x4a463e, width: 13 })
+        .moveTo(start.x, start.y)
+        .lineTo(end.x, end.y)
+        .stroke({ color: 0xd9caa4, width: 8 });
+      roadLayer.addChild(visual);
+
+      const hitTarget = drawFeatureShape(new Graphics(), feature).stroke({
+        color: 0xffffff,
+        width: 22,
+        alpha: 0.001,
+      });
+      hitTarget.eventMode = "static";
+      hitTarget.cursor = "pointer";
+      hitTarget.on("pointertap", (event) => {
+        if (roadTool === "remove") {
+          event.stopPropagation();
+          options.onRemoveRoad?.(feature.id);
+          return;
+        }
+        handleFeatureSelection(feature, event);
+      });
+      roadHitLayer.addChild(hitTarget);
     }
 
-    camera = fitCamera(mapBounds, viewport);
-    applyCamera();
-    drawSelection();
+    refreshSelectableFeatures();
+  }
+
+  function drawConstructionPreview(): void {
+    constructionPreviewLayer.clear();
+    if (!constructionStart || !constructionEnd) {
+      return;
+    }
+
+    constructionPreviewLayer
+      .moveTo(constructionStart.x, constructionStart.y)
+      .lineTo(constructionEnd.x, constructionEnd.y)
+      .stroke({ color: 0x263c35, width: 15, alpha: 0.9 })
+      .moveTo(constructionStart.x, constructionStart.y)
+      .lineTo(constructionEnd.x, constructionEnd.y)
+      .stroke({ color: 0xf3c969, width: 8, alpha: 0.95 })
+      .circle(constructionStart.x, constructionStart.y, 8)
+      .fill({ color: 0xffffff })
+      .circle(constructionEnd.x, constructionEnd.y, 8)
+      .fill({ color: 0xffffff });
   }
 
   function positionInCanvas(event: PointerEvent | WheelEvent): Point {
     const rectangle = canvas.getBoundingClientRect();
     return { x: event.clientX - rectangle.left, y: event.clientY - rectangle.top };
+  }
+
+  function positionInWorld(event: PointerEvent): Point {
+    const position = positionInCanvas(event);
+    return {
+      x: (position.x - camera.x) / camera.scale,
+      y: (position.y - camera.y) / camera.scale,
+    };
+  }
+
+  function snapRoadPoint(position: Point): Point {
+    const tolerance = 14 / camera.scale;
+    let nearest = position;
+    let nearestDistance = tolerance;
+
+    for (const node of currentSnapshot.roadNetwork.nodes) {
+      const distance = Math.hypot(
+        position.x - node.position.x,
+        position.y - node.position.y,
+      );
+      if (distance <= nearestDistance) {
+        nearest = node.position;
+        nearestDistance = distance;
+      }
+    }
+
+    for (const segment of currentSnapshot.roadNetwork.segments) {
+      const delta = {
+        x: segment.end.x - segment.start.x,
+        y: segment.end.y - segment.start.y,
+      };
+      const lengthSquared = delta.x * delta.x + delta.y * delta.y;
+      const parameter = Math.min(
+        1,
+        Math.max(
+          0,
+          ((position.x - segment.start.x) * delta.x +
+            (position.y - segment.start.y) * delta.y) /
+            lengthSquared,
+        ),
+      );
+      const projected = {
+        x: segment.start.x + delta.x * parameter,
+        y: segment.start.y + delta.y * parameter,
+      };
+      const distance = Math.hypot(
+        position.x - projected.x,
+        position.y - projected.y,
+      );
+      if (distance < nearestDistance) {
+        nearest = projected;
+        nearestDistance = distance;
+      }
+    }
+
+    return nearest;
   }
 
   function handlePointerDown(event: PointerEvent): void {
@@ -271,6 +445,14 @@ export async function createWorldRenderer(
     dragDistance = 0;
     suppressNextSelection = false;
     canvas.setPointerCapture(event.pointerId);
+
+    if (roadTool === "build") {
+      constructionStart = snapRoadPoint(positionInWorld(event));
+      constructionEnd = constructionStart;
+      suppressNextSelection = true;
+      canvas.classList.add("is-building");
+      drawConstructionPreview();
+    }
   }
 
   function handlePointerMove(event: PointerEvent): void {
@@ -286,6 +468,11 @@ export async function createWorldRenderer(
     dragDistance += Math.hypot(delta.x, delta.y);
     lastPointer = pointer;
 
+    if (roadTool === "build") {
+      constructionEnd = snapRoadPoint(positionInWorld(event));
+      drawConstructionPreview();
+      return;
+    }
     if (dragDistance < 4) {
       return;
     }
@@ -296,22 +483,49 @@ export async function createWorldRenderer(
     applyCamera();
   }
 
-  function finishPointer(event: PointerEvent): void {
+  function finishPointer(
+    event: PointerEvent,
+    completeConstruction: boolean,
+  ): void {
     if (event.pointerId !== pointerId) {
       return;
     }
 
+    if (
+      roadTool === "build" &&
+      completeConstruction &&
+      constructionStart &&
+      constructionEnd &&
+      Math.hypot(
+        constructionEnd.x - constructionStart.x,
+        constructionEnd.y - constructionStart.y,
+      ) > 0.001
+    ) {
+      options.onBuildRoad?.(constructionStart, constructionEnd);
+    }
+
+    constructionStart = undefined;
+    constructionEnd = undefined;
+    drawConstructionPreview();
     if (canvas.hasPointerCapture(event.pointerId)) {
       canvas.releasePointerCapture(event.pointerId);
     }
     pointerId = undefined;
     lastPointer = undefined;
-    canvas.classList.remove("is-dragging");
+    canvas.classList.remove("is-dragging", "is-building");
 
     window.clearTimeout(selectionSuppressionTimer);
     selectionSuppressionTimer = window.setTimeout(() => {
       suppressNextSelection = false;
     }, 0);
+  }
+
+  function handlePointerUp(event: PointerEvent): void {
+    finishPointer(event, true);
+  }
+
+  function handlePointerCancel(event: PointerEvent): void {
+    finishPointer(event, false);
   }
 
   function handleWheel(event: WheelEvent): void {
@@ -340,17 +554,36 @@ export async function createWorldRenderer(
     applyCamera();
   }
 
+  function setRoadTool(tool: RoadTool): void {
+    roadTool = tool;
+    constructionStart = undefined;
+    constructionEnd = undefined;
+    drawConstructionPreview();
+    canvas.classList.toggle("road-tool-build", tool === "build");
+    canvas.classList.toggle("road-tool-remove", tool === "remove");
+    for (const child of roadHitLayer.children) {
+      child.cursor = "pointer";
+    }
+  }
+
+  function drawSnapshot(snapshot: SimulationSnapshot): void {
+    currentSnapshot = snapshot;
+    drawGeography(snapshot);
+    drawRoads(snapshot);
+  }
+
   canvas.addEventListener("pointerdown", handlePointerDown);
   canvas.addEventListener("pointermove", handlePointerMove);
-  canvas.addEventListener("pointerup", finishPointer);
-  canvas.addEventListener("pointercancel", finishPointer);
+  canvas.addEventListener("pointerup", handlePointerUp);
+  canvas.addEventListener("pointercancel", handlePointerCancel);
   canvas.addEventListener("wheel", handleWheel, { passive: false });
   application.renderer.on("resize", handleResize);
 
-  drawGeography(initialSnapshot);
+  drawSnapshot(initialSnapshot);
+  applyCamera();
 
   return {
-    update: drawGeography,
+    update: drawSnapshot,
     resetView() {
       camera = fitCamera(mapBounds, viewport);
       applyCamera();
@@ -365,13 +598,14 @@ export async function createWorldRenderer(
       );
       applyCamera();
     },
+    setRoadTool,
     destroy() {
       window.clearTimeout(selectionSuppressionTimer);
       application.renderer.off("resize", handleResize);
       canvas.removeEventListener("pointerdown", handlePointerDown);
       canvas.removeEventListener("pointermove", handlePointerMove);
-      canvas.removeEventListener("pointerup", finishPointer);
-      canvas.removeEventListener("pointercancel", finishPointer);
+      canvas.removeEventListener("pointerup", handlePointerUp);
+      canvas.removeEventListener("pointercancel", handlePointerCancel);
       canvas.removeEventListener("wheel", handleWheel);
       application.destroy({ removeView: true }, { children: true });
     },

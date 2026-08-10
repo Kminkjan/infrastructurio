@@ -133,6 +133,22 @@ draws the selected-feature highlight, and reports a small serializable selection
 descriptor to the React inspector. Neither camera position nor transient selection
 is written into authoritative simulation state.
 
+Player road edits cross the same boundary as typed `build-road` and `remove-road`
+commands. The simulation stores each player drag as an authored road segment and
+derives a serializable road graph of nodes and links. The renderer owns only the
+drag preview, screen-to-world conversion, and visual snapping before it submits a
+command; it renders the resulting network snapshot rather than retaining road
+connectivity itself.
+
+For M0, graph construction checks every pair of authored segments, treats every
+2D crossing as an at-grade intersection, and rebuilds the small graph after an
+edit. Intersections split both affected segments into links that share one node.
+Removing an authored segment then rebuilds the remaining topology, so links do not
+become independent editing entities. Route queries run deterministic shortest-path
+search using geometric link length. Collinear overlapping segments are rejected
+because lanes, parallel links, bridges, tunnels, and junction configuration are
+outside the issue's simple-road scope.
+
 ## Save format
 
 Saved games contain a format version, seed, simulation time, world state, and scenario metadata. IndexedDB provides automatic local storage; explicit file export provides player-controlled backup and portability.

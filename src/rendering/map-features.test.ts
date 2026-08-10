@@ -2,7 +2,11 @@
 
 import { describe, expect, it } from "vitest";
 import { generateMillfordValley } from "../scenarios";
-import { getSelectableMapFeatures, toMapSelection } from "./map-features";
+import {
+  getSelectableMapFeatures,
+  getSelectableRoadFeatures,
+  toMapSelection,
+} from "./map-features";
 
 describe("selectable map features", () => {
   it("maps infrastructure, resources, and settlements from scenario data", () => {
@@ -31,5 +35,33 @@ describe("selectable map features", () => {
       kind: "infrastructure",
       description: "Constrained river crossing",
     });
+  });
+
+  it("maps authoritative road segments to selectable presentation features", () => {
+    const features = getSelectableRoadFeatures({
+      segments: [
+        {
+          id: "road-segment-1",
+          start: { x: 10, y: 20 },
+          end: { x: 40, y: 60 },
+        },
+      ],
+      nodes: [],
+      links: [],
+    });
+
+    expect(features).toEqual([
+      {
+        id: "road-segment-1",
+        name: "Road segment",
+        kind: "infrastructure",
+        description: "50 map units · player-built road",
+        geometry: {
+          type: "line",
+          start: { x: 10, y: 20 },
+          end: { x: 40, y: 60 },
+        },
+      },
+    ]);
   });
 });
