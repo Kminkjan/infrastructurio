@@ -58,7 +58,10 @@ npm run dev
 ```
 
 Vite prints the local URL to open. The page renders the seeded Millford Valley
-geography in a PixiJS world canvas with a React control overlay.
+geography in a PixiJS world canvas with a React control overlay. Drag the map
+to pan, use the mouse wheel or map controls to zoom, and select a crossing,
+market connection, resource, or settlement to inspect it. The **Fit** control
+returns the complete map to view.
 
 ## Repository checks
 

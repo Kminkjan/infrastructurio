@@ -55,3 +55,9 @@ Performance targets should be attached to a defined scenario and hardware class 
 
 The vertical slice should prove smooth interaction before pursuing very large maps. Premature scale can hide whether the underlying loop is actually fun.
 
+For M0 map navigation, pointer and wheel input updates a single world-container
+transform; static geography and selection hit targets are rebuilt only when the
+geography snapshot changes. The current roadmap does not define a numeric M0
+object-count target, so this is an architectural guardrail rather than a frame-time
+claim. A numeric scenario and hardware budget should be added when roads and
+representative vehicles establish the actual M0 display-object count.

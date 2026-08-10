@@ -127,6 +127,12 @@ geography and includes it in its serializable snapshot; the renderer only applie
 presentation styles to those snapshot features. A scenario seed therefore changes
 geography without placing scenario coordinates or generation rules in PixiJS code.
 
+Map camera and selection are presentation state. The PixiJS renderer derives hit
+targets from snapshot geography, transforms one world container for pan and zoom,
+draws the selected-feature highlight, and reports a small serializable selection
+descriptor to the React inspector. Neither camera position nor transient selection
+is written into authoritative simulation state.
+
 ## Save format
 
 Saved games contain a format version, seed, simulation time, world state, and scenario metadata. IndexedDB provides automatic local storage; explicit file export provides player-controlled backup and portability.

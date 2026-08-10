@@ -48,17 +48,61 @@ button.secondary {
 }
 
 .prototype-shell,
-.world {
+.world,
+.world-surface {
   position: relative;
   width: 100%;
   height: 100%;
   overflow: hidden;
 }
 
+.world-surface {
+  position: absolute;
+  inset: 0;
+}
+
 .world-canvas {
   display: block;
   width: 100%;
   height: 100%;
+  touch-action: none;
+  cursor: grab;
+}
+
+.world-canvas.is-dragging {
+  cursor: grabbing;
+}
+
+.map-controls {
+  position: absolute;
+  top: clamp(1rem, 3vw, 2rem);
+  right: clamp(1rem, 3vw, 2rem);
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.4rem;
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 999px;
+  background: rgb(14 27 23 / 88%);
+  box-shadow: 0 0.8rem 2rem rgb(0 0 0 / 22%);
+  backdrop-filter: blur(12px);
+}
+
+.map-controls button {
+  display: grid;
+  width: 2.55rem;
+  height: 2.55rem;
+  place-items: center;
+  padding: 0;
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.map-controls button.reset-map {
+  width: auto;
+  padding: 0 0.8rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .overlay {
@@ -100,6 +144,43 @@ button.secondary {
   color: #f3c969;
   font-size: 1.05rem;
   font-variant-numeric: tabular-nums;
+}
+
+.inspector {
+  min-height: 8.5rem;
+  margin-top: 1.15rem;
+  padding: 1rem;
+  border: 1px solid rgb(255 255 255 / 13%);
+  border-radius: 0.75rem;
+  background: rgb(255 255 255 / 5%);
+}
+
+.inspector h2 {
+  margin: 0.35rem 0 0.45rem;
+  color: #fffdf7;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.35rem;
+  font-weight: 500;
+}
+
+.selection-kind {
+  display: inline-block;
+  margin: 0 0 0.55rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  color: #17251f;
+  background: #b8d1bd;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.selection-description {
+  margin: 0;
+  color: #d6ded7;
+  font-size: 0.88rem;
+  line-height: 1.45;
 }
 
 .controls {
