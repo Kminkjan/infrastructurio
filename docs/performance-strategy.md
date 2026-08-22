@@ -82,3 +82,9 @@ and candidates unaffected by a harmless spur retain their previous result object
 Large connected networks may eventually need edit-region or dynamic shortest-path
 indexing to narrow the cost-probe step, but that complexity is deferred until the
 prototype has a measured need.
+
+Development evaluation runs only at weekly simulation boundaries or when a
+network edit changes current pressure. The M1 toy has two candidates and at most
+one new regional construction project per weekly evaluation, so it does not add
+per-frame simulation work. Building marks are reconstructed from the small
+development snapshot only when that snapshot changes.

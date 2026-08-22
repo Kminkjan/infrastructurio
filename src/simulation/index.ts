@@ -8,3 +8,4 @@ export type {
   AccessibilityOpportunity,
   AccessibilityScorer,
 } from "./growth/accessibility";
+export type { DevelopmentStateSnapshot } from "./growth/development";

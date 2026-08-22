@@ -79,3 +79,9 @@ network cost as their shared foundation. Carry the scorer forward as derived
 simulation state, but do not combine the factors into a development score until
 regional demand and location competition are implemented. Revisit opportunity
 weights, typed resource requirements, and service inputs with issues #9 and #10.
+
+Issue #9 now combines the four factors only for a bounded residential settlement
+growth prototype. The combination is an explicit balancing assumption, not a
+finding that resolves the correlated service/labor inputs or the need for typed
+industry resources. Those limitations remain for later balancing and issue #10's
+decision explanations.

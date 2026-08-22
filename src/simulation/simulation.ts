@@ -11,7 +11,17 @@ import {
 import { generateMillfordValley } from "../scenarios";
 import { createQuarryMarketFreight } from "./economy/quarry-market-freight";
 import { createAccessibilityScorer } from "./growth/accessibility";
+import {
+  advanceDevelopment,
+  createDevelopmentSnapshot,
+  createDevelopmentState,
+  updateDevelopmentAccess,
+  validateDevelopmentState,
+  type DevelopmentModel,
+  type DevelopmentStateSnapshot,
+} from "./growth/development";
 import { createMillfordAccessibilityModel } from "./growth/millford-accessibility";
+import { createMillfordDevelopmentModel } from "./growth/millford-development";
 import { createRoadNetwork, findRoadRoute } from "./transport/road-network";
 
 interface SimulationState {
@@ -20,6 +30,7 @@ interface SimulationState {
   readonly geography: ScenarioGeography;
   readonly roadNetwork: RoadNetwork;
   readonly nextRoadSegmentNumber: number;
+  readonly development: DevelopmentStateSnapshot;
 }
 
 export interface SimulationStateSnapshot {
@@ -27,6 +38,7 @@ export interface SimulationStateSnapshot {
   readonly tick: number;
   readonly roadSegments: readonly RoadSegment[];
   readonly nextRoadSegmentNumber: number;
+  readonly development?: DevelopmentStateSnapshot;
 }
 
 export interface Simulation {
@@ -39,6 +51,7 @@ export interface Simulation {
 function snapshot(
   state: SimulationState,
   accessibility: ReturnType<typeof createAccessibilityScorer>,
+  developmentModel: DevelopmentModel,
 ): SimulationSnapshot {
   const quarryMarketRoute = findRoadRoute(
     state.roadNetwork,
@@ -46,6 +59,7 @@ function snapshot(
     state.geography.externalMarketConnection.position,
   );
 
+  const accessibilitySnapshot = accessibility.getSnapshot();
   return Object.freeze({
     seed: state.seed,
     tick: state.tick,
@@ -56,16 +70,40 @@ function snapshot(
       state.geography,
       quarryMarketRoute,
     ),
-    accessibility: accessibility.getSnapshot(),
+    accessibility: accessibilitySnapshot,
+    development: createDevelopmentSnapshot(
+      state.development,
+      developmentModel,
+      accessibilitySnapshot,
+    ),
   });
 }
 
-function advance(state: SimulationState, ticks: number): SimulationState {
+function advance(
+  state: SimulationState,
+  ticks: number,
+  accessibility: ReturnType<typeof createAccessibilityScorer>,
+  developmentModel: DevelopmentModel,
+): SimulationState {
   if (!Number.isSafeInteger(ticks) || ticks < 0) {
     throw new RangeError("advance ticks must be a non-negative safe integer");
   }
 
-  return { ...state, tick: state.tick + ticks };
+  const tick = state.tick + ticks;
+  if (!Number.isSafeInteger(tick)) {
+    throw new RangeError("simulation tick exceeds the safe integer range");
+  }
+  return {
+    ...state,
+    tick,
+    development: advanceDevelopment(
+      state.development,
+      developmentModel,
+      accessibility.getSnapshot(),
+      state.seed,
+      tick,
+    ),
+  };
 }
 
 function normalizeCoordinate(value: number, maximum: number): number {
@@ -130,6 +168,7 @@ function createSimulationState(
   tick: number,
   roadSegments: readonly RoadSegment[],
   nextRoadSegmentNumber: number,
+  savedDevelopment?: DevelopmentStateSnapshot,
 ): SimulationState {
   if (!Number.isSafeInteger(tick) || tick < 0) {
     throw new RangeError("simulation tick must be a non-negative safe integer");
@@ -168,12 +207,21 @@ function createSimulationState(
     throw new RangeError("next road segment id must be unused");
   }
 
+  const developmentModel = createMillfordDevelopmentModel(geography);
+  const development = savedDevelopment
+    ? validateDevelopmentState(developmentModel, savedDevelopment)
+    : createDevelopmentState(developmentModel, tick);
+  if (development.processedTick !== tick) {
+    throw new RangeError("development state must match the simulation tick");
+  }
+
   return Object.freeze({
     seed,
     tick,
     geography,
     roadNetwork,
     nextRoadSegmentNumber,
+    development,
   });
 }
 
@@ -184,6 +232,7 @@ function runSimulation(initialState: SimulationState): Simulation {
       tick: state.tick,
       roadSegments: state.roadNetwork.segments,
       nextRoadSegmentNumber: state.nextRoadSegmentNumber,
+      development: state.development,
     });
 
   let state = initialState;
@@ -191,13 +240,21 @@ function runSimulation(initialState: SimulationState): Simulation {
     createMillfordAccessibilityModel(initialState.geography),
     initialState.roadNetwork,
   );
+  const developmentModel = createMillfordDevelopmentModel(
+    initialState.geography,
+  );
 
   return {
     dispatch(command) {
       const previousRoadNetwork = state.roadNetwork;
       switch (command.type) {
         case "advance":
-          state = advance(state, command.ticks);
+          state = advance(
+            state,
+            command.ticks,
+            accessibility,
+            developmentModel,
+          );
           break;
         case "reset":
           state = initialState;
@@ -219,12 +276,20 @@ function runSimulation(initialState: SimulationState): Simulation {
         command.type !== "reset"
       ) {
         accessibility.updateNetwork(state.roadNetwork);
+        state = {
+          ...state,
+          development: updateDevelopmentAccess(
+            state.development,
+            developmentModel,
+            accessibility.getSnapshot(),
+          ),
+        };
       }
 
-      return snapshot(state, accessibility);
+      return snapshot(state, accessibility, developmentModel);
     },
     getSnapshot() {
-      return snapshot(state, accessibility);
+      return snapshot(state, accessibility, developmentModel);
     },
     getState() {
       return stateSnapshot(state);
@@ -240,12 +305,16 @@ function runSimulation(initialState: SimulationState): Simulation {
 }
 
 export function createSimulation(seed: string): Simulation {
+  const geography = generateMillfordValley(seed);
   const initialState: SimulationState = Object.freeze({
     seed,
     tick: 0,
-    geography: generateMillfordValley(seed),
+    geography,
     roadNetwork: createRoadNetwork(),
     nextRoadSegmentNumber: 1,
+    development: createDevelopmentState(
+      createMillfordDevelopmentModel(geography),
+    ),
   });
 
   return runSimulation(initialState);
@@ -260,6 +329,7 @@ export function restoreSimulation(
       savedState.tick,
       savedState.roadSegments,
       savedState.nextRoadSegmentNumber,
+      savedState.development,
     ),
   );
 }

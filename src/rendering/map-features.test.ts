@@ -5,6 +5,7 @@ import { generateMillfordValley } from "../scenarios";
 import {
   getSelectableMapFeatures,
   getSelectableRoadFeatures,
+  getRoadSnapAnchors,
   toMapSelection,
 } from "./map-features";
 
@@ -62,6 +63,24 @@ describe("selectable map features", () => {
           end: { x: 40, y: 60 },
         },
       },
+    ]);
+  });
+
+  it("snaps road construction to every development access anchor", () => {
+    const geography = generateMillfordValley("selection-test");
+    const fertileCenter = geography.fertileLand.boundary.reduce(
+      (center, position, _index, boundary) => ({
+        x: center.x + position.x / boundary.length,
+        y: center.y + position.y / boundary.length,
+      }),
+      { x: 0, y: 0 },
+    );
+
+    expect(getRoadSnapAnchors(geography)).toEqual([
+      geography.quarry.position,
+      geography.externalMarketConnection.position,
+      ...geography.settlementSeeds.map(({ position }) => position),
+      fertileCenter,
     ]);
   });
 });

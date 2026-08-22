@@ -16,6 +16,7 @@ import {
 import {
   getSelectableMapFeatures,
   getSelectableRoadFeatures,
+  getRoadSnapAnchors,
   toMapSelection,
   type MapSelection,
   type SelectableMapFeature,
@@ -106,6 +107,7 @@ export async function createWorldRenderer(
 
   const world = new Container();
   const geographyLayer = new Container();
+  const developmentLayer = new Container();
   const roadLayer = new Container();
   const representativeVehicleLayer = new Container();
   const geographyHitLayer = new Container();
@@ -118,6 +120,7 @@ export async function createWorldRenderer(
   representativeVehicleLayer.eventMode = "none";
   world.addChild(
     geographyLayer,
+    developmentLayer,
     roadLayer,
     representativeVehicleLayer,
     geographyHitLayer,
@@ -130,6 +133,7 @@ export async function createWorldRenderer(
 
   let currentSnapshot = initialSnapshot;
   let renderedGeography: SimulationSnapshot["geography"] | undefined;
+  let renderedDevelopment: SimulationSnapshot["development"] | undefined;
   let renderedRoadNetwork: SimulationSnapshot["roadNetwork"] | undefined;
   let geographyFeatures: readonly SelectableMapFeature[] = [];
   let roadFeatures: readonly SelectableMapFeature[] = [];
@@ -373,6 +377,45 @@ export async function createWorldRenderer(
     refreshSelectableFeatures();
   }
 
+  function drawDevelopment(snapshot: SimulationSnapshot): void {
+    if (renderedDevelopment === snapshot.development) {
+      return;
+    }
+
+    destroyChildren(developmentLayer);
+    renderedDevelopment = snapshot.development;
+    for (const location of snapshot.development.locations) {
+      const buildingCount = Math.ceil(location.growthPopulation / 10);
+      for (let index = 0; index < buildingCount; index += 1) {
+        const angle = index * 2.4;
+        const radius = 34 + Math.floor(index / 4) * 15;
+        const x = location.position.x + Math.cos(angle) * radius;
+        const y = location.position.y + Math.sin(angle) * radius;
+        developmentLayer.addChild(
+          new Graphics()
+            .roundRect(x - 7, y - 7, 14, 14, 2)
+            .fill({ color: 0xe9d7a9 })
+            .rect(x - 4, y - 4, 3, 3)
+            .fill({ color: 0x6f7f72 })
+            .rect(x + 1, y - 4, 3, 3)
+            .fill({ color: 0x6f7f72 }),
+        );
+      }
+
+      if (location.pendingConstruction) {
+        const angle = buildingCount * 2.4;
+        const radius = 34 + Math.floor(buildingCount / 4) * 15;
+        const x = location.position.x + Math.cos(angle) * radius;
+        const y = location.position.y + Math.sin(angle) * radius;
+        developmentLayer.addChild(
+          new Graphics()
+            .roundRect(x - 8, y - 8, 16, 16, 2)
+            .stroke({ color: 0xf3c969, width: 3, alpha: 0.95 }),
+        );
+      }
+    }
+  }
+
   function createRepresentativeVehicleGraphic(): Graphics {
     return new Graphics()
       .roundRect(-9, -5, 13, 10, 2)
@@ -475,10 +518,7 @@ export async function createWorldRenderer(
     let nearest = position;
     let nearestDistance = tolerance;
 
-    for (const terminal of [
-      currentSnapshot.geography.quarry.position,
-      currentSnapshot.geography.externalMarketConnection.position,
-    ]) {
+    for (const terminal of getRoadSnapAnchors(currentSnapshot.geography)) {
       const distance = Math.hypot(
         position.x - terminal.x,
         position.y - terminal.y,
@@ -666,6 +706,7 @@ export async function createWorldRenderer(
   function drawSnapshot(snapshot: SimulationSnapshot): void {
     currentSnapshot = snapshot;
     drawGeography(snapshot);
+    drawDevelopment(snapshot);
     drawRoads(snapshot);
     updateRepresentativeTraffic(snapshot);
     drawRepresentativeVehicles();

@@ -56,6 +56,40 @@ opportunity
 
 Scores produce weighted choices rather than always selecting the mathematical maximum. Inertia, moving costs, construction time, and imperfect information prevent instant reshuffling.
 
+### M1 settlement growth prototype
+
+The first growth implementation treats Millford and Eastbank as competing
+residential development candidates. Their existing settlement seeds represent
+base populations of 60 and 40 residents. Infrastructure-enabled growth is a
+separate authoritative value so decline never erases that original settlement.
+
+Every seven simulated days, positive development pressure becomes a weighted
+location-choice input:
+
+```text
+pressure = 0.35 * market access
+         + 0.30 * labor access
+         + 0.20 * resource access
+         + 0.15 * service access
+         - 35 viability points
+```
+
+A deterministic value derived from the scenario seed and evaluation number
+selects among all candidates with positive pressure. A stronger candidate is
+more likely to win, but does not receive every project automatically. One
+selected project houses up to 10 residents and takes seven simulated days to
+complete. Completed and pending projects together may never exceed the scenario's
+100-resident regional growth demand.
+
+Network edits update pressure immediately. If a location loses viability, its
+pending project is cancelled while completed growth remains in place. Later
+weekly evaluations reduce only that infrastructure-enabled growth by five
+residents at a time. This is an intentionally small pressure-and-decline model;
+it has no households, land market, building types, relocation destinations, or
+industry-specific resource requirements yet. The accessibility inputs also
+retain the proxy weights documented in the research note. Detailed decision
+explanations belong to issue #10.
+
 ## Settlements and buildings
 
 A settlement is an emergent cluster, not an object placed by the player. It gains an identity when development density and shared access patterns cross a threshold.

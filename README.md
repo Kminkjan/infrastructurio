@@ -63,8 +63,9 @@ to pan, use the mouse wheel or map controls to zoom, and select a crossing,
 market connection, resource, or settlement to inspect it. The **Fit** control
 returns the complete map to view. Hide the controls when you need the full map
 for construction or inspection. Choose **Build road** and drag across the map
-to construct a segment; endpoints snap to the quarry, market, nearby roads, and
-junctions. Choose **Remove road** and select a player-built segment to delete it.
+to construct a segment; endpoints snap to settlements, resources, the market,
+nearby roads, and junctions. Choose **Remove road** and select a player-built
+segment to delete it.
 
 The quarry produces up to 120 tons of granite per day and the external market
 demands up to 100 tons. Select either location to inspect production, demand,
@@ -73,7 +74,17 @@ Freight remains at zero until the terminals are connected by a viable route.
 Once freight is assigned, orange private trucks animate from the quarry to the
 market along the selected route. Each truck represents up to 20 tons of assigned
 daily flow, so busier viable routes show more traffic without creating persistent
-shipment agents. Use **Save local** and **Load local** to keep one scenario save in
+shipment agents.
+
+Millford and Eastbank now compete for a bounded 100-resident regional growth
+allocation. Give a settlement useful road access and advance time: development
+is evaluated weekly, selected construction takes another week to complete, and
+new homes appear around the successful settlement. Select a settlement to inspect
+its population, development pressure, status, and pending construction. Removing
+its access applies pressure immediately and causes only gradual weekly decline in
+infrastructure-enabled growth; the original settlement remains.
+
+Use **Save local** and **Load local** to keep one scenario save in
 the current browser. **Export file** downloads a portable versioned JSON save,
 and **Import file** validates and loads one of those files.
 

@@ -12,4 +12,4 @@ export {
   serializeSaveGame,
   validateSaveGame,
 } from "./save-game";
-export type { SaveGameV1 } from "./save-game";
+export type { SaveGame, SaveGameV1, SaveGameV2 } from "./save-game";

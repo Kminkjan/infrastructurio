@@ -1,5 +1,6 @@
 import type { AccessibilitySnapshot } from "./accessibility";
 import type { AggregateFreightSnapshot } from "./economy";
+import type { DevelopmentSnapshot } from "./development";
 import type { Point, ScenarioGeography } from "./geography";
 import type { RoadNetwork } from "./roads";
 
@@ -23,4 +24,5 @@ export interface SimulationSnapshot {
   readonly roadNetwork: RoadNetwork;
   readonly quarryMarketFreight: AggregateFreightSnapshot;
   readonly accessibility: AccessibilitySnapshot;
+  readonly development: DevelopmentSnapshot;
 }

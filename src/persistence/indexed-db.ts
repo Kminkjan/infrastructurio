@@ -1,4 +1,4 @@
-import { validateSaveGame, type SaveGameV1 } from "./save-game";
+import { validateSaveGame, type SaveGame } from "./save-game";
 
 const DATABASE_NAME = "infrastructurio";
 const DATABASE_VERSION = 1;
@@ -63,7 +63,7 @@ function transactionCompletion(transaction: IDBTransaction): Promise<void> {
 }
 
 export async function saveLocalGame(
-  save: SaveGameV1,
+  save: SaveGame,
   factory?: IDBFactory,
 ): Promise<void> {
   const database = await openSaveDatabase(factory);
@@ -81,7 +81,7 @@ export async function saveLocalGame(
 
 export async function loadLocalGame(
   factory?: IDBFactory,
-): Promise<SaveGameV1 | undefined> {
+): Promise<SaveGame | undefined> {
   const database = await openSaveDatabase(factory);
   try {
     const transaction = database.transaction(SAVE_STORE_NAME, "readonly");

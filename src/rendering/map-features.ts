@@ -35,6 +35,25 @@ export interface SelectableMapFeature extends MapSelection {
   readonly geometry: FeatureGeometry;
 }
 
+export function getRoadSnapAnchors(
+  geography: ScenarioGeography,
+): readonly Point[] {
+  const fertileCenter = geography.fertileLand.boundary.reduce(
+    (center, position, _index, boundary) => ({
+      x: center.x + position.x / boundary.length,
+      y: center.y + position.y / boundary.length,
+    }),
+    { x: 0, y: 0 },
+  );
+
+  return [
+    geography.quarry.position,
+    geography.externalMarketConnection.position,
+    ...geography.settlementSeeds.map(({ position }) => position),
+    fertileCenter,
+  ];
+}
+
 export function getSelectableMapFeatures(
   geography: ScenarioGeography,
 ): readonly SelectableMapFeature[] {

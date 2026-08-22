@@ -63,6 +63,7 @@ describe("save games", () => {
     expect(after.accessibility.locations).toEqual(
       before.accessibility.locations,
     );
+    expect(after.development).toEqual(before.development);
     expect(after.quarryMarketFreight.shippedTonsPerDay).toBeGreaterThan(0);
 
     const continued = restored.dispatch({
@@ -71,6 +72,60 @@ describe("save games", () => {
       end: { x: 20, y: 20 },
     });
     expect(continued.roadNetwork.segments.at(-1)?.id).toBe("road-segment-3");
+  });
+
+  it("preserves completed and pending development for deterministic continuation", () => {
+    const original = createSimulation("save-development");
+    const geography = original.getSnapshot().geography;
+    original.dispatch({
+      type: "build-road",
+      start: geography.settlementSeeds[0]!.position,
+      end: geography.externalMarketConnection.position,
+    });
+    original.dispatch({ type: "advance", ticks: 24 * 14 });
+
+    const restored = restoreSaveGame(createSaveGame(original));
+    expect(restored.getSnapshot().development).toEqual(
+      original.getSnapshot().development,
+    );
+    expect(restored.getState().development).toEqual(
+      original.getState().development,
+    );
+
+    const command = { type: "advance", ticks: 24 * 7 } as const;
+    expect(restored.dispatch(command).development).toEqual(
+      original.dispatch(command).development,
+    );
+  });
+
+  it("loads version 1 saves with an empty growth history at their current tick", () => {
+    const current = createSaveGame(createConnectedSimulation());
+    const legacy = {
+      formatVersion: 1 as const,
+      scenarioId: current.scenarioId,
+      scenarioSeed: current.scenarioSeed,
+      simulation: {
+        tick: current.simulation.tick,
+        roadSegments: current.simulation.roadSegments,
+        nextRoadSegmentNumber: current.simulation.nextRoadSegmentNumber,
+      },
+    };
+
+    const restored = restoreSaveGame(
+      deserializeSaveGame(JSON.stringify(legacy)),
+    );
+    expect(restored.getSnapshot()).toMatchObject({
+      tick: current.simulation.tick,
+      development: {
+        demand: {
+          completedGrowthPopulation: 0,
+          committedGrowthPopulation: 0,
+        },
+      },
+    });
+    expect(
+      restored.getSnapshot().development.nextEvaluationTick,
+    ).toBeGreaterThan(current.simulation.tick);
   });
 
   it("exports and imports the versioned save as a JSON file", async () => {
@@ -131,13 +186,13 @@ describe("save games", () => {
     expect(() =>
       deserializeSaveGame(
         JSON.stringify({
-          formatVersion: 2,
+          formatVersion: 3,
           scenarioId: "millford-valley",
           scenarioSeed: "future",
           simulation: {},
         }),
       ),
-    ).toThrow("unsupported save format version: 2");
+    ).toThrow("unsupported save format version: 3");
 
     const save = createSaveGame(createConnectedSimulation());
     const invalid = {
@@ -154,6 +209,20 @@ describe("save games", () => {
       },
     };
     expect(() => restoreSaveGame(invalid)).toThrow(
+      "save contains invalid simulation state",
+    );
+
+    const invalidDevelopment = {
+      ...save,
+      simulation: {
+        ...save.simulation,
+        development: {
+          ...save.simulation.development,
+          processedTick: save.simulation.tick + 1,
+        },
+      },
+    };
+    expect(() => restoreSaveGame(invalidDevelopment)).toThrow(
       "save contains invalid simulation state",
     );
   });

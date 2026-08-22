@@ -10,6 +10,13 @@ export type {
   FreightLimitingFactor,
 } from "./economy";
 export type {
+  DevelopmentLocationSnapshot,
+  DevelopmentSnapshot,
+  DevelopmentStatus,
+  PendingConstruction,
+  RegionalDevelopmentDemandSnapshot,
+} from "./development";
+export type {
   CrossingAreaGeography,
   ExternalMarketConnectionGeography,
   FertileLandGeography,

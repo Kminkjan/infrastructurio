@@ -16,6 +16,7 @@ import {
 import { createSimulation, type Simulation } from "../simulation";
 import type {
   AggregateFreightSnapshot,
+  DevelopmentLocationSnapshot,
   Point,
   SimulationSnapshot,
 } from "../shared";
@@ -65,6 +66,46 @@ function FreightInspector({
       <p className="limiting-factor">
         <strong>Limiting factor:</strong> {freight.limitingReason}
       </p>
+    </>
+  );
+}
+
+function DevelopmentInspector({
+  development,
+}: {
+  readonly development: DevelopmentLocationSnapshot;
+}) {
+  const pending = development.pendingConstruction;
+  const status =
+    development.status[0]!.toUpperCase() + development.status.slice(1);
+
+  return (
+    <>
+      <dl className="freight-details">
+        <div>
+          <dt>Population</dt>
+          <dd>{development.totalPopulation.toLocaleString()}</dd>
+        </div>
+        <div>
+          <dt>Infrastructure growth</dt>
+          <dd>+{development.growthPopulation.toLocaleString()}</dd>
+        </div>
+        <div>
+          <dt>Development pressure</dt>
+          <dd>{development.pressure.toFixed(1)} points</dd>
+        </div>
+        <div>
+          <dt>Status</dt>
+          <dd>{status}</dd>
+        </div>
+      </dl>
+      {pending ? (
+        <p className="limiting-factor">
+          <strong>Under construction:</strong> homes for {pending.population}
+          {" residents, completing on day "}
+          {pending.completesTick / 24}.
+        </p>
+      ) : null}
     </>
   );
 }
@@ -282,6 +323,9 @@ export function App() {
   const selectionShowsFreight =
     selection?.id === snapshot.quarryMarketFreight.producerId ||
     selection?.id === snapshot.quarryMarketFreight.marketId;
+  const selectedDevelopment = snapshot.development.locations.find(
+    ({ locationId }) => locationId === selection?.id,
+  );
 
   return (
     <main className="prototype-shell">
@@ -313,6 +357,8 @@ export function App() {
           Simulation day {snapshot.elapsedDays} ·{" "}
           {snapshot.roadNetwork.segments.length} road{" "}
           {snapshot.roadNetwork.segments.length === 1 ? "segment" : "segments"}
+          {" · "}
+          {snapshot.development.demand.completedGrowthPopulation} regional growth
         </p>
         <section className="road-tools" aria-label="Road construction tools">
           <p className="eyebrow">Map tool</p>
@@ -357,6 +403,9 @@ export function App() {
               <p className="selection-description">{selection.description}</p>
               {selectionShowsFreight ? (
                 <FreightInspector freight={snapshot.quarryMarketFreight} />
+              ) : null}
+              {selectedDevelopment ? (
+                <DevelopmentInspector development={selectedDevelopment} />
               ) : null}
             </>
           ) : (
@@ -428,7 +477,7 @@ export function App() {
         </section>
         <p className="hint">
           {roadTool === "build"
-            ? "Drag across the map to draw a road. Endpoints snap to the quarry, market, nearby roads, and junctions."
+            ? "Drag across the map to draw a road. Endpoints snap to settlements, resources, the market, nearby roads, and junctions."
             : roadTool === "remove"
               ? "Select a player-built road segment to remove it. Drag empty map space to pan."
               : "Drag the map to pan, scroll to zoom, and select a marked feature to inspect it."}

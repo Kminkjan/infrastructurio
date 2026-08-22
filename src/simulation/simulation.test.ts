@@ -296,4 +296,135 @@ describe("headless simulation", () => {
       unrelated.accessibility.lastNetworkUpdateInvalidatedLocationIds,
     ).toEqual([]);
   });
+
+  it("grows a connected settlement after delayed construction within regional demand", () => {
+    const simulation = createSimulation("settlement-growth");
+    const geography = simulation.getSnapshot().geography;
+    const millford = geography.settlementSeeds[0];
+    expect(millford).toBeDefined();
+
+    const connected = simulation.dispatch({
+      type: "build-road",
+      start: millford!.position,
+      end: geography.externalMarketConnection.position,
+    });
+    expect(connected.development).toMatchObject({
+      demand: {
+        targetGrowthPopulation: 100,
+        completedGrowthPopulation: 0,
+      },
+    });
+    expect(
+      connected.development.locations.find(
+        ({ locationId }) => locationId === millford!.id,
+      )?.pressure,
+    ).toBeGreaterThan(0);
+
+    const scheduled = simulation.dispatch({ type: "advance", ticks: 24 * 7 });
+    expect(scheduled.development.demand).toMatchObject({
+      completedGrowthPopulation: 0,
+      committedGrowthPopulation: 10,
+    });
+    expect(
+      scheduled.development.locations.find(
+        ({ locationId }) => locationId === millford!.id,
+      )?.status,
+    ).toBe("growing");
+
+    const completed = simulation.dispatch({ type: "advance", ticks: 24 * 7 });
+    expect(
+      completed.development.locations.find(
+        ({ locationId }) => locationId === millford!.id,
+      ),
+    ).toMatchObject({ growthPopulation: 10, totalPopulation: 70 });
+
+    const saturated = simulation.dispatch({
+      type: "advance",
+      ticks: 24 * 7 * 20,
+    });
+    expect(saturated.development.demand).toEqual({
+      targetGrowthPopulation: 100,
+      completedGrowthPopulation: 100,
+      committedGrowthPopulation: 100,
+      remainingGrowthPopulation: 0,
+    });
+  });
+
+  it("lets both Millford Valley candidates compete when both gain access", () => {
+    const simulation = createSimulation("development-competition");
+    const geography = simulation.getSnapshot().geography;
+    const [millford, eastbank] = geography.settlementSeeds;
+    expect(millford).toBeDefined();
+    expect(eastbank).toBeDefined();
+    const fertileCenter = geography.fertileLand.boundary.reduce(
+      (center, position, _index, boundary) => ({
+        x: center.x + position.x / boundary.length,
+        y: center.y + position.y / boundary.length,
+      }),
+      { x: 0, y: 0 },
+    );
+    const anchors = [
+      millford!.position,
+      geography.quarry.position,
+      eastbank!.position,
+      fertileCenter,
+      geography.externalMarketConnection.position,
+    ];
+    for (let index = 0; index < anchors.length - 1; index += 1) {
+      simulation.dispatch({
+        type: "build-road",
+        start: anchors[index]!,
+        end: anchors[index + 1]!,
+      });
+    }
+
+    const developed = simulation.dispatch({
+      type: "advance",
+      ticks: 24 * 7 * 12,
+    });
+    for (const location of developed.development.locations) {
+      expect(location.growthPopulation).toBeGreaterThan(0);
+    }
+    expect(developed.development.demand.committedGrowthPopulation).toBe(100);
+  });
+
+  it("keeps completed development under pressure before gradual decline after access removal", () => {
+    const simulation = createSimulation("settlement-decline");
+    const geography = simulation.getSnapshot().geography;
+    const millford = geography.settlementSeeds[0];
+    expect(millford).toBeDefined();
+    simulation.dispatch({
+      type: "build-road",
+      start: millford!.position,
+      end: geography.externalMarketConnection.position,
+    });
+    simulation.dispatch({ type: "advance", ticks: 24 * 14 });
+
+    const disconnected = simulation.dispatch({
+      type: "remove-road",
+      roadSegmentId: "road-segment-1",
+    });
+    expect(
+      disconnected.development.locations.find(
+        ({ locationId }) => locationId === millford!.id,
+      ),
+    ).toMatchObject({
+      growthPopulation: 10,
+      totalPopulation: 70,
+      status: "declining",
+      pendingConstruction: null,
+    });
+
+    const declined = simulation.dispatch({ type: "advance", ticks: 24 * 7 });
+    expect(
+      declined.development.locations.find(
+        ({ locationId }) => locationId === millford!.id,
+      ),
+    ).toMatchObject({
+      basePopulation: 60,
+      growthPopulation: 5,
+      totalPopulation: 65,
+      status: "declining",
+    });
+  });
 });

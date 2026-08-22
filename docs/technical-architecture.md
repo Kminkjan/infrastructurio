@@ -165,14 +165,20 @@ vehicle identity or animation phase crosses into the simulation protocol.
 
 ## Save format
 
-M0 saves use an explicit versioned JSON document. Format version 1 contains the
+Saves use an explicit versioned JSON document. Format version 2 contains the
 Millford Valley scenario ID and seed plus the authoritative mutable state: the
-simulation tick, authored road segments, and the next road-segment number. The
+simulation tick, authored road segments, the next road-segment number, completed
+growth, pending construction, and development evaluation counters. The
 derived geography, road nodes and links, route assignment, and freight snapshot
 are deliberately rebuilt by the simulation on load rather than duplicated in
 the save. This prevents persisted derived values from disagreeing with the same
 rules used during play; the round-trip tests require those economic outputs to
 remain identical.
+
+Format version 1 saves remain loadable. Because they contain no command history
+or development state, they resume at their saved tick with zero
+infrastructure-enabled growth and begin evaluating from the next weekly boundary;
+the loader does not invent past growth from the final road layout.
 
 Imported data is structurally validated before it crosses into the simulation,
 and restored road topology is checked against simulation invariants and scenario
@@ -190,6 +196,12 @@ The M1 accessibility research scorer is also derived simulation state. Scenario
 configuration supplies candidate locations and weighted market, labor, resource,
 and service opportunities. The generic scorer depends only on shared serializable
 types and the road route query; its results are included in simulation snapshots.
-It maintains a per-candidate cache internally, while saves continue to store only
-authoritative road state. Restoring a save deterministically rebuilds the same
-accessibility values.
+It maintains a per-candidate cache internally. Restoring a save deterministically
+rebuilds the same accessibility values.
+
+M1 settlement development is authoritative historical state layered on those
+derived accessibility values. A pure growth reducer evaluates all candidates on
+weekly tick boundaries, performs a seeded weighted selection, schedules delayed
+construction, and applies gradual decline. Its serializable snapshot exposes
+regional demand, location population and pressure, and pending work. React and
+PixiJS only inspect or visualize that snapshot; neither chooses development.
