@@ -69,6 +69,10 @@ The quarry produces up to 120 tons of granite per day and the external market
 demands up to 100 tons. Select either location to inspect production, demand,
 the assigned road route, shipped volume, and the current limiting factor.
 Freight remains at zero until the terminals are connected by a viable route.
+Once freight is assigned, orange private trucks animate from the quarry to the
+market along the selected route. Each truck represents up to 20 tons of assigned
+daily flow, so busier viable routes show more traffic without creating persistent
+shipment agents.
 
 ## Repository checks
 

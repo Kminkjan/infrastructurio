@@ -155,6 +155,13 @@ snapshot contains daily production, market demand, the selected route and cost,
 shipped volume, and a limiting-factor explanation. React formats those values for
 the quarry and market inspector but does not recalculate economic outcomes.
 
+Representative freight vehicles remain renderer-owned. A pure rendering helper
+validates the assigned route against the snapshot road graph, resolves its ordered
+node geometry, and deterministically samples positions for the current animation
+time. PixiJS reconciles only those short-lived graphics. A snapshot route or flow
+change resets the visual plan, while disconnection clears it immediately; no
+vehicle identity or animation phase crosses into the simulation protocol.
+
 ## Save format
 
 Saved games contain a format version, seed, simulation time, world state, and scenario metadata. IndexedDB provides automatic local storage; explicit file export provides player-controlled backup and portability.

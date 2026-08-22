@@ -20,6 +20,11 @@ import {
   type MapSelection,
   type SelectableMapFeature,
 } from "./map-features";
+import {
+  createRepresentativeFreightTrafficPlan,
+  sampleRepresentativeFreightVehicles,
+  type RepresentativeFreightTrafficPlan,
+} from "./representative-freight";
 
 export type RoadTool = "inspect" | "build" | "remove";
 
@@ -102,6 +107,7 @@ export async function createWorldRenderer(
   const world = new Container();
   const geographyLayer = new Container();
   const roadLayer = new Container();
+  const representativeVehicleLayer = new Container();
   const geographyHitLayer = new Container();
   const roadHitLayer = new Container();
   const priorityGeographyHitLayer = new Container();
@@ -109,9 +115,11 @@ export async function createWorldRenderer(
   const constructionPreviewLayer = new Graphics();
   selectionLayer.eventMode = "none";
   constructionPreviewLayer.eventMode = "none";
+  representativeVehicleLayer.eventMode = "none";
   world.addChild(
     geographyLayer,
     roadLayer,
+    representativeVehicleLayer,
     geographyHitLayer,
     roadHitLayer,
     priorityGeographyHitLayer,
@@ -141,6 +149,9 @@ export async function createWorldRenderer(
   let constructionEnd: Point | undefined;
   let suppressNextSelection = false;
   let selectionSuppressionTimer: number | undefined;
+  let representativeTrafficPlan: RepresentativeFreightTrafficPlan | undefined;
+  let representativeTrafficElapsedSeconds = 0;
+  const representativeVehicleGraphics = new Map<string, Graphics>();
 
   function applyCamera(): void {
     world.position.set(camera.x, camera.y);
@@ -360,6 +371,71 @@ export async function createWorldRenderer(
     }
 
     refreshSelectableFeatures();
+  }
+
+  function createRepresentativeVehicleGraphic(): Graphics {
+    return new Graphics()
+      .roundRect(-9, -5, 13, 10, 2)
+      .fill({ color: 0xd65f3f })
+      .roundRect(4, -4, 6, 8, 1)
+      .fill({ color: 0xf0c56c })
+      .rect(-6, -7, 4, 2)
+      .fill({ color: 0x26302c })
+      .rect(-6, 5, 4, 2)
+      .fill({ color: 0x26302c })
+      .rect(5, -6, 3, 2)
+      .fill({ color: 0x26302c })
+      .rect(5, 4, 3, 2)
+      .fill({ color: 0x26302c });
+  }
+
+  function clearRepresentativeVehicles(): void {
+    representativeVehicleGraphics.clear();
+    destroyChildren(representativeVehicleLayer);
+  }
+
+  function updateRepresentativeTraffic(snapshot: SimulationSnapshot): void {
+    const nextPlan = createRepresentativeFreightTrafficPlan(
+      snapshot.quarryMarketFreight,
+      snapshot.roadNetwork,
+    );
+    if (nextPlan?.key === representativeTrafficPlan?.key) {
+      return;
+    }
+
+    representativeTrafficPlan = nextPlan;
+    representativeTrafficElapsedSeconds = 0;
+    clearRepresentativeVehicles();
+  }
+
+  function drawRepresentativeVehicles(): void {
+    const samples = representativeTrafficPlan
+      ? sampleRepresentativeFreightVehicles(
+          representativeTrafficPlan,
+          representativeTrafficElapsedSeconds,
+        )
+      : [];
+    const activeIds = new Set(samples.map(({ id }) => id));
+
+    for (const [id, graphic] of representativeVehicleGraphics) {
+      if (activeIds.has(id)) {
+        continue;
+      }
+      representativeVehicleGraphics.delete(id);
+      representativeVehicleLayer.removeChild(graphic);
+      graphic.destroy();
+    }
+
+    for (const sample of samples) {
+      let graphic = representativeVehicleGraphics.get(sample.id);
+      if (!graphic) {
+        graphic = createRepresentativeVehicleGraphic();
+        representativeVehicleGraphics.set(sample.id, graphic);
+        representativeVehicleLayer.addChild(graphic);
+      }
+      graphic.position.set(sample.position.x, sample.position.y);
+      graphic.rotation = sample.rotation;
+    }
   }
 
   function drawConstructionPreview(): void {
@@ -591,6 +667,17 @@ export async function createWorldRenderer(
     currentSnapshot = snapshot;
     drawGeography(snapshot);
     drawRoads(snapshot);
+    updateRepresentativeTraffic(snapshot);
+    drawRepresentativeVehicles();
+  }
+
+  function animateRepresentativeTraffic(): void {
+    if (!representativeTrafficPlan) {
+      return;
+    }
+
+    representativeTrafficElapsedSeconds += application.ticker.deltaMS / 1_000;
+    drawRepresentativeVehicles();
   }
 
   canvas.addEventListener("pointerdown", handlePointerDown);
@@ -599,6 +686,7 @@ export async function createWorldRenderer(
   canvas.addEventListener("pointercancel", handlePointerCancel);
   canvas.addEventListener("wheel", handleWheel, { passive: false });
   application.renderer.on("resize", handleResize);
+  application.ticker.add(animateRepresentativeTraffic);
 
   drawSnapshot(initialSnapshot);
   applyCamera();
@@ -622,6 +710,7 @@ export async function createWorldRenderer(
     setRoadTool,
     destroy() {
       window.clearTimeout(selectionSuppressionTimer);
+      application.ticker.remove(animateRepresentativeTraffic);
       application.renderer.off("resize", handleResize);
       canvas.removeEventListener("pointerdown", handlePointerDown);
       canvas.removeEventListener("pointermove", handlePointerMove);

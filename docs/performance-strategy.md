@@ -63,6 +63,12 @@ segment intersection checks; it favors simple, reproducible behavior at the toy
 network size over incremental topology maintenance. Profile and replace that
 strategy only when a defined scenario demonstrates it is material. The current
 roadmap does not define a numeric M0 object-count target, so these are architectural
-guardrails rather than a frame-time claim. A numeric scenario and hardware budget
-should be added when representative vehicles establish the actual M0 display-object
-count.
+guardrails rather than a frame-time claim. Representative traffic now establishes
+the scenario-specific display count below; a hardware frame-time budget remains
+future measurement work.
+
+The M0 quarry renderer now uses one representative vehicle per 20 assigned tons
+per day. The current scenario's 100-ton daily demand therefore produces at most
+five freight graphics. Those graphics are reused while their visual trips are
+active and removed at destinations, on route changes, or on disconnection. This
+is a scenario-specific display count, not a general traffic capacity target.

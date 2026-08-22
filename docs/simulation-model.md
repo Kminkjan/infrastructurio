@@ -108,6 +108,19 @@ not a capacity or congestion model. The freight snapshot records the route and
 the same production, demand, cost, and limiting-factor values shown by the
 inspector.
 
+### M0 representative freight traffic
+
+Visible quarry trucks are presentation samples of the assigned daily freight
+rate, not authoritative shipments. The renderer resolves the freight snapshot's
+ordered route nodes into a polyline and displays one representative vehicle per
+20 shipped tons per day, rounded up for any positive flow. Samples move at a
+presentation speed of 90 map units per real-time second.
+
+Each sample is removed when it reaches the market and a later visual trip starts
+at the quarry. A changed route or shipped volume replaces the current visual
+sampling plan; a missing or unviable route clears it. These animation phases are
+intentionally absent from simulation snapshots and saves.
+
 ## Private operators
 
 Vehicles belong to simulated operators. Operators respond to demand, infrastructure compatibility, operating cost, capacity, and policy.
