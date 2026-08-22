@@ -20,9 +20,17 @@ interface SimulationState {
   readonly nextRoadSegmentNumber: number;
 }
 
+export interface SimulationStateSnapshot {
+  readonly seed: string;
+  readonly tick: number;
+  readonly roadSegments: readonly RoadSegment[];
+  readonly nextRoadSegmentNumber: number;
+}
+
 export interface Simulation {
   dispatch(command: SimulationCommand): SimulationSnapshot;
   getSnapshot(): SimulationSnapshot;
+  getState(): SimulationStateSnapshot;
   findRoute(start: Point, end: Point): RoadRoute | undefined;
 }
 
@@ -111,14 +119,67 @@ function removeRoad(
   return { ...state, roadNetwork: createRoadNetwork(segments) };
 }
 
-export function createSimulation(seed: string): Simulation {
-  const initialState: SimulationState = Object.freeze({
+function createSimulationState(
+  seed: string,
+  tick: number,
+  roadSegments: readonly RoadSegment[],
+  nextRoadSegmentNumber: number,
+): SimulationState {
+  if (!Number.isSafeInteger(tick) || tick < 0) {
+    throw new RangeError("simulation tick must be a non-negative safe integer");
+  }
+  if (
+    !Number.isSafeInteger(nextRoadSegmentNumber) ||
+    nextRoadSegmentNumber < 1
+  ) {
+    throw new RangeError(
+      "next road segment number must be a positive safe integer",
+    );
+  }
+
+  const geography = generateMillfordValley(seed);
+  for (const segment of roadSegments) {
+    for (const position of [segment.start, segment.end]) {
+      if (
+        !Number.isFinite(position.x) ||
+        !Number.isFinite(position.y) ||
+        position.x < 0 ||
+        position.x > geography.bounds.width ||
+        position.y < 0 ||
+        position.y > geography.bounds.height
+      ) {
+        throw new RangeError("saved road coordinates must be within map bounds");
+      }
+    }
+  }
+
+  const roadNetwork = createRoadNetwork(roadSegments);
+  if (
+    roadNetwork.segments.some(
+      ({ id }) => id === `road-segment-${nextRoadSegmentNumber}`,
+    )
+  ) {
+    throw new RangeError("next road segment id must be unused");
+  }
+
+  return Object.freeze({
     seed,
-    tick: 0,
-    geography: generateMillfordValley(seed),
-    roadNetwork: createRoadNetwork(),
-    nextRoadSegmentNumber: 1,
+    tick,
+    geography,
+    roadNetwork,
+    nextRoadSegmentNumber,
   });
+}
+
+function runSimulation(initialState: SimulationState): Simulation {
+  const stateSnapshot = (state: SimulationState): SimulationStateSnapshot =>
+    Object.freeze({
+      seed: state.seed,
+      tick: state.tick,
+      roadSegments: state.roadNetwork.segments,
+      nextRoadSegmentNumber: state.nextRoadSegmentNumber,
+    });
+
   let state = initialState;
 
   return {
@@ -143,6 +204,9 @@ export function createSimulation(seed: string): Simulation {
     getSnapshot() {
       return snapshot(state);
     },
+    getState() {
+      return stateSnapshot(state);
+    },
     findRoute(start, end) {
       return findRoadRoute(
         state.roadNetwork,
@@ -151,4 +215,29 @@ export function createSimulation(seed: string): Simulation {
       );
     },
   };
+}
+
+export function createSimulation(seed: string): Simulation {
+  const initialState: SimulationState = Object.freeze({
+    seed,
+    tick: 0,
+    geography: generateMillfordValley(seed),
+    roadNetwork: createRoadNetwork(),
+    nextRoadSegmentNumber: 1,
+  });
+
+  return runSimulation(initialState);
+}
+
+export function restoreSimulation(
+  savedState: SimulationStateSnapshot,
+): Simulation {
+  return runSimulation(
+    createSimulationState(
+      savedState.seed,
+      savedState.tick,
+      savedState.roadSegments,
+      savedState.nextRoadSegmentNumber,
+    ),
+  );
 }

@@ -36,6 +36,11 @@ button:hover {
   background: #ffda7c;
 }
 
+button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
 button:focus-visible {
   outline: 3px solid #ffffff;
   outline-offset: 2px;
@@ -145,6 +150,10 @@ button.secondary {
   margin-top: 1.15rem;
 }
 
+.persistence-tools {
+  margin-bottom: 1.1rem;
+}
+
 .tool-buttons {
   display: flex;
   flex-wrap: wrap;
@@ -180,6 +189,17 @@ button.secondary {
   color: #f3b7a7;
   font-size: 0.8rem;
   line-height: 1.4;
+}
+
+.persistence-message {
+  margin: 0.65rem 0 0;
+  color: #cbd8cd;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.file-input {
+  display: none;
 }
 
 .eyebrow {

@@ -117,6 +117,7 @@ The web scaffold establishes four public module entry points:
 | `src/scenarios` | Deterministic scenario geography generation | `shared` types only |
 | `src/simulation` | Authoritative deterministic state transitions | `shared`, `scenarios` |
 | `src/rendering` | PixiJS canvas and snapshot presentation | `shared` |
+| `src/persistence` | Save validation, IndexedDB storage, and file portability | `simulation`, `shared` |
 | `src/app` | React composition, controls, and orchestration | `simulation`, `rendering`, `shared` |
 
 The browser application currently runs the simulation on the main thread through the typed command/snapshot interface. This keeps the initial scaffold small while preserving the seam that will move behind a Web Worker when simulation processing warrants it. The simulation test suite runs in a Node environment and does not construct browser, React, or PixiJS objects.
@@ -164,4 +165,23 @@ vehicle identity or animation phase crosses into the simulation protocol.
 
 ## Save format
 
-Saved games contain a format version, seed, simulation time, world state, and scenario metadata. IndexedDB provides automatic local storage; explicit file export provides player-controlled backup and portability.
+M0 saves use an explicit versioned JSON document. Format version 1 contains the
+Millford Valley scenario ID and seed plus the authoritative mutable state: the
+simulation tick, authored road segments, and the next road-segment number. The
+derived geography, road nodes and links, route assignment, and freight snapshot
+are deliberately rebuilt by the simulation on load rather than duplicated in
+the save. This prevents persisted derived values from disagreeing with the same
+rules used during play; the round-trip tests require those economic outputs to
+remain identical.
+
+Imported data is structurally validated before it crosses into the simulation,
+and restored road topology is checked against simulation invariants and scenario
+bounds. An unsupported format version or scenario is rejected instead of being
+loaded partially. Any future incompatible state or rule change must introduce a
+new format version and an explicit migration path.
+
+The browser UI exposes one named local save slot backed by IndexedDB. File export
+serializes the same document as readable JSON for player-controlled backup and
+portability; file import passes through the same validation and restore path as
+the local slot. Camera, selection, construction-tool choice, and representative
+vehicle animation remain presentation state and are not saved.

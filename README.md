@@ -72,7 +72,9 @@ Freight remains at zero until the terminals are connected by a viable route.
 Once freight is assigned, orange private trucks animate from the quarry to the
 market along the selected route. Each truck represents up to 20 tons of assigned
 daily flow, so busier viable routes show more traffic without creating persistent
-shipment agents.
+shipment agents. Use **Save local** and **Load local** to keep one scenario save in
+the current browser. **Export file** downloads a portable versioned JSON save,
+and **Import file** validates and loads one of those files.
 
 ## Repository checks
 

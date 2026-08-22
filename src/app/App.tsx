@@ -1,11 +1,19 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import {
+  createSaveGame,
+  downloadSaveFile,
+  loadLocalGame,
+  readSaveFile,
+  restoreSaveGame,
+  saveLocalGame,
+} from "../persistence";
 import {
   createWorldRenderer,
   type MapSelection,
   type RoadTool,
   type WorldRenderer,
 } from "../rendering";
-import { createSimulation } from "../simulation";
+import { createSimulation, type Simulation } from "../simulation";
 import type {
   AggregateFreightSnapshot,
   Point,
@@ -14,6 +22,10 @@ import type {
 import "./app.css";
 
 const SCENARIO_SEED = "millford-valley-foundation";
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Unknown persistence error";
+}
 
 function formatTons(value: number): string {
   return `${value.toLocaleString()} t/day`;
@@ -163,11 +175,16 @@ function WorldView({
 }
 
 export function App() {
-  const [simulation] = useState(() => createSimulation(SCENARIO_SEED));
+  const [simulation, setSimulation] = useState(() =>
+    createSimulation(SCENARIO_SEED),
+  );
   const [snapshot, setSnapshot] = useState(() => simulation.getSnapshot());
   const [selection, setSelection] = useState<MapSelection>();
   const [roadTool, setRoadTool] = useState<RoadTool>("inspect");
   const [constructionMessage, setConstructionMessage] = useState<string>();
+  const [persistenceMessage, setPersistenceMessage] = useState<string>();
+  const [persistenceBusy, setPersistenceBusy] = useState(false);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   function advanceDay(): void {
     setSnapshot(simulation.dispatch({ type: "advance", ticks: 24 }));
@@ -194,6 +211,71 @@ export function App() {
       simulation.dispatch({ type: "remove-road", roadSegmentId }),
     );
     setConstructionMessage(undefined);
+  }
+
+  function useLoadedSimulation(loadedSimulation: Simulation) {
+    setSimulation(loadedSimulation);
+    setSnapshot(loadedSimulation.getSnapshot());
+    setSelection(undefined);
+    setRoadTool("inspect");
+    setConstructionMessage(undefined);
+  }
+
+  async function saveLocally(): Promise<void> {
+    setPersistenceBusy(true);
+    try {
+      await saveLocalGame(createSaveGame(simulation));
+      setPersistenceMessage("Saved locally in this browser.");
+    } catch (error) {
+      setPersistenceMessage(`Local save failed: ${errorMessage(error)}`);
+    } finally {
+      setPersistenceBusy(false);
+    }
+  }
+
+  async function loadLocally(): Promise<void> {
+    setPersistenceBusy(true);
+    try {
+      const save = await loadLocalGame();
+      if (!save) {
+        setPersistenceMessage("No local save exists yet.");
+        return;
+      }
+
+      useLoadedSimulation(restoreSaveGame(save));
+      setPersistenceMessage("Loaded the local browser save.");
+    } catch (error) {
+      setPersistenceMessage(`Local load failed: ${errorMessage(error)}`);
+    } finally {
+      setPersistenceBusy(false);
+    }
+  }
+
+  function exportFile(): void {
+    try {
+      downloadSaveFile(createSaveGame(simulation));
+      setPersistenceMessage("Exported the current scenario as a file.");
+    } catch (error) {
+      setPersistenceMessage(`Export failed: ${errorMessage(error)}`);
+    }
+  }
+
+  async function importFile(event: ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) {
+      return;
+    }
+
+    setPersistenceBusy(true);
+    try {
+      useLoadedSimulation(restoreSaveGame(await readSaveFile(file)));
+      setPersistenceMessage(`Imported ${file.name}.`);
+    } catch (error) {
+      setPersistenceMessage(`Import failed: ${errorMessage(error)}`);
+    } finally {
+      setPersistenceBusy(false);
+    }
   }
 
   const selectionShowsFreight =
@@ -280,6 +362,55 @@ export function App() {
             Reset
           </button>
         </div>
+        <section className="persistence-tools" aria-label="Save and load">
+          <p className="eyebrow">Save and load</p>
+          <div className="tool-buttons">
+            <button
+              className="tool-button"
+              type="button"
+              disabled={persistenceBusy}
+              onClick={() => void saveLocally()}
+            >
+              Save local
+            </button>
+            <button
+              className="tool-button"
+              type="button"
+              disabled={persistenceBusy}
+              onClick={() => void loadLocally()}
+            >
+              Load local
+            </button>
+            <button
+              className="tool-button"
+              type="button"
+              disabled={persistenceBusy}
+              onClick={exportFile}
+            >
+              Export file
+            </button>
+            <button
+              className="tool-button"
+              type="button"
+              disabled={persistenceBusy}
+              onClick={() => importInputRef.current?.click()}
+            >
+              Import file
+            </button>
+            <input
+              ref={importInputRef}
+              className="file-input"
+              type="file"
+              accept="application/json,.json"
+              onChange={(event) => void importFile(event)}
+            />
+          </div>
+          {persistenceMessage ? (
+            <p className="persistence-message" role="status">
+              {persistenceMessage}
+            </p>
+          ) : null}
+        </section>
         <p className="hint">
           {roadTool === "build"
             ? "Drag across the map to draw a road. Endpoints snap to the quarry, market, nearby roads, and junctions."
