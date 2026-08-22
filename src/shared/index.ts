@@ -10,9 +10,15 @@ export type {
   FreightLimitingFactor,
 } from "./economy";
 export type {
+  DevelopmentAccessFactor,
+  DevelopmentAccessFactorExplanation,
+  DevelopmentDecisionExplanation,
+  DevelopmentDecisionOutcome,
+  DevelopmentLandExplanation,
   DevelopmentLocationSnapshot,
   DevelopmentSnapshot,
   DevelopmentStatus,
+  DevelopmentTransportExplanation,
   PendingConstruction,
   RegionalDevelopmentDemandSnapshot,
 } from "./development";

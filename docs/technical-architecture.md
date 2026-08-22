@@ -205,3 +205,11 @@ weekly tick boundaries, performs a seeded weighted selection, schedules delayed
 construction, and applies gradual decline. Its serializable snapshot exposes
 regional demand, location population and pressure, and pending work. React and
 PixiJS only inspect or visualize that snapshot; neither chooses development.
+
+Development decision explanations are derived alongside that snapshot in the
+simulation core. Each location receives structured weighted contributions,
+alternative comparisons, network-cost evidence, land cost, current selection
+share, and the latest pending project's selected location. React formats those
+values and labels the outcome but does not recalculate pressure or weighted
+choice. The explanation is deliberately not persisted because its inputs are
+already deterministically rebuilt from saved road and development state.

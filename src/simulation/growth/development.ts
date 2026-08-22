@@ -1,5 +1,9 @@
 import type {
   AccessibilitySnapshot,
+  DevelopmentAccessFactor,
+  DevelopmentAccessFactorExplanation,
+  DevelopmentDecisionExplanation,
+  DevelopmentDecisionOutcome,
   DevelopmentSnapshot,
   LocationAccessibility,
   PendingConstruction,
@@ -13,6 +17,7 @@ export interface DevelopmentCandidate {
   readonly name: string;
   readonly position: Point;
   readonly basePopulation: number;
+  readonly landCostPoints: number;
 }
 
 export interface DevelopmentModel {
@@ -22,7 +27,6 @@ export interface DevelopmentModel {
   readonly constructionDelayTicks: number;
   readonly projectPopulation: number;
   readonly declinePopulation: number;
-  readonly viabilityThreshold: number;
   readonly accessWeights: Readonly<{
     market: number;
     labor: number;
@@ -64,9 +68,6 @@ function validateModel(model: DevelopmentModel): void {
   positiveSafeInteger(model.constructionDelayTicks, "construction delay");
   positiveSafeInteger(model.projectPopulation, "project population");
   positiveSafeInteger(model.declinePopulation, "decline population");
-  if (!Number.isFinite(model.viabilityThreshold)) {
-    throw new RangeError("viability threshold must be finite");
-  }
   for (const weight of Object.values(model.accessWeights)) {
     if (!Number.isFinite(weight) || weight < 0) {
       throw new RangeError(
@@ -89,6 +90,12 @@ function validateModel(model: DevelopmentModel): void {
       throw new RangeError("development candidate positions must be finite");
     }
     safeNonNegativeInteger(candidate.basePopulation, "base population");
+    if (
+      !Number.isFinite(candidate.landCostPoints) ||
+      candidate.landCostPoints < 0
+    ) {
+      throw new RangeError("land cost must be non-negative and finite");
+    }
     candidateIds.add(candidate.id);
   }
 }
@@ -227,25 +234,218 @@ function locationAccessibility(
   );
 }
 
+const ACCESS_FACTORS: readonly DevelopmentAccessFactor[] = [
+  "market",
+  "labor",
+  "resource",
+  "service",
+];
+
+function candidateFor(
+  model: DevelopmentModel,
+  locationId: string,
+): DevelopmentCandidate | undefined {
+  return model.candidates.find(({ id }) => id === locationId);
+}
+
+function factorContribution(
+  accessibility: AccessibilitySnapshot,
+  locationId: string,
+  model: DevelopmentModel,
+  factor: DevelopmentAccessFactor,
+): number {
+  return (
+    (locationAccessibility(accessibility, locationId)?.[factor].score ?? 0) *
+    model.accessWeights[factor]
+  );
+}
+
 export function developmentPressure(
   accessibility: AccessibilitySnapshot,
   locationId: string,
   model: DevelopmentModel,
 ): number {
   const location = locationAccessibility(accessibility, locationId);
+  const candidate = candidateFor(model, locationId);
+  if (!candidate) {
+    return 0;
+  }
   if (!location) {
-    return -model.viabilityThreshold;
+    return -candidate.landCostPoints;
   }
 
-  const score =
-    location.market.score * model.accessWeights.market +
-    location.labor.score * model.accessWeights.labor +
-    location.resource.score * model.accessWeights.resource +
-    location.service.score * model.accessWeights.service;
+  const score = ACCESS_FACTORS.reduce(
+    (total, factor) =>
+      total + factorContribution(accessibility, locationId, model, factor),
+    0,
+  );
   return (
-    Math.round((score - model.viabilityThreshold) * PRESSURE_PRECISION) /
+    Math.round((score - candidate.landCostPoints) * PRESSURE_PRECISION) /
     PRESSURE_PRECISION
   );
+}
+
+function bestAlternative(
+  model: DevelopmentModel,
+  locationId: string,
+  value: (candidate: DevelopmentCandidate) => number | null,
+  preferLower = false,
+): { candidate: DevelopmentCandidate; value: number } | undefined {
+  const alternatives = model.candidates
+    .filter(({ id }) => id !== locationId)
+    .map((candidate) => ({ candidate, value: value(candidate) }))
+    .filter(
+      (entry): entry is { candidate: DevelopmentCandidate; value: number } =>
+        entry.value !== null,
+    );
+  alternatives.sort((first, second) => {
+    const difference = preferLower
+      ? first.value - second.value
+      : second.value - first.value;
+    return difference || first.candidate.id.localeCompare(second.candidate.id);
+  });
+  return alternatives[0];
+}
+
+function accessFactorExplanation(
+  accessibility: AccessibilitySnapshot,
+  locationId: string,
+  model: DevelopmentModel,
+  factor: DevelopmentAccessFactor,
+): DevelopmentAccessFactorExplanation {
+  const value = locationAccessibility(accessibility, locationId)?.[factor];
+  const contributionPoints = factorContribution(
+    accessibility,
+    locationId,
+    model,
+    factor,
+  );
+  const alternative = bestAlternative(model, locationId, (candidate) =>
+    factorContribution(accessibility, candidate.id, model, factor),
+  );
+  return Object.freeze({
+    factor,
+    accessScore: value?.score ?? 0,
+    weight: model.accessWeights[factor],
+    contributionPoints,
+    nearestNetworkCost: value?.nearestNetworkCost ?? null,
+    reachableOpportunityCount: value?.reachableOpportunityCount ?? 0,
+    bestAlternativeLocationId: alternative?.candidate.id ?? null,
+    bestAlternativeName: alternative?.candidate.name ?? null,
+    differenceFromBestAlternativePoints:
+      alternative === undefined ? null : contributionPoints - alternative.value,
+  });
+}
+
+function decisionOutcome(
+  state: DevelopmentStateSnapshot,
+  pressure: number,
+  selectedLocationId: string | null,
+  remainingGrowthPopulation: number,
+  locationId: string,
+): DevelopmentDecisionOutcome {
+  if (state.lastEvaluationTick === null) {
+    return "not-evaluated";
+  }
+  if (remainingGrowthPopulation === 0 && selectedLocationId === null) {
+    return "regional-demand-met";
+  }
+  if (pressure <= 0) {
+    return "not-viable";
+  }
+  return selectedLocationId === locationId ? "selected" : "not-selected";
+}
+
+function createDecisionExplanation(
+  state: DevelopmentStateSnapshot,
+  model: DevelopmentModel,
+  accessibility: AccessibilitySnapshot,
+  locationId: string,
+  remainingGrowthPopulation: number,
+): DevelopmentDecisionExplanation {
+  const candidate = candidateFor(model, locationId);
+  if (!candidate) {
+    throw new Error(`unknown development candidate ${locationId}`);
+  }
+  const accessFactors = Object.freeze(
+    ACCESS_FACTORS.map((factor) =>
+      accessFactorExplanation(accessibility, locationId, model, factor),
+    ),
+  );
+  const strongestPositiveFactor = accessFactors.every(
+    ({ contributionPoints }) => contributionPoints <= 0,
+  )
+    ? null
+    : accessFactors.reduce((strongest, factor) =>
+        factor.contributionPoints > strongest.contributionPoints
+          ? factor
+          : strongest,
+      );
+  const selectionWeight = Math.max(
+    0,
+    developmentPressure(accessibility, locationId, model),
+  );
+  const totalSelectionWeight = model.candidates.reduce(
+    (total, entry) =>
+      total + Math.max(0, developmentPressure(accessibility, entry.id, model)),
+    0,
+  );
+  const selectedProject = state.pendingConstruction.find(
+    ({ startedTick }) => startedTick === state.lastEvaluationTick,
+  );
+  const selected = selectedProject
+    ? candidateFor(model, selectedProject.locationId)
+    : undefined;
+  const marketCost = locationAccessibility(accessibility, locationId)?.market
+    .nearestNetworkCost ?? null;
+  const transportAlternative = bestAlternative(
+    model,
+    locationId,
+    (entry) =>
+      locationAccessibility(accessibility, entry.id)?.market
+        .nearestNetworkCost ?? null,
+    true,
+  );
+  const landAlternative = bestAlternative(
+    model,
+    locationId,
+    (entry) => entry.landCostPoints,
+    true,
+  );
+  const land = Object.freeze({
+    costPoints: candidate.landCostPoints,
+    cheapestAlternativeLocationId: landAlternative?.candidate.id ?? null,
+    cheapestAlternativeName: landAlternative?.candidate.name ?? null,
+    differenceFromCheapestAlternativePoints:
+      landAlternative === undefined
+        ? null
+        : candidate.landCostPoints - landAlternative.value,
+  });
+
+  return Object.freeze({
+    outcome: decisionOutcome(
+      state,
+      selectionWeight,
+      selected?.id ?? null,
+      remainingGrowthPopulation,
+      locationId,
+    ),
+    selectionWeight,
+    selectionShare:
+      totalSelectionWeight === 0 ? 0 : selectionWeight / totalSelectionWeight,
+    selectedLocationId: selected?.id ?? null,
+    selectedLocationName: selected?.name ?? null,
+    accessFactors,
+    transport: Object.freeze({
+      marketNetworkCost: marketCost,
+      bestAlternativeLocationId: transportAlternative?.candidate.id ?? null,
+      bestAlternativeName: transportAlternative?.candidate.name ?? null,
+      bestAlternativeMarketNetworkCost: transportAlternative?.value ?? null,
+    }),
+    land,
+    strongestPositiveFactor,
+    strongestNegativeFactor: land,
+  });
 }
 
 function seededUnitValue(seed: string, evaluationNumber: number): number {
@@ -483,6 +683,13 @@ export function createDevelopmentSnapshot(
           pressure,
           status,
           pendingConstruction,
+          decision: createDecisionExplanation(
+            state,
+            model,
+            accessibility,
+            candidate.id,
+            model.regionalGrowthDemand - committedGrowthPopulation,
+          ),
         });
       }),
     ),

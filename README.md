@@ -80,9 +80,13 @@ Millford and Eastbank now compete for a bounded 100-resident regional growth
 allocation. Give a settlement useful road access and advance time: development
 is evaluated weekly, selected construction takes another week to complete, and
 new homes appear around the successful settlement. Select a settlement to inspect
-its population, development pressure, status, and pending construction. Removing
-its access applies pressure immediately and causes only gradual weekly decline in
-infrastructure-enabled growth; the original settlement remains.
+its population, development pressure, status, pending construction, and latest
+location decision. The decision view identifies the strongest support and
+constraint, shows the exact weighted market, labor, resource, and service inputs,
+compares transport and land assumptions, and names the candidate selected by the
+seeded weekly choice. The same view remains available on the unsuccessful
+settlement. Removing access applies pressure immediately and causes only gradual
+weekly decline in infrastructure-enabled growth; the original settlement remains.
 
 Use **Save local** and **Load local** to keep one scenario save in
 the current browser. **Export file** downloads a portable versioned JSON save,

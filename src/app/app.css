@@ -142,6 +142,8 @@ button.secondary {
   top: clamp(1rem, 4vw, 3rem);
   left: clamp(1rem, 4vw, 3rem);
   width: min(25rem, calc(100% - 2rem));
+  max-height: calc(100% - clamp(2rem, 8vw, 6rem));
+  overflow-y: auto;
   padding: 1.4rem;
   border: 1px solid rgb(255 255 255 / 16%);
   border-radius: 1rem;
@@ -307,6 +309,62 @@ button.secondary {
   color: #e5c985;
   font-size: 0.8rem;
   line-height: 1.4;
+}
+
+.decision-explanation {
+  margin-top: 1rem;
+  border-top: 1px solid rgb(255 255 255 / 13%);
+  padding-top: 0.8rem;
+}
+
+.decision-explanation h3 {
+  margin: 0;
+  color: #fffdf7;
+  font-size: 0.92rem;
+}
+
+.decision-outcome,
+.decision-highlight {
+  margin: 0.5rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.decision-outcome {
+  color: #d6ded7;
+}
+
+.decision-highlight.positive {
+  color: #b9dfb8;
+}
+
+.decision-highlight.negative {
+  color: #e5c985;
+}
+
+.decision-factors {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0.8rem 0 0;
+}
+
+.decision-factors div {
+  border-top: 1px solid rgb(255 255 255 / 9%);
+  padding-top: 0.45rem;
+}
+
+.decision-factors dt {
+  color: #b8c5bb;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.decision-factors dd {
+  margin: 0.12rem 0 0;
+  color: #fffdf7;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.35;
 }
 
 .controls {

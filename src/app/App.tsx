@@ -16,6 +16,9 @@ import {
 import { createSimulation, type Simulation } from "../simulation";
 import type {
   AggregateFreightSnapshot,
+  DevelopmentAccessFactorExplanation,
+  DevelopmentDecisionExplanation,
+  DevelopmentDecisionOutcome,
   DevelopmentLocationSnapshot,
   Point,
   SimulationSnapshot,
@@ -30,6 +33,71 @@ function errorMessage(error: unknown): string {
 
 function formatTons(value: number): string {
   return `${value.toLocaleString()} t/day`;
+}
+
+function factorLabel(factor: DevelopmentAccessFactorExplanation): string {
+  return factor.factor === "resource"
+    ? "Resources"
+    : factor.factor[0]!.toUpperCase() + factor.factor.slice(1);
+}
+
+function factorComparison(
+  factor: DevelopmentAccessFactorExplanation,
+): string {
+  const difference = factor.differenceFromBestAlternativePoints;
+  if (difference === null || factor.bestAlternativeName === null) {
+    return "no regional alternative";
+  }
+  if (Math.abs(difference) < 0.05) {
+    return `level with ${factor.bestAlternativeName}`;
+  }
+  return difference > 0
+    ? `${difference.toFixed(1)} more than ${factor.bestAlternativeName}`
+    : `${Math.abs(difference).toFixed(1)} fewer than ${factor.bestAlternativeName}`;
+}
+
+function outcomeDescription(
+  outcome: DevelopmentDecisionOutcome,
+  decision: DevelopmentDecisionExplanation,
+): string {
+  switch (outcome) {
+    case "not-evaluated":
+      return "Awaiting the first weekly allocation.";
+    case "selected":
+      return "Selected for the latest weekly allocation.";
+    case "not-selected":
+      return decision.selectedLocationName
+        ? `Not selected; ${decision.selectedLocationName} won the seeded choice.`
+        : "Not selected for the latest weekly allocation.";
+    case "not-viable":
+      return "Not viable at the latest evaluation.";
+    case "regional-demand-met":
+      return "No allocation: regional growth demand is met.";
+  }
+}
+
+function transportDescription(
+  decision: DevelopmentDecisionExplanation,
+): string {
+  const current = decision.transport.marketNetworkCost;
+  const alternative = decision.transport.bestAlternativeMarketNetworkCost;
+  const alternativeName = decision.transport.bestAlternativeName;
+  if (current === null) {
+    return alternative === null || alternativeName === null
+      ? "No market road route from either candidate"
+      : `No market road route; ${alternativeName} has a ${Math.round(alternative).toLocaleString()}-unit route`;
+  }
+  if (alternative === null || alternativeName === null) {
+    return `${Math.round(current).toLocaleString()} network cost units; no alternative route`;
+  }
+  const difference = current - alternative;
+  const comparison =
+    Math.abs(difference) < 0.5
+      ? `level with ${alternativeName}`
+      : difference < 0
+        ? `${Math.round(Math.abs(difference)).toLocaleString()} shorter than ${alternativeName}`
+        : `${Math.round(difference).toLocaleString()} longer than ${alternativeName}`;
+  return `${Math.round(current).toLocaleString()} network cost units; ${comparison}`;
 }
 
 function FreightInspector({
@@ -78,6 +146,15 @@ function DevelopmentInspector({
   const pending = development.pendingConstruction;
   const status =
     development.status[0]!.toUpperCase() + development.status.slice(1);
+  const { decision } = development;
+  const strongestSupport = decision.strongestPositiveFactor;
+  const landDifference = decision.land.differenceFromCheapestAlternativePoints;
+  const landComparison =
+    landDifference === null || decision.land.cheapestAlternativeName === null
+      ? "no regional alternative"
+      : Math.abs(landDifference) < 0.05
+        ? `same prototype cost as ${decision.land.cheapestAlternativeName}`
+        : `${landDifference.toFixed(1)} more than ${decision.land.cheapestAlternativeName}`;
 
   return (
     <>
@@ -106,6 +183,50 @@ function DevelopmentInspector({
           {pending.completesTick / 24}.
         </p>
       ) : null}
+      <section className="decision-explanation" aria-label="Development decision">
+        <h3>Latest location decision</h3>
+        <p className={`decision-outcome outcome-${decision.outcome}`}>
+          {outcomeDescription(decision.outcome, decision)}{" "}
+          {decision.selectionWeight > 0
+            ? `${(decision.selectionShare * 100).toFixed(0)}% of current viable pressure.`
+            : null}
+        </p>
+        <p className="decision-highlight positive">
+          <strong>Strongest support:</strong>{" "}
+          {strongestSupport
+            ? `${factorLabel(strongestSupport)} +${strongestSupport.contributionPoints.toFixed(1)} decision points.`
+            : "No positive access contribution."}
+        </p>
+        <p className="decision-highlight negative">
+          <strong>Strongest constraint:</strong> Land and viability −
+          {decision.strongestNegativeFactor.costPoints.toFixed(1)} decision
+          points.
+        </p>
+        <dl className="decision-factors">
+          {decision.accessFactors.map((factor) => (
+            <div key={factor.factor}>
+              <dt>{factorLabel(factor)}</dt>
+              <dd>
+                {factor.accessScore.toFixed(1)} access points ×{" "}
+                {(factor.weight * 100).toFixed(0)}% = +
+                {factor.contributionPoints.toFixed(1)} decision points;{" "}
+                {factorComparison(factor)}
+              </dd>
+            </div>
+          ))}
+          <div>
+            <dt>Transport</dt>
+            <dd>{transportDescription(decision)}</dd>
+          </div>
+          <div>
+            <dt>Land</dt>
+            <dd>
+              −{decision.land.costPoints.toFixed(1)} decision points;{" "}
+              {landComparison}
+            </dd>
+          </div>
+        </dl>
+      </section>
     </>
   );
 }

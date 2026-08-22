@@ -71,7 +71,7 @@ pressure = 0.35 * market access
          + 0.30 * labor access
          + 0.20 * resource access
          + 0.15 * service access
-         - 35 viability points
+         - 35 land and viability cost points
 ```
 
 A deterministic value derived from the scenario seed and evaluation number
@@ -88,7 +88,31 @@ residents at a time. This is an intentionally small pressure-and-decline model;
 it has no households, land market, building types, relocation destinations, or
 industry-specific resource requirements yet. The accessibility inputs also
 retain the proxy weights documented in the research note. Detailed decision
-explanations belong to issue #10.
+explanations expose these limitations rather than presenting the proxy values as
+real people, jobs, prices, or minutes.
+
+### M1 development decision explanations
+
+Each candidate's development snapshot carries the exact factor scores, weights,
+and contributions used to calculate its current pressure. It also carries its
+share of total positive pressure and the selected candidate associated with the
+latest pending weekly project. This makes a losing candidate inspectable even
+when a seeded choice awards development to a lower-probability alternative.
+
+Market, labor, resource, and service access remain positive decision inputs in
+prototype access points. The transport explanation reports shortest-road market
+cost in network cost units and compares it with the best routed alternative.
+That transport cost is already embedded in the exponentially decayed access
+score, so it is not subtracted again. The previous undifferentiated 35-point
+viability threshold is now named as an equal land-and-viability cost for both
+Millford and Eastbank. It is the model's explicit negative contribution, but it
+is still a balancing assumption: there is no simulated land supply, rent, or
+parcel market yet.
+
+Decision explanations are current derived state, not an event history. A network
+edit immediately updates their access evidence and may cancel a pending project;
+the prototype does not retain explanations for earlier allocations after their
+inputs change.
 
 ## Settlements and buildings
 

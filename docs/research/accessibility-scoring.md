@@ -83,5 +83,7 @@ weights, typed resource requirements, and service inputs with issues #9 and #10.
 Issue #9 now combines the four factors only for a bounded residential settlement
 growth prototype. The combination is an explicit balancing assumption, not a
 finding that resolves the correlated service/labor inputs or the need for typed
-industry resources. Those limitations remain for later balancing and issue #10's
-decision explanations.
+industry resources. Issue #10 now exposes those separate weighted inputs, their
+network-cost evidence, and their comparisons in the settlement inspector. It
+also labels the equal 35-point land-and-viability cost as a prototype assumption;
+the underlying balancing limitations remain.

@@ -46,12 +46,14 @@ function model(regionalGrowthDemand = 30): DevelopmentModel {
         name: "Higher access",
         position: { x: 0, y: 0 },
         basePopulation: 20,
+        landCostPoints: 10,
       },
       {
         id: "lower-access",
         name: "Lower access",
         position: { x: 10, y: 0 },
         basePopulation: 10,
+        landCostPoints: 10,
       },
     ],
     regionalGrowthDemand,
@@ -59,7 +61,6 @@ function model(regionalGrowthDemand = 30): DevelopmentModel {
     constructionDelayTicks: 10,
     projectPopulation: 10,
     declinePopulation: 5,
-    viabilityThreshold: 10,
     accessWeights: {
       market: 0.35,
       labor: 0.3,
@@ -161,6 +162,73 @@ describe("development growth", () => {
     ).toBeGreaterThan(
       selectedBySeed.filter((id) => id === "lower-access").length,
     );
+  });
+
+  it("explains the exact decision inputs and identifies the unsuccessful candidate", () => {
+    const developmentModel = model(20);
+    const access = accessibility({
+      "higher-access": 80,
+      "lower-access": 30,
+    });
+    const evaluated = advanceDevelopment(
+      createDevelopmentState(developmentModel),
+      developmentModel,
+      access,
+      "explanation",
+      10,
+    );
+    const snapshot = createDevelopmentSnapshot(
+      evaluated,
+      developmentModel,
+      access,
+    );
+    const selected = snapshot.locations.find(
+      ({ decision }) => decision.outcome === "selected",
+    );
+    const unsuccessful = snapshot.locations.find(
+      ({ decision }) => decision.outcome === "not-selected",
+    );
+
+    expect(selected).toBeDefined();
+    expect(unsuccessful).toBeDefined();
+    expect(unsuccessful?.decision).toMatchObject({
+      selectedLocationId: selected?.locationId,
+      selectedLocationName: selected?.name,
+      strongestPositiveFactor: { factor: "market" },
+      strongestNegativeFactor: { costPoints: 10 },
+      transport: { marketNetworkCost: 1 },
+      land: {
+        costPoints: 10,
+        differenceFromCheapestAlternativePoints: 0,
+      },
+    });
+
+    for (const location of snapshot.locations) {
+      for (const factorValue of location.decision.accessFactors) {
+        expect(factorValue.contributionPoints).toBeCloseTo(
+          factorValue.accessScore * factorValue.weight,
+          10,
+        );
+      }
+      const explainedPressure =
+        location.decision.accessFactors.reduce(
+          (total, factorValue) =>
+            total + factorValue.contributionPoints,
+          0,
+        ) - location.decision.land.costPoints;
+      expect(explainedPressure).toBeCloseTo(location.pressure, 3);
+      expect(location.decision.transport.marketNetworkCost).toBe(
+        location.decision.accessFactors.find(
+          ({ factor }) => factor === "market",
+        )?.nearestNetworkCost,
+      );
+    }
+    expect(
+      snapshot.locations.reduce(
+        (total, location) => total + location.decision.selectionShare,
+        0,
+      ),
+    ).toBeCloseTo(1, 10);
   });
 
   it("turns lost access into pressure and gradual decline instead of disappearance", () => {
