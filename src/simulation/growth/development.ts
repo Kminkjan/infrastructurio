@@ -466,8 +466,10 @@ function chooseCandidate(
   accessibility: AccessibilitySnapshot,
   seed: string,
   evaluationNumber: number,
+  unavailableLocationIds: ReadonlySet<string>,
 ): DevelopmentCandidate | undefined {
   const weighted = model.candidates
+    .filter(({ id }) => !unavailableLocationIds.has(id))
     .map((candidate) => ({
       candidate,
       weight: Math.max(
@@ -571,6 +573,7 @@ function evaluateDevelopment(
     accessibility,
     seed,
     state.evaluationNumber,
+    new Set(stillPending.map(({ locationId }) => locationId)),
   );
   if (selected && remainingDemand > 0) {
     stillPending.push(

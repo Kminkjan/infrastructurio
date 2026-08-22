@@ -128,6 +128,32 @@ describe("development growth", () => {
       });
   });
 
+  it("does not schedule a second project at a location that is still building", () => {
+    const developmentModel = {
+      ...model(30),
+      constructionDelayTicks: 30,
+    };
+    const access = accessibility({
+      "higher-access": 80,
+      "lower-access": 0,
+    });
+
+    const evaluatedTwice = advanceDevelopment(
+      createDevelopmentState(developmentModel),
+      developmentModel,
+      access,
+      "long-construction",
+      20,
+    );
+
+    expect(evaluatedTwice.pendingConstruction).toHaveLength(1);
+    expect(evaluatedTwice.pendingConstruction[0]).toMatchObject({
+      locationId: "higher-access",
+      startedTick: 10,
+      completesTick: 40,
+    });
+  });
+
   it("lets multiple viable locations compete through reproducible seeded weights", () => {
     const developmentModel = model(10);
     const access = accessibility({

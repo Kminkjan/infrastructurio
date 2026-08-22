@@ -116,6 +116,8 @@ Vitest uses its Node environment for simulation tests, so the simulation can be 
 
 ## Current milestone
 
-**M0 — Simulation Toy:** draw a small map, place a road connection, route representative freight through it, and inspect the resulting flow.
+**M2 — Bottleneck Loop:** make road capacity and congestion legible, then
+support multiple interventions whose transport and development consequences
+unfold over simulated time.
 
 The roadmap describes outcomes rather than dates. Issues describe the concrete work needed to reach each outcome.
