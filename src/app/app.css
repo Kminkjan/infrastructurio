@@ -119,6 +119,24 @@ button.secondary {
   text-transform: uppercase;
 }
 
+.overlay-toggle {
+  position: absolute;
+  z-index: 2;
+  top: 0.65rem;
+  left: clamp(1rem, 4vw, 3rem);
+  border-color: rgb(255 255 255 / 20%);
+  padding: 0.42rem 0.72rem;
+  color: #e8eee9;
+  background: rgb(14 27 23 / 88%);
+  box-shadow: 0 0.5rem 1.4rem rgb(0 0 0 / 20%);
+  font-size: 0.74rem;
+  backdrop-filter: blur(12px);
+}
+
+.overlay-toggle:hover {
+  background: rgb(35 55 47 / 94%);
+}
+
 .overlay {
   position: absolute;
   top: clamp(1rem, 4vw, 3rem);
@@ -130,6 +148,10 @@ button.secondary {
   background: rgb(14 27 23 / 88%);
   box-shadow: 0 1.4rem 3.5rem rgb(0 0 0 / 28%);
   backdrop-filter: blur(12px);
+}
+
+.overlay[hidden] {
+  display: none;
 }
 
 .overlay h1 {

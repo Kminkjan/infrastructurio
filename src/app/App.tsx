@@ -184,6 +184,7 @@ export function App() {
   const [constructionMessage, setConstructionMessage] = useState<string>();
   const [persistenceMessage, setPersistenceMessage] = useState<string>();
   const [persistenceBusy, setPersistenceBusy] = useState(false);
+  const [controlsOpen, setControlsOpen] = useState(true);
   const importInputRef = useRef<HTMLInputElement>(null);
 
   function advanceDay(): void {
@@ -291,7 +292,21 @@ export function App() {
         onBuildRoad={buildRoad}
         onRemoveRoad={removeRoad}
       />
-      <section className="overlay" aria-label="Simulation controls">
+      <button
+        className="overlay-toggle"
+        type="button"
+        aria-controls="simulation-controls"
+        aria-expanded={controlsOpen}
+        onClick={() => setControlsOpen((open) => !open)}
+      >
+        {controlsOpen ? "Hide controls" : "Show controls"}
+      </button>
+      <section
+        id="simulation-controls"
+        className="overlay"
+        aria-label="Simulation controls"
+        hidden={!controlsOpen}
+      >
         <p className="eyebrow">Millford Valley · Foundation</p>
         <h1>Infrastructurio</h1>
         <p className="status">
