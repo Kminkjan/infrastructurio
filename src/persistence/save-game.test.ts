@@ -60,6 +60,9 @@ describe("save games", () => {
     expect(after.tick).toBe(before.tick);
     expect(after.elapsedDays).toBe(before.elapsedDays);
     expect(after.quarryMarketFreight).toEqual(before.quarryMarketFreight);
+    expect(after.accessibility.locations).toEqual(
+      before.accessibility.locations,
+    );
     expect(after.quarryMarketFreight.shippedTonsPerDay).toBeGreaterThan(0);
 
     const continued = restored.dispatch({

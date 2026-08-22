@@ -23,6 +23,22 @@ Locations are evaluated through generalized access costs rather than straight-li
 
 Accessibility is recalculated incrementally when the network or persistent congestion changes.
 
+### M1 accessibility research prototype
+
+The first accessibility experiment evaluates the existing Millford and Eastbank
+settlement seeds as candidate locations. It reports separate market, labor,
+resource, and service values. Every opportunity contribution decays with shortest
+road-network cost; straight-line distance is not a scoring fallback, and an
+unreachable opportunity contributes zero. Each factor also retains its nearest
+reachable network cost and number of reachable opportunities for inspection.
+
+These values are derived simulation state. They are rebuilt from scenario and
+road state after load rather than added to the save format. The initial
+opportunity weights are explicit research assumptions rather than economic
+quantities, and the values do not yet cause development. The experiment and its
+limitations are recorded in
+[`research/accessibility-scoring.md`](research/accessibility-scoring.md).
+
 ### Location choice
 
 Households, developers, and industries compare candidate locations. A conceptual score is:

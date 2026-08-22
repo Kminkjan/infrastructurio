@@ -10,6 +10,8 @@ import {
 } from "../shared";
 import { generateMillfordValley } from "../scenarios";
 import { createQuarryMarketFreight } from "./economy/quarry-market-freight";
+import { createAccessibilityScorer } from "./growth/accessibility";
+import { createMillfordAccessibilityModel } from "./growth/millford-accessibility";
 import { createRoadNetwork, findRoadRoute } from "./transport/road-network";
 
 interface SimulationState {
@@ -34,7 +36,10 @@ export interface Simulation {
   findRoute(start: Point, end: Point): RoadRoute | undefined;
 }
 
-function snapshot(state: SimulationState): SimulationSnapshot {
+function snapshot(
+  state: SimulationState,
+  accessibility: ReturnType<typeof createAccessibilityScorer>,
+): SimulationSnapshot {
   const quarryMarketRoute = findRoadRoute(
     state.roadNetwork,
     state.geography.quarry.position,
@@ -51,6 +56,7 @@ function snapshot(state: SimulationState): SimulationSnapshot {
       state.geography,
       quarryMarketRoute,
     ),
+    accessibility: accessibility.getSnapshot(),
   });
 }
 
@@ -181,15 +187,24 @@ function runSimulation(initialState: SimulationState): Simulation {
     });
 
   let state = initialState;
+  let accessibility = createAccessibilityScorer(
+    createMillfordAccessibilityModel(initialState.geography),
+    initialState.roadNetwork,
+  );
 
   return {
     dispatch(command) {
+      const previousRoadNetwork = state.roadNetwork;
       switch (command.type) {
         case "advance":
           state = advance(state, command.ticks);
           break;
         case "reset":
           state = initialState;
+          accessibility = createAccessibilityScorer(
+            createMillfordAccessibilityModel(initialState.geography),
+            initialState.roadNetwork,
+          );
           break;
         case "build-road":
           state = buildRoad(state, command.start, command.end);
@@ -199,10 +214,17 @@ function runSimulation(initialState: SimulationState): Simulation {
           break;
       }
 
-      return snapshot(state);
+      if (
+        state.roadNetwork !== previousRoadNetwork &&
+        command.type !== "reset"
+      ) {
+        accessibility.updateNetwork(state.roadNetwork);
+      }
+
+      return snapshot(state, accessibility);
     },
     getSnapshot() {
-      return snapshot(state);
+      return snapshot(state, accessibility);
     },
     getState() {
       return stateSnapshot(state);

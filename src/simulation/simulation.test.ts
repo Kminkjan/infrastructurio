@@ -192,4 +192,108 @@ describe("headless simulation", () => {
     );
     expect(indirectFreight.limitingFactor).toBe("route-cost");
   });
+
+  it("publishes deterministic network accessibility for candidate locations", () => {
+    const simulation = createSimulation("accessibility-snapshot");
+    const initial = simulation.getSnapshot();
+    const [millford, eastbank] = initial.geography.settlementSeeds;
+    expect(millford).toBeDefined();
+    expect(eastbank).toBeDefined();
+
+    expect(
+      initial.accessibility.locations.map(({ locationId }) => locationId),
+    ).toEqual(initial.geography.settlementSeeds.map(({ id }) => id));
+    for (const location of initial.accessibility.locations) {
+      expect(location).toMatchObject({
+        market: { score: 0, nearestNetworkCost: null },
+        labor: { score: 0, nearestNetworkCost: null },
+        resource: { score: 0, nearestNetworkCost: null },
+        service: { score: 0, nearestNetworkCost: null },
+      });
+    }
+
+    const fertileCenter = initial.geography.fertileLand.boundary.reduce(
+      (center, position, _index, boundary) => ({
+        x: center.x + position.x / boundary.length,
+        y: center.y + position.y / boundary.length,
+      }),
+      { x: 0, y: 0 },
+    );
+    const anchors = [
+      millford!.position,
+      initial.geography.quarry.position,
+      eastbank!.position,
+      fertileCenter,
+      initial.geography.externalMarketConnection.position,
+    ];
+    let connected = initial;
+    for (let index = 0; index < anchors.length - 1; index += 1) {
+      connected = simulation.dispatch({
+        type: "build-road",
+        start: anchors[index]!,
+        end: anchors[index + 1]!,
+      });
+    }
+
+    for (const location of connected.accessibility.locations) {
+      expect(location.market.score).toBeGreaterThan(0);
+      expect(location.labor.score).toBeGreaterThan(0);
+      expect(location.resource.score).toBeGreaterThan(0);
+      expect(location.service.score).toBeGreaterThan(0);
+    }
+
+    const replay = createSimulation("accessibility-snapshot");
+    for (let index = 0; index < anchors.length - 1; index += 1) {
+      replay.dispatch({
+        type: "build-road",
+        start: anchors[index]!,
+        end: anchors[index + 1]!,
+      });
+    }
+    expect(replay.getSnapshot().accessibility).toEqual(connected.accessibility);
+  });
+
+  it("invalidates only candidate locations affected by a local edit", () => {
+    const simulation = createSimulation("accessibility-invalidation");
+    const geography = simulation.getSnapshot().geography;
+    const [millford, eastbank] = geography.settlementSeeds;
+    expect(millford).toBeDefined();
+    expect(eastbank).toBeDefined();
+
+    simulation.dispatch({
+      type: "build-road",
+      start: millford!.position,
+      end: geography.quarry.position,
+    });
+    const fertileCenter = geography.fertileLand.boundary.reduce(
+      (center, position, _index, boundary) => ({
+        x: center.x + position.x / boundary.length,
+        y: center.y + position.y / boundary.length,
+      }),
+      { x: 0, y: 0 },
+    );
+    const locallyEdited = simulation.dispatch({
+      type: "build-road",
+      start: geography.quarry.position,
+      end: fertileCenter,
+    });
+
+    expect(
+      locallyEdited.accessibility.lastNetworkUpdateInvalidatedLocationIds,
+    ).toEqual([millford!.id]);
+    expect(
+      locallyEdited.accessibility.locations.find(
+        ({ locationId }) => locationId === eastbank!.id,
+      ),
+    ).toBeDefined();
+
+    const unrelated = simulation.dispatch({
+      type: "build-road",
+      start: { x: 0, y: 0 },
+      end: { x: 20, y: 0 },
+    });
+    expect(
+      unrelated.accessibility.lastNetworkUpdateInvalidatedLocationIds,
+    ).toEqual([]);
+  });
 });

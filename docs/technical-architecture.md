@@ -185,3 +185,11 @@ serializes the same document as readable JSON for player-controlled backup and
 portability; file import passes through the same validation and restore path as
 the local slot. Camera, selection, construction-tool choice, and representative
 vehicle animation remain presentation state and are not saved.
+
+The M1 accessibility research scorer is also derived simulation state. Scenario
+configuration supplies candidate locations and weighted market, labor, resource,
+and service opportunities. The generic scorer depends only on shared serializable
+types and the road route query; its results are included in simulation snapshots.
+It maintains a per-candidate cache internally, while saves continue to store only
+authoritative road state. Restoring a save deterministically rebuilds the same
+accessibility values.

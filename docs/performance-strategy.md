@@ -72,3 +72,13 @@ per day. The current scenario's 100-ton daily demand therefore produces at most
 five freight graphics. Those graphics are reused while their visual trips are
 active and removed at destinations, on route changes, or on disconnection. This
 is a scenario-specific display count, not a general traffic capacity target.
+
+The accessibility research prototype caches results per candidate location. A
+location's first dependency boundary is its complete reachable road component. A
+road edit compares component topology fingerprints, then probes opportunity costs
+only for candidates in changed components. A candidate's score cache is invalidated
+only when one or more of those costs changed; candidates in untouched components
+and candidates unaffected by a harmless spur retain their previous result objects.
+Large connected networks may eventually need edit-region or dynamic shortest-path
+indexing to narrow the cost-probe step, but that complexity is deferred until the
+prototype has a measured need.

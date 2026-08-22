@@ -1,5 +1,11 @@
 export { TICKS_PER_DAY } from "./simulation";
 export type {
+  AccessibilityFactor,
+  AccessibilityFactorValue,
+  AccessibilitySnapshot,
+  LocationAccessibility,
+} from "./accessibility";
+export type {
   AggregateFreightSnapshot,
   FreightLimitingFactor,
 } from "./economy";
