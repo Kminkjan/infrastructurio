@@ -1,15 +1,21 @@
 // @vitest-environment node
 
 import { describe, expect, it } from "vitest";
-import type { RoadSegment } from "../../shared";
-import { createRoadNetwork, findRoadRoute } from "./road-network";
+import type { RoadClass, RoadSegment } from "../../shared";
+import {
+  applyRoadLinkFlows,
+  createRoadNetwork,
+  findRoadRoute,
+  ROAD_CLASS_PROFILES,
+} from "./road-network";
 
 function segment(
   id: string,
   start: { readonly x: number; readonly y: number },
   end: { readonly x: number; readonly y: number },
+  roadClass: RoadClass = "arterial",
 ): RoadSegment {
-  return { id, start, end };
+  return { id, roadClass, start, end };
 }
 
 describe("road network", () => {
@@ -50,10 +56,59 @@ describe("road network", () => {
       nodeIds: ["road-node-1", "road-node-2", "road-node-5"],
       linkIds: ["east-west:link-1", "north-south:link-2"],
       length: 10,
+      freeFlowTravelTimeHours: 10 / 60,
+      congestionDelayHours: 0,
+      generalizedCostHours: 10 / 60,
     });
     expect(
       findRoadRoute(network, { x: 0, y: 0 }, { x: 99, y: 99 }),
     ).toBeUndefined();
+  });
+
+  it("derives practical capacity and free-flow time from road class", () => {
+    const network = createRoadNetwork([
+      segment("local", { x: 0, y: 0 }, { x: 70, y: 0 }, "local"),
+      segment("highway", { x: 0, y: 20 }, { x: 90, y: 20 }, "highway"),
+    ]);
+
+    expect(network.links[0]).toMatchObject({
+      roadClass: "local",
+      capacityUnitsPerDay:
+        ROAD_CLASS_PROFILES.local.practicalCapacityUnitsPerDay,
+      freeFlowTravelTimeHours: 2,
+      generalizedCostHours: 2,
+    });
+    expect(network.links[1]).toMatchObject({
+      roadClass: "highway",
+      capacityUnitsPerDay:
+        ROAD_CLASS_PROFILES.highway.practicalCapacityUnitsPerDay,
+      freeFlowTravelTimeHours: 1,
+      generalizedCostHours: 1,
+    });
+  });
+
+  it("raises generalized cost only when assigned flow exceeds practical capacity", () => {
+    const network = createRoadNetwork([
+      segment("bridge", { x: 0, y: 0 }, { x: 70, y: 0 }, "local"),
+    ]);
+    const link = network.links[0]!;
+    const atCapacity = applyRoadLinkFlows(
+      network,
+      new Map([[link.id, link.capacityUnitsPerDay]]),
+    ).links[0]!;
+    const overloaded = applyRoadLinkFlows(
+      network,
+      new Map([[link.id, link.capacityUnitsPerDay + 1]]),
+    ).links[0]!;
+
+    expect(atCapacity.congestionDelayHours).toBe(0);
+    expect(atCapacity.generalizedCostHours).toBe(
+      atCapacity.freeFlowTravelTimeHours,
+    );
+    expect(overloaded.congestionDelayHours).toBeGreaterThan(0);
+    expect(overloaded.generalizedCostHours).toBeGreaterThan(
+      overloaded.freeFlowTravelTimeHours,
+    );
   });
 
   it("joins an endpoint to the interior of an existing segment", () => {

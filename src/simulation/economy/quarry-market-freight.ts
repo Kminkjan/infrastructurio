@@ -6,8 +6,8 @@ import type {
 
 export const QUARRY_DAILY_OUTPUT_TONS = 120;
 export const MARKET_DAILY_DEMAND_TONS = 100;
-export const FULL_VOLUME_ROUTE_COST = 1_000;
-export const MAXIMUM_VIABLE_ROUTE_COST = 2_000;
+export const FULL_VOLUME_ROUTE_COST = 16;
+export const MAXIMUM_VIABLE_ROUTE_COST = 32;
 
 interface FreightAssignmentInput {
   readonly producerId: string;
@@ -57,7 +57,10 @@ export function assignAggregateFreight({
     });
   }
 
-  const routeCost = nonNegativeFinite(route.length, "route cost");
+  const routeCost = nonNegativeFinite(
+    route.generalizedCostHours,
+    "route cost",
+  );
   if (routeCost >= MAXIMUM_VIABLE_ROUTE_COST) {
     return Object.freeze({
       commodity: "granite",
@@ -69,7 +72,7 @@ export function assignAggregateFreight({
       route,
       routeCost,
       limitingFactor: "route-cost",
-      limitingReason: `The ${Math.round(routeCost)}-unit route costs too much to serve.`,
+      limitingReason: `The ${routeCost.toFixed(1)}-hour route costs too much to serve.`,
     });
   }
 
@@ -99,7 +102,7 @@ export function assignAggregateFreight({
       route,
       routeCost,
       limitingFactor: "route-cost",
-      limitingReason: `Route cost limits shipments to ${shippedTonsPerDay} tons per day.`,
+      limitingReason: `Congested route cost limits shipments to ${shippedTonsPerDay} tons per day.`,
     });
   }
 

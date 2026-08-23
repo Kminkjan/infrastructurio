@@ -34,6 +34,7 @@ export type {
   SettlementSeedGeography,
 } from "./geography";
 export type {
+  RoadClass,
   RoadLink,
   RoadNetwork,
   RoadNode,

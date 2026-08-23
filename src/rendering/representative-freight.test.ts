@@ -8,6 +8,28 @@ import {
   TONS_PER_REPRESENTATIVE_VEHICLE,
 } from "./representative-freight";
 
+function roadLink(
+  id: string,
+  roadSegmentId: string,
+  startNodeId: string,
+  endNodeId: string,
+  length: number,
+): RoadNetwork["links"][number] {
+  return {
+    id,
+    roadSegmentId,
+    roadClass: "arterial",
+    startNodeId,
+    endNodeId,
+    length,
+    capacityUnitsPerDay: 80,
+    freeFlowTravelTimeHours: length / 60,
+    assignedFlowUnitsPerDay: 0,
+    congestionDelayHours: 0,
+    generalizedCostHours: length / 60,
+  };
+}
+
 const roadNetwork: RoadNetwork = {
   segments: [],
   nodes: [
@@ -17,34 +39,22 @@ const roadNetwork: RoadNetwork = {
     { id: "alternate", position: { x: 0, y: 100 } },
   ],
   links: [
-    {
-      id: "first",
-      roadSegmentId: "road-1",
-      startNodeId: "quarry",
-      endNodeId: "corner",
-      length: 100,
-    },
-    {
-      id: "second",
-      roadSegmentId: "road-2",
-      startNodeId: "corner",
-      endNodeId: "market",
-      length: 100,
-    },
-    {
-      id: "alternate-first",
-      roadSegmentId: "road-3",
-      startNodeId: "quarry",
-      endNodeId: "alternate",
-      length: 100,
-    },
-    {
-      id: "alternate-second",
-      roadSegmentId: "road-4",
-      startNodeId: "alternate",
-      endNodeId: "market",
-      length: 100,
-    },
+    roadLink("first", "road-1", "quarry", "corner", 100),
+    roadLink("second", "road-2", "corner", "market", 100),
+    roadLink(
+      "alternate-first",
+      "road-3",
+      "quarry",
+      "alternate",
+      100,
+    ),
+    roadLink(
+      "alternate-second",
+      "road-4",
+      "alternate",
+      "market",
+      100,
+    ),
   ],
 };
 
@@ -54,6 +64,9 @@ function freight(
     nodeIds: ["quarry", "corner", "market"],
     linkIds: ["first", "second"],
     length: 200,
+    freeFlowTravelTimeHours: 10 / 3,
+    congestionDelayHours: 0,
+    generalizedCostHours: 10 / 3,
   },
 ): AggregateFreightSnapshot {
   return {
@@ -64,7 +77,7 @@ function freight(
     demandTonsPerDay: 100,
     shippedTonsPerDay,
     route,
-    routeCost: route?.length ?? null,
+    routeCost: route?.generalizedCostHours ?? null,
     limitingFactor: route ? "demand" : "no-route",
     limitingReason: "Test fixture",
   };
@@ -141,6 +154,9 @@ describe("representative freight traffic", () => {
         nodeIds: ["quarry", "alternate", "market"],
         linkIds: ["alternate-first", "alternate-second"],
         length: 200,
+        freeFlowTravelTimeHours: 10 / 3,
+        congestionDelayHours: 0,
+        generalizedCostHours: 10 / 3,
       }),
       roadNetwork,
     );
@@ -158,6 +174,9 @@ describe("representative freight traffic", () => {
           nodeIds: ["quarry", "market"],
           linkIds: ["missing-link"],
           length: 200,
+          freeFlowTravelTimeHours: 10 / 3,
+          congestionDelayHours: 0,
+          generalizedCostHours: 10 / 3,
         }),
         roadNetwork,
       ),

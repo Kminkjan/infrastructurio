@@ -1,7 +1,7 @@
 import type { Point, ScenarioGeography } from "../../shared";
 import type { AccessibilityModel } from "./accessibility";
 
-const ACCESSIBILITY_DECAY_COST = 500;
+const ACCESSIBILITY_DECAY_COST = 10;
 
 function polygonCenter(boundary: readonly Point[]): Point {
   const total = boundary.reduce(

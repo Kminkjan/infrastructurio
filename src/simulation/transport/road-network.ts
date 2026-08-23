@@ -1,5 +1,6 @@
 import type {
   Point,
+  RoadClass,
   RoadLink,
   RoadNetwork,
   RoadNode,
@@ -8,6 +9,29 @@ import type {
 } from "../../shared";
 
 const EPSILON = 1e-7;
+
+export interface RoadClassProfile {
+  readonly speedMapUnitsPerHour: number;
+  readonly practicalCapacityUnitsPerDay: number;
+}
+
+export const ROAD_CLASS_PROFILES: Readonly<Record<RoadClass, RoadClassProfile>> =
+  Object.freeze({
+    local: Object.freeze({
+      speedMapUnitsPerHour: 35,
+      practicalCapacityUnitsPerDay: 40,
+    }),
+    arterial: Object.freeze({
+      speedMapUnitsPerHour: 60,
+      practicalCapacityUnitsPerDay: 80,
+    }),
+    highway: Object.freeze({
+      speedMapUnitsPerHour: 90,
+      practicalCapacityUnitsPerDay: 160,
+    }),
+  });
+
+const CONGESTION_DELAY_SCALE = 0.5;
 
 interface Breakpoint {
   readonly parameter: number;
@@ -101,8 +125,42 @@ function freezePoint(position: Point): Point {
 function freezeSegment(segment: RoadSegment): RoadSegment {
   return Object.freeze({
     id: segment.id,
+    roadClass: segment.roadClass,
     start: freezePoint(segment.start),
     end: freezePoint(segment.end),
+  });
+}
+
+function roadLinkWithFlow(
+  link: Omit<
+    RoadLink,
+    | "assignedFlowUnitsPerDay"
+    | "congestionDelayHours"
+    | "generalizedCostHours"
+  >,
+  assignedFlowUnitsPerDay: number,
+): RoadLink {
+  if (
+    !Number.isFinite(assignedFlowUnitsPerDay) ||
+    assignedFlowUnitsPerDay < 0
+  ) {
+    throw new RangeError("assigned road flow must be non-negative and finite");
+  }
+  const volumeCapacityRatio =
+    assignedFlowUnitsPerDay / link.capacityUnitsPerDay;
+  const congestionDelayHours =
+    volumeCapacityRatio <= 1
+      ? 0
+      : link.freeFlowTravelTimeHours *
+        CONGESTION_DELAY_SCALE *
+        (volumeCapacityRatio ** 4 - 1);
+
+  return Object.freeze({
+    ...link,
+    assignedFlowUnitsPerDay,
+    congestionDelayHours,
+    generalizedCostHours:
+      link.freeFlowTravelTimeHours + congestionDelayHours,
   });
 }
 
@@ -113,6 +171,13 @@ export function createRoadNetwork(
   for (const segment of inputSegments) {
     if (segment.id.length === 0 || segmentIds.has(segment.id)) {
       throw new RangeError("road segment ids must be non-empty and unique");
+    }
+    if (
+      segment.roadClass !== "local" &&
+      segment.roadClass !== "arterial" &&
+      segment.roadClass !== "highway"
+    ) {
+      throw new RangeError("road segments require a recognized road class");
     }
     if (
       !Number.isFinite(segment.start.x) ||
@@ -202,17 +267,25 @@ export function createRoadNetwork(
 
       const startNode = nodeFor(start.position);
       const endNode = nodeFor(end.position);
+      const length = Math.hypot(
+        end.position.x - start.position.x,
+        end.position.y - start.position.y,
+      );
+      const profile = ROAD_CLASS_PROFILES[segment.roadClass];
       links.push(
-        Object.freeze({
-          id: `${segment.id}:link-${index + 1}`,
-          roadSegmentId: segment.id,
-          startNodeId: startNode.id,
-          endNodeId: endNode.id,
-          length: Math.hypot(
-            end.position.x - start.position.x,
-            end.position.y - start.position.y,
-          ),
-        }),
+        roadLinkWithFlow(
+          {
+            id: `${segment.id}:link-${index + 1}`,
+            roadSegmentId: segment.id,
+            roadClass: segment.roadClass,
+            startNodeId: startNode.id,
+            endNodeId: endNode.id,
+            length,
+            capacityUnitsPerDay: profile.practicalCapacityUnitsPerDay,
+            freeFlowTravelTimeHours: length / profile.speedMapUnitsPerHour,
+          },
+          0,
+        ),
       );
     }
   }
@@ -221,6 +294,83 @@ export function createRoadNetwork(
     segments: Object.freeze(segments),
     nodes: Object.freeze(nodes),
     links: Object.freeze(links),
+  });
+}
+
+export function applyRoadLinkFlows(
+  network: RoadNetwork,
+  flowByLinkId: ReadonlyMap<string, number>,
+): RoadNetwork {
+  for (const linkId of flowByLinkId.keys()) {
+    if (!network.links.some(({ id }) => id === linkId)) {
+      throw new RangeError(
+        `assigned flow references unknown road link ${linkId}`,
+      );
+    }
+  }
+
+  return Object.freeze({
+    segments: network.segments,
+    nodes: network.nodes,
+    links: Object.freeze(
+      network.links.map((link) =>
+        roadLinkWithFlow(
+          {
+            id: link.id,
+            roadSegmentId: link.roadSegmentId,
+            roadClass: link.roadClass,
+            startNodeId: link.startNodeId,
+            endNodeId: link.endNodeId,
+            length: link.length,
+            capacityUnitsPerDay: link.capacityUnitsPerDay,
+            freeFlowTravelTimeHours: link.freeFlowTravelTimeHours,
+          },
+          flowByLinkId.get(link.id) ?? 0,
+        ),
+      ),
+    ),
+  });
+}
+
+export function createRoadRouteFromIds(
+  network: RoadNetwork,
+  nodeIdsInput: readonly string[],
+  linkIdsInput: readonly string[],
+): RoadRoute | undefined {
+  if (nodeIdsInput.length !== linkIdsInput.length + 1) {
+    return undefined;
+  }
+  const nodeIds = [...nodeIdsInput];
+  const linkIds = [...linkIdsInput];
+  let length = 0;
+  let freeFlowTravelTimeHours = 0;
+  let congestionDelayHours = 0;
+
+  for (let index = 0; index < linkIds.length; index += 1) {
+    const link = network.links.find(({ id }) => id === linkIds[index]);
+    const startNodeId = nodeIds[index];
+    const endNodeId = nodeIds[index + 1];
+    if (
+      !link ||
+      !(
+        (link.startNodeId === startNodeId && link.endNodeId === endNodeId) ||
+        (link.startNodeId === endNodeId && link.endNodeId === startNodeId)
+      )
+    ) {
+      return undefined;
+    }
+    length += link.length;
+    freeFlowTravelTimeHours += link.freeFlowTravelTimeHours;
+    congestionDelayHours += link.congestionDelayHours;
+  }
+
+  return Object.freeze({
+    nodeIds: Object.freeze(nodeIds),
+    linkIds: Object.freeze(linkIds),
+    length,
+    freeFlowTravelTimeHours,
+    congestionDelayHours,
+    generalizedCostHours: freeFlowTravelTimeHours + congestionDelayHours,
   });
 }
 
@@ -239,6 +389,9 @@ export function findRoadRoute(
       nodeIds: Object.freeze([startNode.id]),
       linkIds: Object.freeze([]),
       length: 0,
+      freeFlowTravelTimeHours: 0,
+      congestionDelayHours: 0,
+      generalizedCostHours: 0,
     });
   }
 
@@ -294,7 +447,8 @@ export function findRoadRoute(
       if (!unvisited.has(connection.nodeId)) {
         continue;
       }
-      const nextDistance = currentDistance + connection.link.length;
+      const nextDistance =
+        currentDistance + connection.link.generalizedCostHours;
       if (
         nextDistance <
         (distances.get(connection.nodeId) ?? Infinity) - EPSILON
@@ -308,8 +462,8 @@ export function findRoadRoute(
     }
   }
 
-  const length = distances.get(endNode.id);
-  if (length === undefined) {
+  const generalizedCostHours = distances.get(endNode.id);
+  if (generalizedCostHours === undefined) {
     return undefined;
   }
 
@@ -328,9 +482,5 @@ export function findRoadRoute(
 
   nodeIds.reverse();
   linkIds.reverse();
-  return Object.freeze({
-    nodeIds: Object.freeze(nodeIds),
-    linkIds: Object.freeze(linkIds),
-    length,
-  });
+  return createRoadRouteFromIds(network, nodeIds, linkIds);
 }

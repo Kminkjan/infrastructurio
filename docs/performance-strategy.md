@@ -88,3 +88,10 @@ network edit changes current pressure. The M1 toy has two candidates and at most
 one new regional construction project per weekly evaluation, so it does not add
 per-frame simulation work. Building marks are reconstructed from the small
 development snapshot only when that snapshot changes.
+
+Road traffic assignment runs every eight simulated ticks (eight hours) and
+immediately after a network edit. A multi-tick advance processes each crossed
+assignment boundary deterministically, while representative freight motion
+continues on the render-frame clock. The current network and single freight
+origin-destination pair are intentionally small; incremental or equilibrium
+assignment is deferred until multiple measured flows make it necessary.

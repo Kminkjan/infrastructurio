@@ -85,19 +85,19 @@ function transportDescription(
   if (current === null) {
     return alternative === null || alternativeName === null
       ? "No market road route from either candidate"
-      : `No market road route; ${alternativeName} has a ${Math.round(alternative).toLocaleString()}-unit route`;
+      : `No market road route; ${alternativeName} has a ${alternative.toFixed(1)}-hour route`;
   }
   if (alternative === null || alternativeName === null) {
-    return `${Math.round(current).toLocaleString()} network cost units; no alternative route`;
+    return `${current.toFixed(1)} generalized hours; no alternative route`;
   }
   const difference = current - alternative;
   const comparison =
     Math.abs(difference) < 0.5
       ? `level with ${alternativeName}`
       : difference < 0
-        ? `${Math.round(Math.abs(difference)).toLocaleString()} shorter than ${alternativeName}`
-        : `${Math.round(difference).toLocaleString()} longer than ${alternativeName}`;
-  return `${Math.round(current).toLocaleString()} network cost units; ${comparison}`;
+        ? `${Math.abs(difference).toFixed(1)} hours lower than ${alternativeName}`
+        : `${difference.toFixed(1)} hours higher than ${alternativeName}`;
+  return `${current.toFixed(1)} generalized hours; ${comparison}`;
 }
 
 function FreightInspector({
@@ -106,7 +106,7 @@ function FreightInspector({
   readonly freight: AggregateFreightSnapshot;
 }) {
   const routeDescription = freight.route
-    ? `${Math.round(freight.routeCost ?? 0).toLocaleString()} cost units · ${
+    ? `${(freight.routeCost ?? 0).toFixed(1)} generalized hours · ${
         freight.route.linkIds.length
       } ${freight.route.linkIds.length === 1 ? "link" : "links"}`
     : "No connected road route";

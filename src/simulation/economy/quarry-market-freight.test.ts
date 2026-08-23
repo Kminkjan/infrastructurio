@@ -13,6 +13,9 @@ function route(length: number): RoadRoute {
     nodeIds: ["quarry", "market"],
     linkIds: ["road"],
     length,
+    freeFlowTravelTimeHours: length,
+    congestionDelayHours: 0,
+    generalizedCostHours: length,
   };
 }
 

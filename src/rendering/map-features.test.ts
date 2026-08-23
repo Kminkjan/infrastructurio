@@ -43,6 +43,7 @@ describe("selectable map features", () => {
       segments: [
         {
           id: "road-segment-1",
+          roadClass: "arterial",
           start: { x: 10, y: 20 },
           end: { x: 40, y: 60 },
         },
@@ -56,7 +57,7 @@ describe("selectable map features", () => {
         id: "road-segment-1",
         name: "Road segment",
         kind: "infrastructure",
-        description: "50 map units · player-built road",
+        description: "50 map units · arterial road",
         geometry: {
           type: "line",
           start: { x: 10, y: 20 },

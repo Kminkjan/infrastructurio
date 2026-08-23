@@ -1,6 +1,7 @@
 import {
   TICKS_PER_DAY,
   type Point,
+  type RoadClass,
   type RoadNetwork,
   type RoadRoute,
   type RoadSegment,
@@ -9,7 +10,11 @@ import {
   type SimulationSnapshot,
 } from "../shared";
 import { generateMillfordValley } from "../scenarios";
-import { createQuarryMarketFreight } from "./economy/quarry-market-freight";
+import {
+  createQuarryMarketFreight,
+  MARKET_DAILY_DEMAND_TONS,
+  QUARRY_DAILY_OUTPUT_TONS,
+} from "./economy/quarry-market-freight";
 import { createAccessibilityScorer } from "./growth/accessibility";
 import {
   advanceDevelopment,
@@ -23,12 +28,26 @@ import {
 import { createMillfordAccessibilityModel } from "./growth/millford-accessibility";
 import { createMillfordDevelopmentModel } from "./growth/millford-development";
 import { createRoadNetwork, findRoadRoute } from "./transport/road-network";
+import {
+  advanceRoadTraffic,
+  assignedRoadTrafficRoute,
+  createRoadTraffic,
+  restoreRoadTraffic,
+  type RoadTrafficStateSnapshot,
+} from "./transport/road-traffic";
+
+const DEFAULT_PLAYER_ROAD_CLASS: RoadClass = "arterial";
+const QUARRY_MARKET_ASSIGNED_FLOW_UNITS_PER_DAY = Math.min(
+  QUARRY_DAILY_OUTPUT_TONS,
+  MARKET_DAILY_DEMAND_TONS,
+);
 
 interface SimulationState {
   readonly seed: string;
   readonly tick: number;
   readonly geography: ScenarioGeography;
   readonly roadNetwork: RoadNetwork;
+  readonly roadTraffic: RoadTrafficStateSnapshot;
   readonly nextRoadSegmentNumber: number;
   readonly development: DevelopmentStateSnapshot;
 }
@@ -38,6 +57,7 @@ export interface SimulationStateSnapshot {
   readonly tick: number;
   readonly roadSegments: readonly RoadSegment[];
   readonly nextRoadSegmentNumber: number;
+  readonly roadTraffic?: RoadTrafficStateSnapshot;
   readonly development?: DevelopmentStateSnapshot;
 }
 
@@ -53,10 +73,9 @@ function snapshot(
   accessibility: ReturnType<typeof createAccessibilityScorer>,
   developmentModel: DevelopmentModel,
 ): SimulationSnapshot {
-  const quarryMarketRoute = findRoadRoute(
+  const quarryMarketRoute = assignedRoadTrafficRoute(
     state.roadNetwork,
-    state.geography.quarry.position,
-    state.geography.externalMarketConnection.position,
+    state.roadTraffic,
   );
 
   const accessibilitySnapshot = accessibility.getSnapshot();
@@ -79,12 +98,7 @@ function snapshot(
   });
 }
 
-function advance(
-  state: SimulationState,
-  ticks: number,
-  accessibility: ReturnType<typeof createAccessibilityScorer>,
-  developmentModel: DevelopmentModel,
-): SimulationState {
+function advance(state: SimulationState, ticks: number): number {
   if (!Number.isSafeInteger(ticks) || ticks < 0) {
     throw new RangeError("advance ticks must be a non-negative safe integer");
   }
@@ -93,17 +107,7 @@ function advance(
   if (!Number.isSafeInteger(tick)) {
     throw new RangeError("simulation tick exceeds the safe integer range");
   }
-  return {
-    ...state,
-    tick,
-    development: advanceDevelopment(
-      state.development,
-      developmentModel,
-      accessibility.getSnapshot(),
-      state.seed,
-      tick,
-    ),
-  };
+  return tick;
 }
 
 function normalizeCoordinate(value: number, maximum: number): number {
@@ -128,6 +132,7 @@ function buildRoad(
   state: SimulationState,
   startInput: Point,
   endInput: Point,
+  roadClass: RoadClass = DEFAULT_PLAYER_ROAD_CLASS,
 ): SimulationState {
   const start = normalizePoint(startInput, state.geography);
   const end = normalizePoint(endInput, state.geography);
@@ -137,6 +142,7 @@ function buildRoad(
 
   const segment: RoadSegment = Object.freeze({
     id: `road-segment-${state.nextRoadSegmentNumber}`,
+    roadClass,
     start,
     end,
   });
@@ -169,6 +175,7 @@ function createSimulationState(
   roadSegments: readonly RoadSegment[],
   nextRoadSegmentNumber: number,
   savedDevelopment?: DevelopmentStateSnapshot,
+  savedRoadTraffic?: RoadTrafficStateSnapshot,
 ): SimulationState {
   if (!Number.isSafeInteger(tick) || tick < 0) {
     throw new RangeError("simulation tick must be a non-negative safe integer");
@@ -198,9 +205,9 @@ function createSimulationState(
     }
   }
 
-  const roadNetwork = createRoadNetwork(roadSegments);
+  const baseRoadNetwork = createRoadNetwork(roadSegments);
   if (
-    roadNetwork.segments.some(
+    baseRoadNetwork.segments.some(
       ({ id }) => id === `road-segment-${nextRoadSegmentNumber}`,
     )
   ) {
@@ -215,11 +222,29 @@ function createSimulationState(
     throw new RangeError("development state must match the simulation tick");
   }
 
+  const traffic = savedRoadTraffic
+    ? restoreRoadTraffic(
+        baseRoadNetwork,
+        savedRoadTraffic,
+        tick,
+        geography.quarry.position,
+        geography.externalMarketConnection.position,
+        QUARRY_MARKET_ASSIGNED_FLOW_UNITS_PER_DAY,
+      )
+    : createRoadTraffic(
+        baseRoadNetwork,
+        tick,
+        geography.quarry.position,
+        geography.externalMarketConnection.position,
+        QUARRY_MARKET_ASSIGNED_FLOW_UNITS_PER_DAY,
+      );
+
   return Object.freeze({
     seed,
     tick,
     geography,
-    roadNetwork,
+    roadNetwork: traffic.network,
+    roadTraffic: traffic.state,
     nextRoadSegmentNumber,
     development,
   });
@@ -232,6 +257,7 @@ function runSimulation(initialState: SimulationState): Simulation {
       tick: state.tick,
       roadSegments: state.roadNetwork.segments,
       nextRoadSegmentNumber: state.nextRoadSegmentNumber,
+      roadTraffic: state.roadTraffic,
       development: state.development,
     });
 
@@ -248,14 +274,34 @@ function runSimulation(initialState: SimulationState): Simulation {
     dispatch(command) {
       const previousRoadNetwork = state.roadNetwork;
       switch (command.type) {
-        case "advance":
-          state = advance(
-            state,
-            command.ticks,
-            accessibility,
-            developmentModel,
+        case "advance": {
+          const tick = advance(state, command.ticks);
+          const traffic = advanceRoadTraffic(
+            state.roadNetwork,
+            state.roadTraffic,
+            tick,
+            state.geography.quarry.position,
+            state.geography.externalMarketConnection.position,
+            QUARRY_MARKET_ASSIGNED_FLOW_UNITS_PER_DAY,
           );
+          if (traffic.network !== state.roadNetwork) {
+            accessibility.updateNetwork(traffic.network);
+          }
+          state = {
+            ...state,
+            tick,
+            roadNetwork: traffic.network,
+            roadTraffic: traffic.state,
+            development: advanceDevelopment(
+              state.development,
+              developmentModel,
+              accessibility.getSnapshot(),
+              state.seed,
+              tick,
+            ),
+          };
           break;
+        }
         case "reset":
           state = initialState;
           accessibility = createAccessibilityScorer(
@@ -264,7 +310,12 @@ function runSimulation(initialState: SimulationState): Simulation {
           );
           break;
         case "build-road":
-          state = buildRoad(state, command.start, command.end);
+          state = buildRoad(
+            state,
+            command.start,
+            command.end,
+            command.roadClass,
+          );
           break;
         case "remove-road":
           state = removeRoad(state, command.roadSegmentId);
@@ -273,8 +324,21 @@ function runSimulation(initialState: SimulationState): Simulation {
 
       if (
         state.roadNetwork !== previousRoadNetwork &&
-        command.type !== "reset"
+        command.type !== "reset" &&
+        command.type !== "advance"
       ) {
+        const traffic = createRoadTraffic(
+          state.roadNetwork,
+          state.tick,
+          state.geography.quarry.position,
+          state.geography.externalMarketConnection.position,
+          QUARRY_MARKET_ASSIGNED_FLOW_UNITS_PER_DAY,
+        );
+        state = {
+          ...state,
+          roadNetwork: traffic.network,
+          roadTraffic: traffic.state,
+        };
         accessibility.updateNetwork(state.roadNetwork);
         state = {
           ...state,
@@ -305,17 +369,7 @@ function runSimulation(initialState: SimulationState): Simulation {
 }
 
 export function createSimulation(seed: string): Simulation {
-  const geography = generateMillfordValley(seed);
-  const initialState: SimulationState = Object.freeze({
-    seed,
-    tick: 0,
-    geography,
-    roadNetwork: createRoadNetwork(),
-    nextRoadSegmentNumber: 1,
-    development: createDevelopmentState(
-      createMillfordDevelopmentModel(geography),
-    ),
-  });
+  const initialState = createSimulationState(seed, 0, [], 1);
 
   return runSimulation(initialState);
 }
@@ -330,6 +384,7 @@ export function restoreSimulation(
       savedState.roadSegments,
       savedState.nextRoadSegmentNumber,
       savedState.development,
+      savedState.roadTraffic,
     ),
   );
 }

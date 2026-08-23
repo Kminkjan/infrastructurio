@@ -131,9 +131,10 @@ describe("headless simulation", () => {
       end: market,
     });
     expect(connected.quarryMarketFreight).toMatchObject({
-      shippedTonsPerDay: 100,
-      limitingFactor: "demand",
+      limitingFactor: "route-cost",
     });
+    expect(connected.quarryMarketFreight.shippedTonsPerDay).toBeGreaterThan(0);
+    expect(connected.quarryMarketFreight.shippedTonsPerDay).toBeLessThan(100);
     expect(connected.quarryMarketFreight.route?.linkIds).toEqual([
       "road-segment-1:link-1",
     ]);
@@ -191,6 +192,49 @@ describe("headless simulation", () => {
       directFreight.shippedTonsPerDay,
     );
     expect(indirectFreight.limitingFactor).toBe("route-cost");
+  });
+
+  it("exposes a congestion-driven route change after a simulated day", () => {
+    const simulation = createSimulation("overloaded-bridge-snapshot");
+    const geography = simulation.getSnapshot().geography;
+    const quarry = geography.quarry.position;
+    const market = geography.externalMarketConnection.position;
+    simulation.dispatch({
+      type: "build-road",
+      roadClass: "local",
+      start: quarry,
+      end: market,
+    });
+    const bypass = [
+      quarry,
+      { x: 0, y: quarry.y },
+      { x: 0, y: 0 },
+      { x: geography.bounds.width, y: 0 },
+      market,
+    ];
+    for (let index = 0; index < bypass.length - 1; index += 1) {
+      simulation.dispatch({
+        type: "build-road",
+        roadClass: "arterial",
+        start: bypass[index]!,
+        end: bypass[index + 1]!,
+      });
+    }
+
+    const congestedBridgeRoute = simulation.getSnapshot().quarryMarketFreight
+      .route?.linkIds;
+    expect(congestedBridgeRoute).toEqual(["road-segment-1:link-1"]);
+
+    const afterDay = simulation.dispatch({ type: "advance", ticks: 24 });
+    expect(afterDay.quarryMarketFreight.route?.linkIds).not.toEqual(
+      congestedBridgeRoute,
+    );
+    expect(afterDay.quarryMarketFreight.route?.linkIds).toEqual([
+      "road-segment-2:link-1",
+      "road-segment-3:link-1",
+      "road-segment-4:link-1",
+      "road-segment-5:link-1",
+    ]);
   });
 
   it("publishes deterministic network accessibility for candidate locations", () => {

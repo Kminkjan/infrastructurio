@@ -146,7 +146,9 @@ For M0, graph construction checks every pair of authored segments, treats every
 edit. Intersections split both affected segments into links that share one node.
 Removing an authored segment then rebuilds the remaining topology, so links do not
 become independent editing entities. Route queries run deterministic shortest-path
-search using geometric link length. Collinear overlapping segments are rejected
+search using link generalized hours. Road class supplies link speed and practical
+capacity; the latest lower-frequency assignment supplies congestion delay.
+Collinear overlapping segments are rejected
 because lanes, parallel links, bridges, tunnels, and junction configuration are
 outside the issue's simple-road scope.
 
@@ -165,19 +167,20 @@ vehicle identity or animation phase crosses into the simulation protocol.
 
 ## Save format
 
-Saves use an explicit versioned JSON document. Format version 2 contains the
+Saves use an explicit versioned JSON document. Format version 3 contains the
 Millford Valley scenario ID and seed plus the authoritative mutable state: the
 simulation tick, authored road segments, the next road-segment number, completed
-growth, pending construction, and development evaluation counters. The
-derived geography, road nodes and links, route assignment, and freight snapshot
-are deliberately rebuilt by the simulation on load rather than duplicated in
-the save. This prevents persisted derived values from disagreeing with the same
-rules used during play; the round-trip tests require those economic outputs to
-remain identical.
+growth, pending construction, development evaluation counters, and current road
+traffic assignment cadence and route. Derived geography, road nodes, and link
+costs are rebuilt; the saved assigned route is validated against that topology
+and reapplied so persistent congestion resumes identically. The freight snapshot
+is then derived from the restored assignment.
 
-Format version 1 saves remain loadable. Because they contain no command history
-or development state, they resume at their saved tick with zero
-infrastructure-enabled growth and begin evaluating from the next weekly boundary;
+Format versions 1 and 2 remain loadable. Roads without a class migrate to the
+current default arterial profile, and a traffic assignment is derived at the
+saved tick. Because version 1 contains no command history or development state,
+it resumes at its saved tick with zero infrastructure-enabled growth and begins
+evaluating from the next weekly boundary;
 the loader does not invent past growth from the final road layout.
 
 Imported data is structurally validated before it crosses into the simulation,
@@ -213,3 +216,12 @@ share, and the latest pending project's selected location. React formats those
 values and labels the outcome but does not recalculate pressure or weighted
 choice. The explanation is deliberately not persisted because its inputs are
 already deterministically rebuilt from saved road and development state.
+
+M2 road traffic state remains simulation-owned. Network edits trigger an immediate
+assignment; time advancement processes fixed eight-tick boundaries even when the
+caller advances many ticks at once. Each assignment routes quarry demand using
+the previous link costs, replaces assigned link flows, and derives new congestion
+costs. The accessibility scorer fingerprints generalized link cost as well as
+topology, so only candidates whose routed opportunity costs changed receive new
+score objects. PixiJS continues to animate representative vehicles every render
+frame from the assigned freight snapshot and never updates congestion.

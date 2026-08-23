@@ -142,6 +142,7 @@ function componentFingerprint(
       return [
         link.id,
         link.length,
+        link.generalizedCostHours,
         start?.position.x,
         start?.position.y,
         end?.position.x,
@@ -227,7 +228,7 @@ function opportunityCosts(
     opportunities.map(
       (opportunity) =>
         findRoadRoute(network, candidate.position, opportunity.position)
-          ?.length ?? null,
+          ?.generalizedCostHours ?? null,
     ),
   );
 }

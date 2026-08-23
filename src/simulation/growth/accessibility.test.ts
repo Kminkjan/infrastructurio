@@ -11,7 +11,7 @@ import {
 } from "./accessibility";
 
 function segment(id: string, start: Point, end: Point): RoadSegment {
-  return { id, start, end };
+  return { id, roadClass: "arterial", start, end };
 }
 
 function candidate(id: string, position: Point): AccessibilityCandidate {
@@ -61,23 +61,23 @@ describe("generalized accessibility scoring", () => {
         name: "site",
         position: { x: 0, y: 0 },
         market: {
-          score: 36.788,
-          nearestNetworkCost: 100,
+          score: 98.347,
+          nearestNetworkCost: 100 / 60,
           reachableOpportunityCount: 1,
         },
         labor: {
-          score: 36.788,
-          nearestNetworkCost: 100,
+          score: 98.347,
+          nearestNetworkCost: 100 / 60,
           reachableOpportunityCount: 1,
         },
         resource: {
-          score: 13.534,
-          nearestNetworkCost: 200,
+          score: 96.722,
+          nearestNetworkCost: 200 / 60,
           reachableOpportunityCount: 1,
         },
         service: {
-          score: 60.653,
-          nearestNetworkCost: 50,
+          score: 99.17,
+          nearestNetworkCost: 50 / 60,
           reachableOpportunityCount: 1,
         },
       },

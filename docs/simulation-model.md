@@ -101,7 +101,7 @@ when a seeded choice awards development to a lower-probability alternative.
 
 Market, labor, resource, and service access remain positive decision inputs in
 prototype access points. The transport explanation reports shortest-road market
-cost in network cost units and compares it with the best routed alternative.
+cost in generalized hours and compares it with the best routed alternative.
 That transport cost is already embedded in the exponentially decayed access
 score, so it is not subtracted again. The previous undifferentiated 35-point
 viability threshold is now named as an equal land-and-viability cost for both
@@ -158,9 +158,10 @@ Traffic assignment may update less frequently than rendered vehicle motion. Repr
 
 The authoritative road network distinguishes player-authored segments from the
 graph links derived from them. Segment endpoints and at-grade intersections form
-nodes; intersections split every affected segment into routable links. Queries
-currently minimize geometric distance because road class, speed, capacity,
-congestion, tolls, and restrictions belong to later milestones.
+nodes; intersections split every affected segment into routable links. M2 route
+queries now minimize generalized hours derived from road-class free-flow time and
+the most recent congestion assignment. Geometric length remains available for
+rendering and construction information.
 
 Deleting a player-authored segment removes all links derived from it and rebuilds
 the remaining topology. The M0 graph intentionally does not model collinear
@@ -174,13 +175,50 @@ an inventory or a collection of persistent shipments. The quarry offers at most
 per day. No freight is assigned unless the road graph contains a route whose
 end nodes coincide with the quarry and market terminals.
 
-For this first proof, generalized route cost equals geometric route length. A
-route at or below 1,000 cost units can carry all otherwise available freight.
-Between 1,000 and 2,000 units, shipped volume declines linearly; at 2,000 units
-the route becomes unviable. These explicit scenario values are balancing inputs,
-not a capacity or congestion model. The freight snapshot records the route and
-the same production, demand, cost, and limiting-factor values shown by the
-inspector.
+The M2 cost model supersedes the original geometric freight cost. A route at or
+below 16 generalized hours can carry all otherwise available freight. Between 16
+and 32 hours, shipped volume declines linearly; at 32 hours the route becomes
+unviable. These explicit scenario values remain balancing inputs. The freight
+snapshot records the assigned route and the same production, demand, generalized
+cost, and limiting-factor values shown by the inspector.
+
+### M2 road capacity and congestion
+
+Every authored segment has a road class, which is copied to its derived links.
+The prototype profiles are:
+
+| Class | Free-flow speed | Practical capacity |
+| --- | ---: | ---: |
+| Local | 35 map units/hour | 40 assigned flow units/day |
+| Arterial | 60 map units/hour | 80 assigned flow units/day |
+| Highway | 90 map units/hour | 160 assigned flow units/day |
+
+The current construction tool builds arterials. Local and highway profiles are
+part of the simulation domain for deterministic scenario tests and later upgrade
+work; issue 11 does not add class-selection or upgrade controls.
+
+For a link with free-flow time `t0`, assigned flow `v`, and practical capacity
+`c`, delay is zero while `v <= c`. Above capacity, the prototype curve is:
+
+```text
+delay = t0 * 0.5 * ((v / c)^4 - 1)
+generalized cost = t0 + delay
+```
+
+The deliberately steep curve makes a toy-scale overloaded crossing capable of
+changing a route decision. Quarry-to-market demand supplies 100 assigned flow
+units per day, with one prototype flow unit corresponding to one ton of requested
+daily freight. Assignment runs immediately after a network edit and then every
+eight simulated hours. It chooses one minimum-cost route using the previous
+assignment's persistent costs, applies all demand to that route, and publishes
+the resulting link costs. Accessibility is recalculated from those same costs,
+so congestion can change the inputs used by weekly development decisions.
+
+This is capacity-restraint scaffolding, not a traffic equilibrium. It has one
+freight demand source, does not split flow across routes, and does not yet generate
+commuter traffic from development. With competing routes, all-or-nothing demand
+can shift again on later assignment boundaries. Flow visualization, queue display,
+upgrades, and bottleneck diagnosis remain separate work.
 
 ### M0 representative freight traffic
 

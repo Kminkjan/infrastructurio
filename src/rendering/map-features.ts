@@ -133,7 +133,7 @@ export function getSelectableRoadFeatures(
         segment.end.x - segment.start.x,
         segment.end.y - segment.start.y,
       ),
-    )} map units · player-built road`,
+    )} map units · ${segment.roadClass} road`,
     geometry: {
       type: "line" as const,
       start: segment.start,

@@ -57,6 +57,9 @@ describe("save games", () => {
       },
     });
     expect(after.roadNetwork).toEqual(before.roadNetwork);
+    expect(restored.getState().roadTraffic).toEqual(
+      original.getState().roadTraffic,
+    );
     expect(after.tick).toBe(before.tick);
     expect(after.elapsedDays).toBe(before.elapsedDays);
     expect(after.quarryMarketFreight).toEqual(before.quarryMarketFreight);
@@ -106,7 +109,9 @@ describe("save games", () => {
       scenarioSeed: current.scenarioSeed,
       simulation: {
         tick: current.simulation.tick,
-        roadSegments: current.simulation.roadSegments,
+        roadSegments: current.simulation.roadSegments.map(
+          ({ id, start, end }) => ({ id, start, end }),
+        ),
         nextRoadSegmentNumber: current.simulation.nextRoadSegmentNumber,
       },
     };
@@ -126,6 +131,37 @@ describe("save games", () => {
     expect(
       restored.getSnapshot().development.nextEvaluationTick,
     ).toBeGreaterThan(current.simulation.tick);
+    expect(restored.getSnapshot().roadNetwork.segments).toEqual(
+      current.simulation.roadSegments,
+    );
+  });
+
+  it("loads version 2 saves with derived traffic and default classes", () => {
+    const current = createSaveGame(createConnectedSimulation());
+    const legacy = {
+      formatVersion: 2 as const,
+      scenarioId: current.scenarioId,
+      scenarioSeed: current.scenarioSeed,
+      simulation: {
+        tick: current.simulation.tick,
+        roadSegments: current.simulation.roadSegments.map(
+          ({ id, start, end }) => ({ id, start, end }),
+        ),
+        nextRoadSegmentNumber: current.simulation.nextRoadSegmentNumber,
+        development: current.simulation.development,
+      },
+    };
+
+    const restored = restoreSaveGame(
+      deserializeSaveGame(JSON.stringify(legacy)),
+    );
+    expect(restored.getState().development).toEqual(
+      current.simulation.development,
+    );
+    expect(restored.getSnapshot().roadNetwork.segments.every(
+      ({ roadClass }) => roadClass === "arterial",
+    )).toBe(true);
+    expect(restored.getState().roadTraffic).toBeDefined();
   });
 
   it("exports and imports the versioned save as a JSON file", async () => {
@@ -186,13 +222,13 @@ describe("save games", () => {
     expect(() =>
       deserializeSaveGame(
         JSON.stringify({
-          formatVersion: 3,
+          formatVersion: 4,
           scenarioId: "millford-valley",
           scenarioSeed: "future",
           simulation: {},
         }),
       ),
-    ).toThrow("unsupported save format version: 3");
+    ).toThrow("unsupported save format version: 4");
 
     const save = createSaveGame(createConnectedSimulation());
     const invalid = {
@@ -202,6 +238,7 @@ describe("save games", () => {
         roadSegments: [
           {
             id: "road-segment-1",
+            roadClass: "arterial" as const,
             start: { x: -1, y: 0 },
             end: { x: 10, y: 0 },
           },
@@ -223,6 +260,20 @@ describe("save games", () => {
       },
     };
     expect(() => restoreSaveGame(invalidDevelopment)).toThrow(
+      "save contains invalid simulation state",
+    );
+
+    const invalidTraffic = {
+      ...save,
+      simulation: {
+        ...save.simulation,
+        roadTraffic: {
+          ...save.simulation.roadTraffic,
+          nextAssignmentTick: save.simulation.tick,
+        },
+      },
+    };
+    expect(() => restoreSaveGame(invalidTraffic)).toThrow(
       "save contains invalid simulation state",
     );
   });

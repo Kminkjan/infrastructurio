@@ -23,8 +23,8 @@ use existing scenario features plus temporary proxy weights:
 | Resource | Granite quarry, fertile land center | 55, 45 |
 | Service | Millford, Eastbank | 70, 30 |
 
-For each factor, reachable opportunity weights are summed after exponential
-decay over shortest road-network cost:
+For each factor, reachable opportunity weights were originally summed after
+exponential decay over shortest geometric road-network cost:
 
 ```text
 access = sum(opportunity weight * exp(-network cost / 500))
@@ -33,7 +33,13 @@ access = sum(opportunity weight * exp(-network cost / 500))
 An opportunity with no road route contributes zero. The result also retains the
 nearest network cost and reachable opportunity count so the score can be checked
 without reconstructing it from map geometry. These weights and the 500-unit
-decay are experiment inputs, not settled balance values.
+decay were issue #8 experiment inputs, not settled balance values.
+
+Issue #11 changed the router's cost from geometric map units to generalized
+hours containing road-class free-flow time and congestion delay. The current
+scorer therefore uses the same equation with a 10-hour decay input. This retune
+keeps scores useful at Millford Valley's scale; it is another balancing
+assumption, not a claim about real travel behavior.
 
 Each cached location records a fingerprint of its reachable road component and
 its cost to every opportunity. A topology change triggers cost probes only in

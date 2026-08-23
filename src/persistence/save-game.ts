@@ -1,13 +1,21 @@
 import {
   restoreSimulation,
   type DevelopmentStateSnapshot,
+  type RoadTrafficStateSnapshot,
   type Simulation,
   type SimulationStateSnapshot,
 } from "../simulation";
-import type { Point, RoadSegment } from "../shared";
+import type { Point, RoadClass, RoadSegment } from "../shared";
 
-export const SAVE_FORMAT_VERSION = 2 as const;
+export const SAVE_FORMAT_VERSION = 3 as const;
 export const SAVE_FILE_NAME = "millford-valley-save.json";
+
+interface SavedRoadSegment {
+  readonly id: string;
+  readonly roadClass?: RoadClass;
+  readonly start: Point;
+  readonly end: Point;
+}
 
 export interface SaveGameV1 {
   readonly formatVersion: 1;
@@ -15,12 +23,24 @@ export interface SaveGameV1 {
   readonly scenarioSeed: string;
   readonly simulation: {
     readonly tick: number;
-    readonly roadSegments: readonly RoadSegment[];
+    readonly roadSegments: readonly SavedRoadSegment[];
     readonly nextRoadSegmentNumber: number;
   };
 }
 
 export interface SaveGameV2 {
+  readonly formatVersion: 2;
+  readonly scenarioId: "millford-valley";
+  readonly scenarioSeed: string;
+  readonly simulation: {
+    readonly tick: number;
+    readonly roadSegments: readonly SavedRoadSegment[];
+    readonly nextRoadSegmentNumber: number;
+    readonly development: DevelopmentStateSnapshot;
+  };
+}
+
+export interface SaveGameV3 {
   readonly formatVersion: typeof SAVE_FORMAT_VERSION;
   readonly scenarioId: "millford-valley";
   readonly scenarioSeed: string;
@@ -29,10 +49,11 @@ export interface SaveGameV2 {
     readonly roadSegments: readonly RoadSegment[];
     readonly nextRoadSegmentNumber: number;
     readonly development: DevelopmentStateSnapshot;
+    readonly roadTraffic: RoadTrafficStateSnapshot;
   };
 }
 
-export type SaveGame = SaveGameV1 | SaveGameV2;
+export type SaveGame = SaveGameV1 | SaveGameV2 | SaveGameV3;
 
 export class SaveGameError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -82,10 +103,68 @@ function readRoadSegment(value: unknown, index: number): RoadSegment {
     throw new SaveGameError(`road segment ${index} must have a non-empty id`);
   }
 
+  const roadClass = value.roadClass ?? "arterial";
+  if (
+    roadClass !== "local" &&
+    roadClass !== "arterial" &&
+    roadClass !== "highway"
+  ) {
+    throw new SaveGameError(`road segment ${index} has an unknown road class`);
+  }
+
   return Object.freeze({
     id: value.id,
+    roadClass,
     start: readPoint(value.start, `road segment ${index} start`),
     end: readPoint(value.end, `road segment ${index} end`),
+  });
+}
+
+function readStringArray(value: unknown, name: string): readonly string[] {
+  if (
+    !Array.isArray(value) ||
+    value.some((entry) => typeof entry !== "string" || entry.length === 0)
+  ) {
+    throw new SaveGameError(`${name} must contain non-empty strings`);
+  }
+  return Object.freeze([...value]);
+}
+
+function readRoadTrafficState(value: unknown): RoadTrafficStateSnapshot {
+  if (!isRecord(value)) {
+    throw new SaveGameError("road traffic state must be an object");
+  }
+  const routeNodeIds =
+    value.routeNodeIds === null
+      ? null
+      : readStringArray(value.routeNodeIds, "road traffic routeNodeIds");
+  const routeLinkIds =
+    value.routeLinkIds === null
+      ? null
+      : readStringArray(value.routeLinkIds, "road traffic routeLinkIds");
+  if (
+    typeof value.assignedFlowUnitsPerDay !== "number" ||
+    !Number.isFinite(value.assignedFlowUnitsPerDay) ||
+    value.assignedFlowUnitsPerDay < 0
+  ) {
+    throw new SaveGameError(
+      "road traffic assignedFlowUnitsPerDay must be non-negative and finite",
+    );
+  }
+  return Object.freeze({
+    lastAssignmentTick: readSafeInteger(
+      value.lastAssignmentTick,
+      "road traffic lastAssignmentTick",
+      0,
+    ),
+    nextAssignmentTick: readSafeInteger(
+      value.nextAssignmentTick,
+      "road traffic nextAssignmentTick",
+      0,
+    ),
+    assignedFlowUnitsPerDay: value.assignedFlowUnitsPerDay,
+    routeNodeIds,
+    routeLinkIds,
   });
 }
 
@@ -192,6 +271,7 @@ export function validateSaveGame(value: unknown): SaveGame {
   }
   if (
     value.formatVersion !== 1 &&
+    value.formatVersion !== 2 &&
     value.formatVersion !== SAVE_FORMAT_VERSION
   ) {
     throw new SaveGameError(
@@ -231,21 +311,34 @@ export function validateSaveGame(value: unknown): SaveGame {
     });
   }
 
+  const development = readDevelopmentState(value.simulation.development);
+  if (value.formatVersion === 2) {
+    return Object.freeze({
+      formatVersion: 2,
+      scenarioId: "millford-valley",
+      scenarioSeed: value.scenarioSeed,
+      simulation: Object.freeze({ ...simulation, development }),
+    });
+  }
+
   return Object.freeze({
-    formatVersion: SAVE_FORMAT_VERSION,
+    formatVersion: 3,
     scenarioId: "millford-valley",
     scenarioSeed: value.scenarioSeed,
     simulation: Object.freeze({
       ...simulation,
-      development: readDevelopmentState(value.simulation.development),
+      development,
+      roadTraffic: readRoadTrafficState(value.simulation.roadTraffic),
     }),
   });
 }
 
-export function createSaveGame(simulation: Simulation): SaveGameV2 {
+export function createSaveGame(simulation: Simulation): SaveGameV3 {
   const state = simulation.getState();
-  if (!state.development) {
-    throw new SaveGameError("simulation did not provide development state");
+  if (!state.development || !state.roadTraffic) {
+    throw new SaveGameError(
+      "simulation did not provide development and road traffic state",
+    );
   }
 
   return validateSaveGame({
@@ -257,8 +350,9 @@ export function createSaveGame(simulation: Simulation): SaveGameV2 {
       roadSegments: state.roadSegments,
       nextRoadSegmentNumber: state.nextRoadSegmentNumber,
       development: state.development,
+      roadTraffic: state.roadTraffic,
     },
-  }) as SaveGameV2;
+  }) as SaveGameV3;
 }
 
 export function restoreSaveGame(save: SaveGame): Simulation {
@@ -266,11 +360,18 @@ export function restoreSaveGame(save: SaveGame): Simulation {
   const state: SimulationStateSnapshot = {
     seed: validated.scenarioSeed,
     tick: validated.simulation.tick,
-    roadSegments: validated.simulation.roadSegments,
+    roadSegments: validated.simulation.roadSegments.map((segment) => ({
+      ...segment,
+      roadClass: segment.roadClass ?? "arterial",
+    })),
     nextRoadSegmentNumber: validated.simulation.nextRoadSegmentNumber,
     development:
-      validated.formatVersion === SAVE_FORMAT_VERSION
+      validated.formatVersion !== 1
         ? validated.simulation.development
+        : undefined,
+    roadTraffic:
+      validated.formatVersion === SAVE_FORMAT_VERSION
+        ? validated.simulation.roadTraffic
         : undefined,
   };
 
