@@ -21,6 +21,7 @@ import {
   type MapSelection,
   type SelectableMapFeature,
 } from "./map-features";
+import { getBottleneckOverlayFeatures } from "./bottleneck-overlay";
 import {
   createRepresentativeFreightTrafficPlan,
   sampleRepresentativeFreightVehicles,
@@ -109,6 +110,7 @@ export async function createWorldRenderer(
   const geographyLayer = new Container();
   const developmentLayer = new Container();
   const roadLayer = new Container();
+  const analysisOverlayLayer = new Container();
   const representativeVehicleLayer = new Container();
   const geographyHitLayer = new Container();
   const roadHitLayer = new Container();
@@ -118,10 +120,12 @@ export async function createWorldRenderer(
   selectionLayer.eventMode = "none";
   constructionPreviewLayer.eventMode = "none";
   representativeVehicleLayer.eventMode = "none";
+  analysisOverlayLayer.eventMode = "none";
   world.addChild(
     geographyLayer,
     developmentLayer,
     roadLayer,
+    analysisOverlayLayer,
     representativeVehicleLayer,
     geographyHitLayer,
     roadHitLayer,
@@ -135,6 +139,7 @@ export async function createWorldRenderer(
   let renderedGeography: SimulationSnapshot["geography"] | undefined;
   let renderedDevelopment: SimulationSnapshot["development"] | undefined;
   let renderedRoadNetwork: SimulationSnapshot["roadNetwork"] | undefined;
+  let renderedBottlenecks: SimulationSnapshot["bottlenecks"] | undefined;
   let geographyFeatures: readonly SelectableMapFeature[] = [];
   let roadFeatures: readonly SelectableMapFeature[] = [];
   let selectableFeatures: readonly SelectableMapFeature[] = [];
@@ -375,6 +380,42 @@ export async function createWorldRenderer(
     }
 
     refreshSelectableFeatures();
+  }
+
+  function drawBottleneckOverlay(snapshot: SimulationSnapshot): void {
+    if (
+      renderedBottlenecks === snapshot.bottlenecks &&
+      renderedRoadNetwork === snapshot.roadNetwork
+    ) {
+      return;
+    }
+    destroyChildren(analysisOverlayLayer);
+    renderedBottlenecks = snapshot.bottlenecks;
+
+    for (const feature of getBottleneckOverlayFeatures(snapshot)) {
+      const graphic = new Graphics()
+        .moveTo(feature.start.x, feature.start.y)
+        .lineTo(feature.end.x, feature.end.y);
+      if (feature.role === "affected-flow") {
+        graphic.stroke({ color: 0xf0a04b, width: 20, alpha: 0.34 });
+      } else {
+        graphic
+          .stroke({ color: 0xfff3df, width: 22, alpha: 0.94 })
+          .moveTo(feature.start.x, feature.start.y)
+          .lineTo(feature.end.x, feature.end.y)
+          .stroke({ color: 0xe64c3c, width: 15, alpha: 0.96 });
+        const midpoint = {
+          x: (feature.start.x + feature.end.x) / 2,
+          y: (feature.start.y + feature.end.y) / 2,
+        };
+        graphic
+          .circle(midpoint.x, midpoint.y, 17)
+          .fill({ color: 0xe64c3c, alpha: 0.98 })
+          .circle(midpoint.x, midpoint.y, 8)
+          .stroke({ color: 0xfff3df, width: 4, alpha: 1 });
+      }
+      analysisOverlayLayer.addChild(graphic);
+    }
   }
 
   function drawDevelopment(snapshot: SimulationSnapshot): void {
@@ -708,6 +749,7 @@ export async function createWorldRenderer(
     drawGeography(snapshot);
     drawDevelopment(snapshot);
     drawRoads(snapshot);
+    drawBottleneckOverlay(snapshot);
     updateRepresentativeTraffic(snapshot);
     drawRepresentativeVehicles();
   }

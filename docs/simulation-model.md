@@ -193,9 +193,9 @@ The prototype profiles are:
 | Arterial | 60 map units/hour | 80 assigned flow units/day |
 | Highway | 90 map units/hour | 160 assigned flow units/day |
 
-The current construction tool builds arterials. Local and highway profiles are
-part of the simulation domain for deterministic scenario tests and later upgrade
-work; issue 11 does not add class-selection or upgrade controls.
+The construction tool can build arterials or highways. An overloaded authored
+segment can be upgraded to highway class; because links are derived rather than
+independently editable, that command upgrades the complete authored segment.
 
 For a link with free-flow time `t0`, assigned flow `v`, and practical capacity
 `c`, delay is zero while `v <= c`. Above capacity, the prototype curve is:
@@ -217,8 +217,33 @@ so congestion can change the inputs used by weekly development decisions.
 This is capacity-restraint scaffolding, not a traffic equilibrium. It has one
 freight demand source, does not split flow across routes, and does not yet generate
 commuter traffic from development. With competing routes, all-or-nothing demand
-can shift again on later assignment boundaries. Flow visualization, queue display,
-upgrades, and bottleneck diagnosis remain separate work.
+can shift again on later assignment boundaries. Queue length and spillback remain
+out of scope.
+
+### M2 bridge bottleneck diagnosis and interventions
+
+The simulation derives a bottleneck analysis from the same assigned link flows,
+capacities, delays, route, and assignment cadence used by transport and freight.
+Each overloaded link reports assigned and excess demand, practical capacity and
+volume/capacity ratio, congestion delay, current route cost, next assignment
+tick, and affected aggregate flows. An overloaded link whose geometry intersects
+the authored Millford Crossing constraint is identified as the Millford bridge.
+
+The renderer turns that snapshot into an amber affected-route overlay and a red
+overloaded-link overlay. React presents the diagnosis without recalculating its
+causes. Two player interventions are available:
+
+- Upgrade the authored crossing segment to highway class. This increases its
+  speed and capacity while keeping assigned traffic on the corridor.
+- Draw a connected highway bypass. If its persistent generalized cost beats the
+  congested crossing, the next eight-hour assignment redirects freight; the new
+  network costs also feed accessibility and later weekly development evaluation.
+
+There is no construction budget, land acquisition, induced demand, commuter
+flow, or multi-route equilibrium yet. The present trade-off is corridor retention
+versus traffic and accessibility shifting to a new route. A long authored road
+that crosses the constraint is upgraded in full because the graph does not store
+the geographic crossing as an independently editable segment.
 
 ### M0 representative freight traffic
 

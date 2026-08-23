@@ -62,10 +62,10 @@ geography in a PixiJS world canvas with a React control overlay. Drag the map
 to pan, use the mouse wheel or map controls to zoom, and select a crossing,
 market connection, resource, or settlement to inspect it. The **Fit** control
 returns the complete map to view. Hide the controls when you need the full map
-for construction or inspection. Choose **Build road** and drag across the map
-to construct a default arterial segment; endpoints snap to settlements,
-resources, the market, nearby roads, and junctions. Choose **Remove road** and
-select a player-built segment to delete it.
+for construction or inspection. Choose **Build arterial** or **Build highway**
+and drag across the map to construct that road class; endpoints snap to
+settlements, resources, the market, nearby roads, and junctions. Choose
+**Remove road** and select a player-built segment to delete it.
 
 The quarry produces up to 120 tons of granite per day and the external market
 demands up to 100 tons. The simulation reassigns that demand every eight simulated
@@ -73,6 +73,14 @@ hours. Road class sets free-flow speed and practical capacity; an overloaded
 route gains delay and may later lose traffic to a lower-cost bypass. Select either
 location to inspect production, demand, the assigned road route, shipped volume,
 and the current limiting factor.
+When assigned flow exceeds capacity, the current freight route is highlighted in
+amber and the overloaded link in red. Select the highlighted road or Millford
+Crossing to separate its demand, capacity, and route-choice causes and see the
+affected freight. Upgrade the crossing segment to highway capacity to retain the
+route, or draw a connected highway bypass and advance time until the next
+eight-hour assignment redirects traffic. The prototype does not yet have a
+construction budget: the meaningful difference is whether capacity stays on the
+existing corridor or access and freight shift to a new one.
 Freight remains at zero until the terminals are connected by a viable route.
 Once freight is assigned, orange private trucks animate from the quarry to the
 market along the selected route. Each truck represents up to 20 tons of assigned

@@ -10,6 +10,11 @@ export type {
   FreightLimitingFactor,
 } from "./economy";
 export type {
+  BottleneckAffectedFlow,
+  BottleneckAnalysisSnapshot,
+  RoadBottleneckSnapshot,
+} from "./bottlenecks";
+export type {
   DevelopmentAccessFactor,
   DevelopmentAccessFactorExplanation,
   DevelopmentDecisionExplanation,

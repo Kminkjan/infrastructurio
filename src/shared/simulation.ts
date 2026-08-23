@@ -1,4 +1,5 @@
 import type { AccessibilitySnapshot } from "./accessibility";
+import type { BottleneckAnalysisSnapshot } from "./bottlenecks";
 import type { AggregateFreightSnapshot } from "./economy";
 import type { DevelopmentSnapshot } from "./development";
 import type { Point, ScenarioGeography } from "./geography";
@@ -15,6 +16,7 @@ export type SimulationCommand =
       readonly end: Point;
       readonly roadClass?: RoadClass;
     }
+  | { readonly type: "upgrade-road"; readonly roadSegmentId: string }
   | { readonly type: "remove-road"; readonly roadSegmentId: string };
 
 export interface SimulationSnapshot {
@@ -24,6 +26,7 @@ export interface SimulationSnapshot {
   readonly geography: ScenarioGeography;
   readonly roadNetwork: RoadNetwork;
   readonly quarryMarketFreight: AggregateFreightSnapshot;
+  readonly bottlenecks: BottleneckAnalysisSnapshot;
   readonly accessibility: AccessibilitySnapshot;
   readonly development: DevelopmentSnapshot;
 }

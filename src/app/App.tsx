@@ -21,6 +21,8 @@ import type {
   DevelopmentDecisionOutcome,
   DevelopmentLocationSnapshot,
   Point,
+  RoadBottleneckSnapshot,
+  RoadClass,
   SimulationSnapshot,
 } from "../shared";
 import "./app.css";
@@ -135,6 +137,85 @@ function FreightInspector({
         <strong>Limiting factor:</strong> {freight.limitingReason}
       </p>
     </>
+  );
+}
+
+function assignmentTime(tick: number): string {
+  const day = Math.floor(tick / 24);
+  const hour = tick % 24;
+  return `day ${day}, ${hour.toString().padStart(2, "0")}:00`;
+}
+
+function BottleneckInspector({
+  bottleneck,
+  onUpgrade,
+  onPlanBypass,
+}: {
+  readonly bottleneck: RoadBottleneckSnapshot;
+  readonly onUpgrade: (roadSegmentId: string) => void;
+  readonly onPlanBypass: () => void;
+}) {
+  const flow = bottleneck.affectedFlows[0];
+  return (
+    <section className="bottleneck-diagnosis" aria-label="Bottleneck diagnosis">
+      <h3>{bottleneck.name}</h3>
+      <p className="bottleneck-severity">
+        {Math.round(bottleneck.capacity.volumeCapacityRatio * 100)}% of
+        practical capacity · +{bottleneck.congestionDelayHours.toFixed(1)} hours
+        delay
+      </p>
+      <dl className="diagnosis-causes">
+        <div>
+          <dt>Demand cause</dt>
+          <dd>
+            {bottleneck.demand.assignedUnitsPerDay.toLocaleString()} assigned
+            units/day, {bottleneck.demand.excessUnitsPerDay.toLocaleString()} over
+            capacity.
+          </dd>
+        </div>
+        <div>
+          <dt>Capacity cause</dt>
+          <dd>
+            {bottleneck.roadClass} road with{" "}
+            {bottleneck.capacity.practicalUnitsPerDay.toLocaleString()} practical
+            units/day.
+          </dd>
+        </div>
+        <div>
+          <dt>Route-choice cause</dt>
+          <dd>
+            One minimum-cost route carries all assigned flow across{" "}
+            {bottleneck.routeChoice.routeLinkCount} route{" "}
+            {bottleneck.routeChoice.routeLinkCount === 1 ? "link" : "links"} at{" "}
+            {bottleneck.routeChoice.routeGeneralizedCostHours.toFixed(1)}
+            {" generalized hours. Routes are reconsidered at "}
+            {assignmentTime(bottleneck.routeChoice.nextAssignmentTick)}.
+          </dd>
+        </div>
+      </dl>
+      {flow ? (
+        <p className="affected-flow">
+          <strong>Affected flow:</strong> {flow.assignedUnitsPerDay} t/day of{" "}
+          {flow.commodity} from {flow.originName} to {flow.destinationName}.
+        </p>
+      ) : null}
+      <div className="intervention-actions">
+        <button
+          type="button"
+          onClick={() => onUpgrade(bottleneck.roadSegmentId)}
+        >
+          Upgrade this crossing
+        </button>
+        <button className="secondary" type="button" onClick={onPlanBypass}>
+          Draw highway bypass
+        </button>
+      </div>
+      <p className="intervention-tradeoff">
+        Upgrading keeps traffic on this corridor. A bypass creates a new route,
+        redirects affected traffic after assignment, and changes access along
+        that corridor.
+      </p>
+    </section>
   );
 }
 
@@ -343,6 +424,8 @@ export function App() {
   const [snapshot, setSnapshot] = useState(() => simulation.getSnapshot());
   const [selection, setSelection] = useState<MapSelection>();
   const [roadTool, setRoadTool] = useState<RoadTool>("inspect");
+  const [buildRoadClass, setBuildRoadClass] =
+    useState<RoadClass>("arterial");
   const [constructionMessage, setConstructionMessage] = useState<string>();
   const [persistenceMessage, setPersistenceMessage] = useState<string>();
   const [persistenceBusy, setPersistenceBusy] = useState(false);
@@ -360,13 +443,43 @@ export function App() {
 
   function buildRoad(start: Point, end: Point): void {
     try {
-      setSnapshot(simulation.dispatch({ type: "build-road", start, end }));
+      setSnapshot(
+        simulation.dispatch({
+          type: "build-road",
+          start,
+          end,
+          roadClass: buildRoadClass,
+        }),
+      );
       setConstructionMessage(undefined);
     } catch (error) {
       setConstructionMessage(
         error instanceof Error ? error.message : "Road construction failed",
       );
     }
+  }
+
+  function upgradeRoad(roadSegmentId: string): void {
+    try {
+      setSnapshot(
+        simulation.dispatch({ type: "upgrade-road", roadSegmentId }),
+      );
+      setConstructionMessage(
+        "Crossing upgraded to highway capacity; current traffic has been reassigned.",
+      );
+    } catch (error) {
+      setConstructionMessage(
+        error instanceof Error ? error.message : "Road upgrade failed",
+      );
+    }
+  }
+
+  function planBypass(): void {
+    setBuildRoadClass("highway");
+    setRoadTool("build");
+    setConstructionMessage(
+      "Draw a connected highway route around the highlighted crossing, then advance time for route choice to respond.",
+    );
   }
 
   function removeRoad(roadSegmentId: string): void {
@@ -381,6 +494,7 @@ export function App() {
     setSnapshot(loadedSimulation.getSnapshot());
     setSelection(undefined);
     setRoadTool("inspect");
+    setBuildRoadClass("arterial");
     setConstructionMessage(undefined);
   }
 
@@ -447,6 +561,19 @@ export function App() {
   const selectedDevelopment = snapshot.development.locations.find(
     ({ locationId }) => locationId === selection?.id,
   );
+  const selectedBottleneck = snapshot.bottlenecks.roadBottlenecks.find(
+    (bottleneck) =>
+      bottleneck.roadSegmentId === selection?.id ||
+      (selection?.id === snapshot.geography.crossingArea.id &&
+        bottleneck.isMillfordBridge),
+  );
+  const selectionCanShowBottleneckStatus =
+    selection?.id === snapshot.geography.crossingArea.id ||
+    snapshot.roadNetwork.segments.some(({ id }) => id === selection?.id);
+  const millfordBridgeBottleneck =
+    snapshot.bottlenecks.roadBottlenecks.find(
+      ({ isMillfordBridge }) => isMillfordBridge,
+    );
 
   return (
     <main className="prototype-shell">
@@ -480,6 +607,7 @@ export function App() {
           {snapshot.roadNetwork.segments.length === 1 ? "segment" : "segments"}
           {" · "}
           {snapshot.development.demand.completedGrowthPopulation} regional growth
+          {millfordBridgeBottleneck ? " · Bridge overloaded" : ""}
         </p>
         <section className="road-tools" aria-label="Road construction tools">
           <p className="eyebrow">Map tool</p>
@@ -495,10 +623,28 @@ export function App() {
             <button
               className="tool-button"
               type="button"
-              aria-pressed={roadTool === "build"}
-              onClick={() => setRoadTool("build")}
+              aria-pressed={
+                roadTool === "build" && buildRoadClass === "arterial"
+              }
+              onClick={() => {
+                setBuildRoadClass("arterial");
+                setRoadTool("build");
+              }}
             >
-              Build road
+              Build arterial
+            </button>
+            <button
+              className="tool-button"
+              type="button"
+              aria-pressed={
+                roadTool === "build" && buildRoadClass === "highway"
+              }
+              onClick={() => {
+                setBuildRoadClass("highway");
+                setRoadTool("build");
+              }}
+            >
+              Build highway
             </button>
             <button
               className="tool-button danger"
@@ -527,6 +673,17 @@ export function App() {
               ) : null}
               {selectedDevelopment ? (
                 <DevelopmentInspector development={selectedDevelopment} />
+              ) : null}
+              {selectedBottleneck ? (
+                <BottleneckInspector
+                  bottleneck={selectedBottleneck}
+                  onUpgrade={upgradeRoad}
+                  onPlanBypass={planBypass}
+                />
+              ) : selectionCanShowBottleneckStatus ? (
+                <p className="resolved-bottleneck">
+                  No overloaded link is currently detected here.
+                </p>
               ) : null}
             </>
           ) : (
@@ -598,7 +755,7 @@ export function App() {
         </section>
         <p className="hint">
           {roadTool === "build"
-            ? "Drag across the map to draw a road. Endpoints snap to settlements, resources, the market, nearby roads, and junctions."
+            ? `Drag across the map to draw ${buildRoadClass === "arterial" ? "an" : "a"} ${buildRoadClass} road. Endpoints snap to settlements, resources, the market, nearby roads, and junctions.`
             : roadTool === "remove"
               ? "Select a player-built road segment to remove it. Drag empty map space to pan."
               : "Drag the map to pan, scroll to zoom, and select a marked feature to inspect it."}

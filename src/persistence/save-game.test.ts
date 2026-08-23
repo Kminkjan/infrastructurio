@@ -101,6 +101,25 @@ describe("save games", () => {
     );
   });
 
+  it("preserves an upgraded crossing and its resolved bottleneck state", () => {
+    const original = createSimulation("save-upgraded-crossing");
+    const geography = original.getSnapshot().geography;
+    original.dispatch({
+      type: "build-road",
+      start: geography.quarry.position,
+      end: geography.externalMarketConnection.position,
+    });
+    const upgraded = original.dispatch({
+      type: "upgrade-road",
+      roadSegmentId: "road-segment-1",
+    });
+    expect(upgraded.bottlenecks.roadBottlenecks).toEqual([]);
+
+    const restored = restoreSaveGame(createSaveGame(original)).getSnapshot();
+    expect(restored.roadNetwork.segments[0]?.roadClass).toBe("highway");
+    expect(restored.bottlenecks).toEqual(upgraded.bottlenecks);
+  });
+
   it("loads version 1 saves with an empty growth history at their current tick", () => {
     const current = createSaveGame(createConnectedSimulation());
     const legacy = {

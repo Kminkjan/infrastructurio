@@ -58,6 +58,7 @@ Commands describe player intent:
 type SimulationCommand =
   | { type: "advance"; ticks: number }
   | { type: "build-road"; road: RoadSpec }
+  | { type: "upgrade-road"; roadSegmentId: EntityId }
   | { type: "remove-entity"; entityId: EntityId }
   | { type: "set-policy"; policy: Policy };
 ```
@@ -139,7 +140,8 @@ commands. The simulation stores each player drag as an authored road segment and
 derives a serializable road graph of nodes and links. The renderer owns only the
 drag preview, screen-to-world conversion, and visual snapping before it submits a
 command; it renders the resulting network snapshot rather than retaining road
-connectivity itself.
+connectivity itself. Highway upgrades also cross this boundary as typed commands
+and rebuild the derived links from the upgraded authored segment.
 
 For M0, graph construction checks every pair of authored segments, treats every
 2D crossing as an at-grade intersection, and rebuilds the small graph after an
@@ -148,6 +150,13 @@ Removing an authored segment then rebuilds the remaining topology, so links do n
 become independent editing entities. Route queries run deterministic shortest-path
 search using link generalized hours. Road class supplies link speed and practical
 capacity; the latest lower-frequency assignment supplies congestion delay.
+
+Bottleneck diagnosis is derived in the simulation from authoritative link flow,
+capacity, cost, route, and assignment timing. The resulting serializable snapshot
+is shared by the React inspector and a renderer-independent overlay mapper. PixiJS
+only draws the affected-route and overloaded-link features; it does not decide
+which road is constrained or why.
+
 Collinear overlapping segments are rejected
 because lanes, parallel links, bridges, tunnels, and junction configuration are
 outside the issue's simple-road scope.

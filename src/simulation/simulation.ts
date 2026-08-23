@@ -28,6 +28,7 @@ import {
 import { createMillfordAccessibilityModel } from "./growth/millford-accessibility";
 import { createMillfordDevelopmentModel } from "./growth/millford-development";
 import { createRoadNetwork, findRoadRoute } from "./transport/road-network";
+import { createBottleneckAnalysis } from "./transport/bottlenecks";
 import {
   advanceRoadTraffic,
   assignedRoadTrafficRoute,
@@ -79,15 +80,22 @@ function snapshot(
   );
 
   const accessibilitySnapshot = accessibility.getSnapshot();
+  const quarryMarketFreight = createQuarryMarketFreight(
+    state.geography,
+    quarryMarketRoute,
+  );
   return Object.freeze({
     seed: state.seed,
     tick: state.tick,
     elapsedDays: state.tick / TICKS_PER_DAY,
     geography: state.geography,
     roadNetwork: state.roadNetwork,
-    quarryMarketFreight: createQuarryMarketFreight(
+    quarryMarketFreight,
+    bottlenecks: createBottleneckAnalysis(
       state.geography,
-      quarryMarketRoute,
+      state.roadNetwork,
+      state.roadTraffic,
+      quarryMarketFreight,
     ),
     accessibility: accessibilitySnapshot,
     development: createDevelopmentSnapshot(
@@ -96,6 +104,28 @@ function snapshot(
       accessibilitySnapshot,
     ),
   });
+}
+
+function upgradeRoad(
+  state: SimulationState,
+  roadSegmentId: string,
+): SimulationState {
+  const existing = state.roadNetwork.segments.find(
+    ({ id }) => id === roadSegmentId,
+  );
+  if (!existing) {
+    throw new RangeError(`road segment ${roadSegmentId} does not exist`);
+  }
+  if (existing.roadClass === "highway") {
+    return state;
+  }
+
+  const segments = state.roadNetwork.segments.map((segment) =>
+    segment.id === roadSegmentId
+      ? Object.freeze({ ...segment, roadClass: "highway" as const })
+      : segment,
+  );
+  return { ...state, roadNetwork: createRoadNetwork(segments) };
 }
 
 function advance(state: SimulationState, ticks: number): number {
@@ -316,6 +346,9 @@ function runSimulation(initialState: SimulationState): Simulation {
             command.end,
             command.roadClass,
           );
+          break;
+        case "upgrade-road":
+          state = upgradeRoad(state, command.roadSegmentId);
           break;
         case "remove-road":
           state = removeRoad(state, command.roadSegmentId);

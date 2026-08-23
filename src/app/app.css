@@ -367,6 +367,81 @@ button.secondary {
   line-height: 1.35;
 }
 
+.bottleneck-diagnosis {
+  margin-top: 1rem;
+  border-top: 1px solid rgb(255 255 255 / 13%);
+  padding-top: 0.85rem;
+}
+
+.bottleneck-diagnosis h3 {
+  margin: 0;
+  color: #ffd8cc;
+  font-size: 0.95rem;
+}
+
+.bottleneck-severity {
+  margin: 0.35rem 0 0;
+  color: #f09b83;
+  font-size: 0.82rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.diagnosis-causes {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0.85rem 0 0;
+}
+
+.diagnosis-causes div {
+  border-left: 3px solid #e36f55;
+  padding-left: 0.65rem;
+}
+
+.diagnosis-causes dt {
+  color: #f2b8a9;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.diagnosis-causes dd {
+  margin: 0.16rem 0 0;
+  color: #fffdf7;
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+}
+
+.affected-flow,
+.intervention-tradeoff,
+.resolved-bottleneck {
+  margin: 0.8rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.affected-flow {
+  color: #efc783;
+}
+
+.intervention-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.85rem;
+}
+
+.intervention-actions button {
+  padding: 0.5rem 0.7rem;
+  font-size: 0.74rem;
+}
+
+.intervention-tradeoff,
+.resolved-bottleneck {
+  color: #bdc9c0;
+}
+
 .controls {
   display: flex;
   flex-wrap: wrap;
