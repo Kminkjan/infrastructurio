@@ -68,17 +68,19 @@ function freight(
     congestionDelayHours: 0,
     generalizedCostHours: 10 / 3,
   },
+  id: AggregateFreightSnapshot["id"] = "stone-supply-inbound",
 ): AggregateFreightSnapshot {
   return {
-    commodity: "granite",
-    producerId: "quarry",
-    marketId: "market",
-    productionTonsPerDay: 120,
-    demandTonsPerDay: 100,
+    id,
+    commodity: id === "stone-supply-inbound" ? "raw-granite" : "finished-stone",
+    originId: "quarry",
+    destinationId: "market",
+    availableTonsPerDay: 120,
+    requestedTonsPerDay: 100,
     shippedTonsPerDay,
     route,
     routeCost: route?.generalizedCostHours ?? null,
-    limitingFactor: route ? "demand" : "no-route",
+    limitingFactor: route ? "market-demand" : "no-route",
     limitingReason: "Test fixture",
   };
 }
@@ -181,5 +183,20 @@ describe("representative freight traffic", () => {
         roadNetwork,
       ),
     ).toBeUndefined();
+  });
+
+  it("keeps representative identities distinct for both aggregate legs", () => {
+    const inbound = createRepresentativeFreightTrafficPlan(
+      freight(20),
+      roadNetwork,
+    )!;
+    const outbound = createRepresentativeFreightTrafficPlan(
+      freight(20, undefined, "stone-supply-outbound"),
+      roadNetwork,
+    )!;
+
+    expect(sampleRepresentativeFreightVehicles(inbound, 0)[0]?.id).not.toBe(
+      sampleRepresentativeFreightVehicles(outbound, 0)[0]?.id,
+    );
   });
 });

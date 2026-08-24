@@ -60,19 +60,21 @@ npm run dev
 Vite prints the local URL to open. The page renders the seeded Millford Valley
 geography in a PixiJS world canvas with a React control overlay. Drag the map
 to pan, use the mouse wheel or map controls to zoom, and select a crossing,
-market connection, resource, or settlement to inspect it. The **Fit** control
+market connection, resource, stoneworks, or settlement to inspect it. The **Fit** control
 returns the complete map to view. Hide the controls when you need the full map
 for construction or inspection. Choose **Build arterial** or **Build highway**
 and drag across the map to construct that road class; endpoints snap to
 settlements, resources, the market, nearby roads, and junctions. Choose
 **Remove road** and select a player-built segment to delete it.
 
-The quarry produces up to 120 tons of granite per day and the external market
-demands up to 100 tons. The simulation reassigns that demand every eight simulated
-hours. Road class sets free-flow speed and practical capacity; an overloaded
-route gains delay and may later lose traffic to a lower-cost bypass. Select either
-location to inspect production, demand, the assigned road route, shipped volume,
-and the current limiting factor.
+Granite Ridge Quarry produces up to 120 tons of raw granite per day. It must first
+reach the bounded Millford Stoneworks, which can store 240 tons of input, process
+100 tons per day, and store 160 tons of finished stone. The Eastern External
+Market then buys up to 100 tons of finished stone per day. Connect quarry to
+stoneworks and stoneworks to market, then advance time: inventories and processing
+update once per simulated day, while each active road flow can reconsider its
+route every eight simulated hours. Select any terminal to inspect both legs,
+inventory, processing, route cost, and authoritative limiting factors.
 When assigned flow exceeds capacity, the current freight route is highlighted in
 amber and the overloaded link in red. Select the highlighted road or Millford
 Crossing to separate its demand, capacity, and route-choice causes and see the
@@ -81,11 +83,13 @@ route, or draw a connected highway bypass and advance time until the next
 eight-hour assignment redirects traffic. The prototype does not yet have a
 construction budget: the meaningful difference is whether capacity stays on the
 existing corridor or access and freight shift to a new one.
-Freight remains at zero until the terminals are connected by a viable route.
-Once freight is assigned, orange private trucks animate from the quarry to the
-market along the selected route. Each truck represents up to 20 tons of assigned
-daily flow, so busier viable routes show more traffic without creating persistent
-shipment agents.
+Each freight leg remains at zero until its terminals have a viable route and the
+daily economy has goods available to move. Orange private trucks animate along
+both selected routes. Each truck represents up to 20 tons of assigned daily flow,
+so busier viable routes show more traffic without creating persistent shipment
+agents. Realized stoneworks processing also adds a bounded labor opportunity near
+Millford, feeding the same accessibility and delayed-development model as other
+opportunities.
 
 Millford and Eastbank now compete for a bounded 100-resident regional growth
 allocation. Give a settlement useful road access and advance time: development
@@ -127,8 +131,7 @@ Vitest uses its Node environment for simulation tests, so the simulation can be 
 
 ## Current milestone
 
-**M2 — Bottleneck Loop:** make road capacity and congestion legible, then
-support multiple interventions whose transport and development consequences
-unfold over simulated time.
+**M3 — Millford Valley Vertical Slice:** integrate the complete scenario arc,
+beginning with the two-leg stone supply chain and its effect on Millford.
 
 The roadmap describes outcomes rather than dates. Issues describe the concrete work needed to reach each outcome.

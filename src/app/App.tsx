@@ -24,6 +24,7 @@ import type {
   RoadBottleneckSnapshot,
   RoadClass,
   SimulationSnapshot,
+  StoneworksSnapshot,
 } from "../shared";
 import "./app.css";
 
@@ -115,14 +116,19 @@ function FreightInspector({
 
   return (
     <>
+      <h3>
+        {freight.commodity === "raw-granite"
+          ? "Inbound raw granite"
+          : "Outbound finished stone"}
+      </h3>
       <dl className="freight-details">
         <div>
-          <dt>Production</dt>
-          <dd>{formatTons(freight.productionTonsPerDay)}</dd>
+          <dt>Available</dt>
+          <dd>{formatTons(freight.availableTonsPerDay)}</dd>
         </div>
         <div>
-          <dt>Market demand</dt>
-          <dd>{formatTons(freight.demandTonsPerDay)}</dd>
+          <dt>Requested</dt>
+          <dd>{formatTons(freight.requestedTonsPerDay)}</dd>
         </div>
         <div>
           <dt>Shipped</dt>
@@ -135,6 +141,48 @@ function FreightInspector({
       </dl>
       <p className="limiting-factor">
         <strong>Limiting factor:</strong> {freight.limitingReason}
+      </p>
+    </>
+  );
+}
+
+function StoneworksInspector({
+  stoneworks,
+}: {
+  readonly stoneworks: StoneworksSnapshot;
+}) {
+  return (
+    <>
+      <dl className="freight-details">
+        <div>
+          <dt>Industry status</dt>
+          <dd>{stoneworks.active ? "Active" : "Dormant"}</dd>
+        </div>
+        <div>
+          <dt>Raw granite</dt>
+          <dd>
+            {stoneworks.inputInventoryTons} / {stoneworks.inputStorageCapacityTons} t
+          </dd>
+        </div>
+        <div>
+          <dt>Processing</dt>
+          <dd>
+            {formatTons(stoneworks.processedTonsPerDay)} / {formatTons(stoneworks.processingCapacityTonsPerDay)}
+          </dd>
+        </div>
+        <div>
+          <dt>Finished stone</dt>
+          <dd>
+            {stoneworks.finishedStoneInventoryTons} / {stoneworks.outputStorageCapacityTons} t
+          </dd>
+        </div>
+        <div>
+          <dt>Labor opportunity</dt>
+          <dd>{stoneworks.laborOpportunity.toFixed(1)} access weight</dd>
+        </div>
+      </dl>
+      <p className="limiting-factor">
+        <strong>Industry limit:</strong> {stoneworks.limitingReason}
       </p>
     </>
   );
@@ -155,7 +203,6 @@ function BottleneckInspector({
   readonly onUpgrade: (roadSegmentId: string) => void;
   readonly onPlanBypass: () => void;
 }) {
-  const flow = bottleneck.affectedFlows[0];
   return (
     <section className="bottleneck-diagnosis" aria-label="Bottleneck diagnosis">
       <h3>{bottleneck.name}</h3>
@@ -193,12 +240,13 @@ function BottleneckInspector({
           </dd>
         </div>
       </dl>
-      {flow ? (
-        <p className="affected-flow">
+      {bottleneck.affectedFlows.map((flow) => (
+        <p className="affected-flow" key={flow.id}>
           <strong>Affected flow:</strong> {flow.assignedUnitsPerDay} t/day of{" "}
-          {flow.commodity} from {flow.originName} to {flow.destinationName}.
+          {flow.commodity.replaceAll("-", " ")} from {flow.originName} to{" "}
+          {flow.destinationName}.
         </p>
-      ) : null}
+      ))}
       <div className="intervention-actions">
         <button
           type="button"
@@ -555,9 +603,18 @@ export function App() {
     }
   }
 
-  const selectionShowsFreight =
-    selection?.id === snapshot.quarryMarketFreight.producerId ||
-    selection?.id === snapshot.quarryMarketFreight.marketId;
+  const selectedFreightLegs = [
+    snapshot.stoneSupplyChain.inboundFreight,
+    snapshot.stoneSupplyChain.outboundFreight,
+  ].filter(
+    (freight) =>
+      selection?.id === freight.originId ||
+      selection?.id === freight.destinationId,
+  );
+  const selectedStoneworks =
+    selection?.id === snapshot.stoneSupplyChain.stoneworks.id
+      ? snapshot.stoneSupplyChain.stoneworks
+      : undefined;
   const selectedDevelopment = snapshot.development.locations.find(
     ({ locationId }) => locationId === selection?.id,
   );
@@ -607,6 +664,8 @@ export function App() {
           {snapshot.roadNetwork.segments.length === 1 ? "segment" : "segments"}
           {" · "}
           {snapshot.development.demand.completedGrowthPopulation} regional growth
+          {" · "}
+          {snapshot.stoneSupplyChain.outboundFreight.shippedTonsPerDay} t/day stone exports
           {millfordBridgeBottleneck ? " · Bridge overloaded" : ""}
         </p>
         <section className="road-tools" aria-label="Road construction tools">
@@ -668,9 +727,12 @@ export function App() {
               <h2>{selection.name}</h2>
               <p className="selection-kind">{selection.kind}</p>
               <p className="selection-description">{selection.description}</p>
-              {selectionShowsFreight ? (
-                <FreightInspector freight={snapshot.quarryMarketFreight} />
+              {selectedStoneworks ? (
+                <StoneworksInspector stoneworks={selectedStoneworks} />
               ) : null}
+              {selectedFreightLegs.map((freight) => (
+                <FreightInspector key={freight.id} freight={freight} />
+              ))}
               {selectedDevelopment ? (
                 <DevelopmentInspector development={selectedDevelopment} />
               ) : null}
@@ -690,8 +752,8 @@ export function App() {
             <>
               <h2>Nothing selected</h2>
               <p className="selection-description">
-                Select a road, crossing, market connection, resource, or
-                settlement.
+                Select a road, crossing, market connection, resource, industry,
+                or settlement.
               </p>
             </>
           )}

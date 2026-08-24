@@ -109,132 +109,94 @@ describe("headless simulation", () => {
     });
   });
 
-  it("assigns bounded daily freight only across the connected quarry route", () => {
-    const simulation = createSimulation("quarry-freight");
+  it("advances both stone-supply legs only at deterministic daily boundaries", () => {
+    const simulation = createSimulation("stone-supply");
     const initial = simulation.getSnapshot();
     const quarry = initial.geography.quarry.position;
+    const stoneworks = initial.geography.stoneworks.position;
     const market = initial.geography.externalMarketConnection.position;
 
-    expect(initial.quarryMarketFreight).toMatchObject({
-      producerId: initial.geography.quarry.id,
-      marketId: initial.geography.externalMarketConnection.id,
-      productionTonsPerDay: 120,
-      demandTonsPerDay: 100,
-      shippedTonsPerDay: 0,
-      route: null,
-      limitingFactor: "no-route",
+    expect(initial.stoneSupplyChain).toMatchObject({
+      updateIntervalTicks: 24,
+      lastUpdateTick: null,
+      nextUpdateTick: 24,
+      stoneworks: {
+        active: false,
+        inputStorageCapacityTons: 240,
+        processingCapacityTonsPerDay: 100,
+        outputStorageCapacityTons: 160,
+      },
     });
-
-    const connected = simulation.dispatch({
+    simulation.dispatch({
       type: "build-road",
       start: quarry,
+      end: stoneworks,
+    });
+    expect(
+      simulation.dispatch({ type: "advance", ticks: 23 }).stoneSupplyChain
+        .inboundFreight.shippedTonsPerDay,
+    ).toBe(0);
+
+    const inboundDay = simulation.dispatch({ type: "advance", ticks: 1 });
+    expect(inboundDay.stoneSupplyChain).toMatchObject({
+      lastUpdateTick: 24,
+      inboundFreight: { shippedTonsPerDay: 120 },
+      stoneworks: {
+        active: true,
+        inputInventoryTons: 20,
+        processedTonsPerDay: 100,
+        finishedStoneInventoryTons: 100,
+      },
+      outboundFreight: { shippedTonsPerDay: 0, limitingFactor: "no-route" },
+    });
+    simulation.dispatch({
+      type: "build-road",
+      start: stoneworks,
       end: market,
     });
-    expect(connected.quarryMarketFreight).toMatchObject({
-      limitingFactor: "route-cost",
+    const completeChain = simulation.dispatch({ type: "advance", ticks: 24 });
+    expect(completeChain.stoneSupplyChain.outboundFreight).toMatchObject({
+      commodity: "finished-stone",
+      shippedTonsPerDay: 100,
+      limitingFactor: "market-demand",
     });
-    expect(connected.quarryMarketFreight.shippedTonsPerDay).toBeGreaterThan(0);
-    expect(connected.quarryMarketFreight.shippedTonsPerDay).toBeLessThan(100);
-    expect(connected.quarryMarketFreight.route?.linkIds).toEqual([
-      "road-segment-1:link-1",
-    ]);
-    expect(connected.quarryMarketFreight.shippedTonsPerDay).toBeLessThanOrEqual(
-      connected.quarryMarketFreight.productionTonsPerDay,
-    );
 
-    const afterManyDays = simulation.dispatch({
-      type: "advance",
-      ticks: 24 * 30,
-    });
-    expect(afterManyDays.quarryMarketFreight).toEqual(
-      connected.quarryMarketFreight,
-    );
-
-    const disconnected = simulation.dispatch({
+    const disconnectedInbound = simulation.dispatch({
       type: "remove-road",
       roadSegmentId: "road-segment-1",
     });
-    expect(disconnected.quarryMarketFreight).toMatchObject({
+    expect(disconnectedInbound.stoneSupplyChain.inboundFreight).toMatchObject({
       shippedTonsPerDay: 0,
       route: null,
       limitingFactor: "no-route",
     });
   });
 
-  it("ships less freight over a more expensive connected route", () => {
-    const direct = createSimulation("route-cost-freight");
-    const directGeography = direct.getSnapshot().geography;
-    direct.dispatch({
-      type: "build-road",
-      start: directGeography.quarry.position,
-      end: directGeography.externalMarketConnection.position,
-    });
-
-    const indirect = createSimulation("route-cost-freight");
-    const indirectGeography = indirect.getSnapshot().geography;
-    indirect.dispatch({
-      type: "build-road",
-      start: indirectGeography.quarry.position,
-      end: { x: 0, y: 0 },
-    });
-    const indirectSnapshot = indirect.dispatch({
-      type: "build-road",
-      start: { x: 0, y: 0 },
-      end: indirectGeography.externalMarketConnection.position,
-    });
-
-    const directFreight = direct.getSnapshot().quarryMarketFreight;
-    const indirectFreight = indirectSnapshot.quarryMarketFreight;
-    expect(indirectFreight.routeCost).toBeGreaterThan(
-      directFreight.routeCost ?? 0,
-    );
-    expect(indirectFreight.shippedTonsPerDay).toBeLessThan(
-      directFreight.shippedTonsPerDay,
-    );
-    expect(indirectFreight.limitingFactor).toBe("route-cost");
-  });
-
-  it("exposes a congestion-driven route change after a simulated day", () => {
-    const simulation = createSimulation("overloaded-bridge-snapshot");
-    const geography = simulation.getSnapshot().geography;
-    const quarry = geography.quarry.position;
-    const market = geography.externalMarketConnection.position;
-    simulation.dispatch({
-      type: "build-road",
-      roadClass: "local",
-      start: quarry,
-      end: market,
-    });
-    const bypass = [
-      quarry,
-      { x: 0, y: quarry.y },
-      { x: 0, y: 0 },
-      { x: geography.bounds.width, y: 0 },
-      market,
-    ];
-    for (let index = 0; index < bypass.length - 1; index += 1) {
-      simulation.dispatch({
-        type: "build-road",
-        roadClass: "arterial",
-        start: bypass[index]!,
-        end: bypass[index + 1]!,
-      });
+  it("replays both supply-chain legs identically across chunked advances", () => {
+    const setup = (simulation: ReturnType<typeof createSimulation>) => {
+      const geography = simulation.getSnapshot().geography;
+      simulation.dispatch({ type: "build-road", start: geography.quarry.position, end: geography.stoneworks.position });
+      simulation.dispatch({ type: "build-road", start: geography.stoneworks.position, end: geography.externalMarketConnection.position });
+    };
+    const first = createSimulation("supply-replay");
+    const second = createSimulation("supply-replay");
+    setup(first);
+    setup(second);
+    first.dispatch({ type: "advance", ticks: 24 * 10 });
+    for (let day = 0; day < 10; day += 1) {
+      second.dispatch({ type: "advance", ticks: 24 });
     }
 
-    const congestedBridgeRoute = simulation.getSnapshot().quarryMarketFreight
-      .route?.linkIds;
-    expect(congestedBridgeRoute).toEqual(["road-segment-1:link-1"]);
-
-    const afterDay = simulation.dispatch({ type: "advance", ticks: 24 });
-    expect(afterDay.quarryMarketFreight.route?.linkIds).not.toEqual(
-      congestedBridgeRoute,
+    expect(second.getSnapshot().stoneSupplyChain).toEqual(
+      first.getSnapshot().stoneSupplyChain,
     );
-    expect(afterDay.quarryMarketFreight.route?.linkIds).toEqual([
-      "road-segment-2:link-1",
-      "road-segment-3:link-1",
-      "road-segment-4:link-1",
-      "road-segment-5:link-1",
-    ]);
+    expect(second.getSnapshot().roadNetwork).toEqual(
+      first.getSnapshot().roadNetwork,
+    );
+    expect(second.getSnapshot().accessibility.locations).toEqual(
+      first.getSnapshot().accessibility.locations,
+    );
+    expect(second.getState().supplyChain).toEqual(first.getState().supplyChain);
   });
 
   it("publishes deterministic network accessibility for candidate locations", () => {
@@ -339,6 +301,49 @@ describe("headless simulation", () => {
     expect(
       unrelated.accessibility.lastNetworkUpdateInvalidatedLocationIds,
     ).toEqual([]);
+  });
+
+  it("adds realized stoneworks employment to Millford accessibility", () => {
+    const simulation = createSimulation("stoneworks-employment");
+    const geography = simulation.getSnapshot().geography;
+    const millford = geography.settlementSeeds[0]!;
+    simulation.dispatch({
+      type: "build-road",
+      start: geography.quarry.position,
+      end: geography.stoneworks.position,
+    });
+    simulation.dispatch({
+      type: "build-road",
+      start: millford.position,
+      end: geography.stoneworks.position,
+    });
+    simulation.dispatch({
+      type: "build-road",
+      start: geography.stoneworks.position,
+      end: geography.externalMarketConnection.position,
+    });
+    const beforeSnapshot = simulation.getSnapshot();
+    const before = beforeSnapshot.accessibility.locations.find(
+      ({ locationId }) => locationId === millford.id,
+    )!;
+    const beforePressure = beforeSnapshot.development.locations.find(
+      ({ locationId }) => locationId === millford.id,
+    )!.pressure;
+
+    const afterSnapshot = simulation.dispatch({ type: "advance", ticks: 24 });
+    const after = afterSnapshot.accessibility.locations.find(
+      ({ locationId }) => locationId === millford.id,
+    )!;
+    const afterPressure = afterSnapshot.development.locations.find(
+      ({ locationId }) => locationId === millford.id,
+    )!.pressure;
+
+    expect(after.labor.score).toBeGreaterThan(before.labor.score);
+    expect(afterPressure).toBeGreaterThan(beforePressure);
+    expect(simulation.getSnapshot().stoneSupplyChain.stoneworks).toMatchObject({
+      active: true,
+      laborOpportunity: 40,
+    });
   });
 
   it("grows a connected settlement after delayed construction within regional demand", () => {

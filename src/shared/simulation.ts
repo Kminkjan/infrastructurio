@@ -1,6 +1,6 @@
 import type { AccessibilitySnapshot } from "./accessibility";
 import type { BottleneckAnalysisSnapshot } from "./bottlenecks";
-import type { AggregateFreightSnapshot } from "./economy";
+import type { StoneSupplyChainSnapshot } from "./economy";
 import type { DevelopmentSnapshot } from "./development";
 import type { Point, ScenarioGeography } from "./geography";
 import type { RoadClass, RoadNetwork } from "./roads";
@@ -25,7 +25,7 @@ export interface SimulationSnapshot {
   readonly elapsedDays: number;
   readonly geography: ScenarioGeography;
   readonly roadNetwork: RoadNetwork;
-  readonly quarryMarketFreight: AggregateFreightSnapshot;
+  readonly stoneSupplyChain: StoneSupplyChainSnapshot;
   readonly bottlenecks: BottleneckAnalysisSnapshot;
   readonly accessibility: AccessibilitySnapshot;
   readonly development: DevelopmentSnapshot;

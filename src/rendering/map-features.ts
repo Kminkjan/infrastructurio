@@ -48,6 +48,7 @@ export function getRoadSnapAnchors(
 
   return [
     geography.quarry.position,
+    geography.stoneworks.position,
     geography.externalMarketConnection.position,
     ...geography.settlementSeeds.map(({ position }) => position),
     fertileCenter,
@@ -89,6 +90,17 @@ export function getSelectableMapFeatures(
         type: "point",
         position: geography.externalMarketConnection.position,
         radius: 44,
+      },
+    },
+    {
+      id: geography.stoneworks.id,
+      name: geography.stoneworks.name,
+      kind: "infrastructure",
+      description: "Stone-processing industry",
+      geometry: {
+        type: "point",
+        position: geography.stoneworks.position,
+        radius: 38,
       },
     },
     {

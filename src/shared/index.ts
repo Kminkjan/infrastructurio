@@ -7,7 +7,11 @@ export type {
 } from "./accessibility";
 export type {
   AggregateFreightSnapshot,
+  FreightCommodity,
   FreightLimitingFactor,
+  StoneSupplyChainSnapshot,
+  StoneworksLimitingFactor,
+  StoneworksSnapshot,
 } from "./economy";
 export type {
   BottleneckAffectedFlow,
@@ -37,6 +41,7 @@ export type {
   RiverGeography,
   ScenarioGeography,
   SettlementSeedGeography,
+  StoneworksGeography,
 } from "./geography";
 export type {
   RoadClass,

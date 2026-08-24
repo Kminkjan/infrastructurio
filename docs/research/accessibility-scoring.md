@@ -68,9 +68,10 @@ Behavior that was not yet useful or conclusive:
 - Service access is strongly correlated with labor access because both currently
   use settlement seeds. It needs distinct service facilities or capacities to
   add much explanatory value.
-- Proxy opportunity weights create plausible differences but are not grounded in
-  simulated population, jobs, output, or service capacity. Permanent values
-  should come from authoritative economic state.
+- Most proxy opportunity weights create plausible differences but are not grounded
+  in simulated population, jobs, output, or service capacity. Issue #13 adds the
+  first authoritative exception: realized Millford Stoneworks processing creates
+  a bounded dynamic labor opportunity. Settlement and service proxies remain.
 - Combining quarry and fertile-land access into one resource number loses input
   specificity. Development rules will need required-resource types before this
   factor can determine industry suitability.

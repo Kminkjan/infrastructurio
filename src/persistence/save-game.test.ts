@@ -21,6 +21,11 @@ function createConnectedSimulation() {
   simulation.dispatch({
     type: "build-road",
     start: geography.quarry.position,
+    end: geography.stoneworks.position,
+  });
+  simulation.dispatch({
+    type: "build-road",
+    start: geography.stoneworks.position,
     end: geography.externalMarketConnection.position,
   });
   simulation.dispatch({
@@ -30,7 +35,7 @@ function createConnectedSimulation() {
   });
   simulation.dispatch({
     type: "remove-road",
-    roadSegmentId: "road-segment-2",
+    roadSegmentId: "road-segment-3",
   });
   simulation.dispatch({ type: "advance", ticks: 24 * 17 });
   return simulation;
@@ -53,28 +58,37 @@ describe("save games", () => {
       scenarioSeed: "save-round-trip",
       simulation: {
         tick: 24 * 17,
-        nextRoadSegmentNumber: 3,
+        nextRoadSegmentNumber: 4,
       },
     });
     expect(after.roadNetwork).toEqual(before.roadNetwork);
     expect(restored.getState().roadTraffic).toEqual(
       original.getState().roadTraffic,
     );
+    expect(restored.getState().supplyChain).toEqual(
+      original.getState().supplyChain,
+    );
     expect(after.tick).toBe(before.tick);
     expect(after.elapsedDays).toBe(before.elapsedDays);
-    expect(after.quarryMarketFreight).toEqual(before.quarryMarketFreight);
+    expect(after.stoneSupplyChain).toEqual(before.stoneSupplyChain);
     expect(after.accessibility.locations).toEqual(
       before.accessibility.locations,
     );
     expect(after.development).toEqual(before.development);
-    expect(after.quarryMarketFreight.shippedTonsPerDay).toBeGreaterThan(0);
+    expect(after.stoneSupplyChain.inboundFreight.shippedTonsPerDay).toBeGreaterThan(0);
+    expect(after.stoneSupplyChain.outboundFreight.shippedTonsPerDay).toBeGreaterThan(0);
+
+    const replayCommand = { type: "advance", ticks: 24 * 7 } as const;
+    expect(restored.dispatch(replayCommand).stoneSupplyChain).toEqual(
+      original.dispatch(replayCommand).stoneSupplyChain,
+    );
 
     const continued = restored.dispatch({
       type: "build-road",
       start: { x: 0, y: 20 },
       end: { x: 20, y: 20 },
     });
-    expect(continued.roadNetwork.segments.at(-1)?.id).toBe("road-segment-3");
+    expect(continued.roadNetwork.segments.at(-1)?.id).toBe("road-segment-4");
   });
 
   it("preserves completed and pending development for deterministic continuation", () => {
@@ -107,16 +121,26 @@ describe("save games", () => {
     original.dispatch({
       type: "build-road",
       start: geography.quarry.position,
+      end: geography.stoneworks.position,
+    });
+    original.dispatch({
+      type: "build-road",
+      start: geography.stoneworks.position,
       end: geography.externalMarketConnection.position,
     });
+    original.dispatch({ type: "advance", ticks: 24 });
     const upgraded = original.dispatch({
       type: "upgrade-road",
-      roadSegmentId: "road-segment-1",
+      roadSegmentId: "road-segment-2",
     });
-    expect(upgraded.bottlenecks.roadBottlenecks).toEqual([]);
+    expect(
+      upgraded.bottlenecks.roadBottlenecks.some(
+        ({ isMillfordBridge }) => isMillfordBridge,
+      ),
+    ).toBe(false);
 
     const restored = restoreSaveGame(createSaveGame(original)).getSnapshot();
-    expect(restored.roadNetwork.segments[0]?.roadClass).toBe("highway");
+    expect(restored.roadNetwork.segments[1]?.roadClass).toBe("highway");
     expect(restored.bottlenecks).toEqual(upgraded.bottlenecks);
   });
 
@@ -183,6 +207,43 @@ describe("save games", () => {
     expect(restored.getState().roadTraffic).toBeDefined();
   });
 
+  it("migrates version 3 quarry-export saves to a dormant stoneworks", () => {
+    const current = createSaveGame(createConnectedSimulation());
+    const legacy = {
+      formatVersion: 3 as const,
+      scenarioId: current.scenarioId,
+      scenarioSeed: current.scenarioSeed,
+      simulation: {
+        tick: current.simulation.tick,
+        roadSegments: current.simulation.roadSegments,
+        nextRoadSegmentNumber: current.simulation.nextRoadSegmentNumber,
+        development: current.simulation.development,
+        roadTraffic: {
+          lastAssignmentTick: current.simulation.tick,
+          nextAssignmentTick: current.simulation.tick + 8,
+          assignedFlowUnitsPerDay: 100,
+          routeNodeIds: null,
+          routeLinkIds: null,
+        },
+      },
+    };
+
+    const restored = restoreSaveGame(
+      deserializeSaveGame(JSON.stringify(legacy)),
+    );
+    expect(restored.getSnapshot().stoneSupplyChain).toMatchObject({
+      lastUpdateTick: null,
+      stoneworks: {
+        active: false,
+        inputInventoryTons: 0,
+        finishedStoneInventoryTons: 0,
+      },
+    });
+    expect(restored.getSnapshot().stoneSupplyChain.nextUpdateTick).toBeGreaterThan(
+      current.simulation.tick,
+    );
+  });
+
   it("exports and imports the versioned save as a JSON file", async () => {
     const save = createSaveGame(createConnectedSimulation());
     const file = createSaveFile(save);
@@ -241,13 +302,13 @@ describe("save games", () => {
     expect(() =>
       deserializeSaveGame(
         JSON.stringify({
-          formatVersion: 4,
+          formatVersion: 5,
           scenarioId: "millford-valley",
           scenarioSeed: "future",
           simulation: {},
         }),
       ),
-    ).toThrow("unsupported save format version: 4");
+    ).toThrow("unsupported save format version: 5");
 
     const save = createSaveGame(createConnectedSimulation());
     const invalid = {
@@ -293,6 +354,20 @@ describe("save games", () => {
       },
     };
     expect(() => restoreSaveGame(invalidTraffic)).toThrow(
+      "save contains invalid simulation state",
+    );
+
+    const invalidSupplyChain = {
+      ...save,
+      simulation: {
+        ...save.simulation,
+        supplyChain: {
+          ...save.simulation.supplyChain,
+          inputInventoryTons: 241,
+        },
+      },
+    };
+    expect(() => restoreSaveGame(invalidSupplyChain)).toThrow(
       "save contains invalid simulation state",
     );
   });

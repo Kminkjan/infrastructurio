@@ -34,6 +34,11 @@ describe("Millford Valley scenario", () => {
         name: "Granite Ridge Quarry",
         position: { x: 154, y: 508 },
       },
+      stoneworks: {
+        id: "stoneworks-millford",
+        name: "Millford Stoneworks",
+        position: { x: 467, y: 424.5 },
+      },
       fertileLand: {
         id: "fertile-land-eastbank",
         name: "Eastbank Fields",

@@ -4,49 +4,55 @@ import { describe, expect, it } from "vitest";
 import { createSimulation } from "../simulation";
 import { getBottleneckOverlayFeatures } from "./bottleneck-overlay";
 
-describe("bottleneck map overlay", () => {
-  it("maps the authoritative affected route and overloaded bridge to deterministic lines", () => {
-    const simulation = createSimulation("millford-valley-foundation");
-    const geography = simulation.getSnapshot().geography;
-    const snapshot = simulation.dispatch({
-      type: "build-road",
-      start: geography.quarry.position,
-      end: geography.externalMarketConnection.position,
-    });
+function activeChain() {
+  const simulation = createSimulation("millford-valley-foundation");
+  const geography = simulation.getSnapshot().geography;
+  simulation.dispatch({
+    type: "build-road",
+    start: geography.quarry.position,
+    end: geography.stoneworks.position,
+  });
+  simulation.dispatch({
+    type: "build-road",
+    start: geography.stoneworks.position,
+    end: geography.externalMarketConnection.position,
+  });
+  return {
+    simulation,
+    geography,
+    snapshot: simulation.dispatch({ type: "advance", ticks: 24 }),
+  };
+}
 
-    expect(getBottleneckOverlayFeatures(snapshot)).toEqual([
-      {
-        id: "affected-flow:road-segment-1:link-1",
-        role: "affected-flow",
-        start: geography.quarry.position,
-        end: geography.externalMarketConnection.position,
-        label: "Granite freight affected by the current route choice",
-      },
-      {
-        id: "bottleneck:road-segment-1:link-1",
-        role: "overloaded-link",
-        start: geography.quarry.position,
-        end: geography.externalMarketConnection.position,
-        label: "Overloaded Millford bridge: 125% of practical capacity",
-      },
+describe("bottleneck map overlay", () => {
+  it("maps both authoritative freight routes and their overloaded links", () => {
+    const { snapshot } = activeChain();
+    const features = getBottleneckOverlayFeatures(snapshot);
+
+    expect(features.map(({ role }) => role)).toEqual([
+      "affected-flow",
+      "affected-flow",
+      "overloaded-link",
+      "overloaded-link",
+    ]);
+    expect(features.map(({ id }) => id)).toEqual([
+      "affected-flow:road-segment-1:link-1",
+      "affected-flow:road-segment-2:link-1",
+      "bottleneck:road-segment-1:link-1",
+      "bottleneck:road-segment-2:link-1",
     ]);
   });
 
-  it("clears the overload line once an intervention removes the bottleneck", () => {
-    const simulation = createSimulation("millford-valley-foundation");
-    const geography = simulation.getSnapshot().geography;
-    simulation.dispatch({
-      type: "build-road",
-      start: geography.quarry.position,
-      end: geography.externalMarketConnection.position,
-    });
+  it("retains affected routes after upgrades remove both overloads", () => {
+    const { simulation } = activeChain();
+    simulation.dispatch({ type: "upgrade-road", roadSegmentId: "road-segment-1" });
     const upgraded = simulation.dispatch({
       type: "upgrade-road",
-      roadSegmentId: "road-segment-1",
+      roadSegmentId: "road-segment-2",
     });
 
     expect(
       getBottleneckOverlayFeatures(upgraded).map(({ role }) => role),
-    ).toEqual(["affected-flow"]);
+    ).toEqual(["affected-flow", "affected-flow"]);
   });
 });

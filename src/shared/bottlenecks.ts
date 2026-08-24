@@ -1,8 +1,9 @@
+import type { FreightCommodity } from "./economy";
 import type { RoadClass } from "./roads";
 
 export interface BottleneckAffectedFlow {
-  readonly id: "quarry-market-granite";
-  readonly commodity: "granite";
+  readonly id: "stone-supply-inbound" | "stone-supply-outbound";
+  readonly commodity: FreightCommodity;
   readonly originName: string;
   readonly destinationName: string;
   readonly demandUnitsPerDay: number;

@@ -1,13 +1,21 @@
 import {
   restoreSimulation,
   type DevelopmentStateSnapshot,
+  type RoadTrafficFlowStateSnapshot,
   type RoadTrafficStateSnapshot,
   type Simulation,
   type SimulationStateSnapshot,
+  type StoneSupplyChainStateSnapshot,
 } from "../simulation";
-import type { Point, RoadClass, RoadSegment } from "../shared";
+import type {
+  FreightLimitingFactor,
+  Point,
+  RoadClass,
+  RoadSegment,
+  StoneworksLimitingFactor,
+} from "../shared";
 
-export const SAVE_FORMAT_VERSION = 3 as const;
+export const SAVE_FORMAT_VERSION = 4 as const;
 export const SAVE_FILE_NAME = "millford-valley-save.json";
 
 interface SavedRoadSegment {
@@ -17,43 +25,59 @@ interface SavedRoadSegment {
   readonly end: Point;
 }
 
+interface SaveBaseSimulation {
+  readonly tick: number;
+  readonly roadSegments: readonly SavedRoadSegment[];
+  readonly nextRoadSegmentNumber: number;
+}
+
 export interface SaveGameV1 {
   readonly formatVersion: 1;
   readonly scenarioId: "millford-valley";
   readonly scenarioSeed: string;
-  readonly simulation: {
-    readonly tick: number;
-    readonly roadSegments: readonly SavedRoadSegment[];
-    readonly nextRoadSegmentNumber: number;
-  };
+  readonly simulation: SaveBaseSimulation;
 }
 
 export interface SaveGameV2 {
   readonly formatVersion: 2;
   readonly scenarioId: "millford-valley";
   readonly scenarioSeed: string;
-  readonly simulation: {
-    readonly tick: number;
-    readonly roadSegments: readonly SavedRoadSegment[];
-    readonly nextRoadSegmentNumber: number;
+  readonly simulation: SaveBaseSimulation & {
     readonly development: DevelopmentStateSnapshot;
   };
 }
 
+interface LegacyRoadTrafficStateV3 {
+  readonly lastAssignmentTick: number;
+  readonly nextAssignmentTick: number;
+  readonly assignedFlowUnitsPerDay: number;
+  readonly routeNodeIds: readonly string[] | null;
+  readonly routeLinkIds: readonly string[] | null;
+}
+
 export interface SaveGameV3 {
+  readonly formatVersion: 3;
+  readonly scenarioId: "millford-valley";
+  readonly scenarioSeed: string;
+  readonly simulation: SaveBaseSimulation & {
+    readonly development: DevelopmentStateSnapshot;
+    readonly roadTraffic: LegacyRoadTrafficStateV3;
+  };
+}
+
+export interface SaveGameV4 {
   readonly formatVersion: typeof SAVE_FORMAT_VERSION;
   readonly scenarioId: "millford-valley";
   readonly scenarioSeed: string;
-  readonly simulation: {
-    readonly tick: number;
+  readonly simulation: SaveBaseSimulation & {
     readonly roadSegments: readonly RoadSegment[];
-    readonly nextRoadSegmentNumber: number;
     readonly development: DevelopmentStateSnapshot;
+    readonly supplyChain: StoneSupplyChainStateSnapshot;
     readonly roadTraffic: RoadTrafficStateSnapshot;
   };
 }
 
-export type SaveGame = SaveGameV1 | SaveGameV2 | SaveGameV3;
+export type SaveGame = SaveGameV1 | SaveGameV2 | SaveGameV3 | SaveGameV4;
 
 export class SaveGameError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -66,18 +90,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function readSafeInteger(
-  value: unknown,
-  name: string,
-  minimum: number,
-): number {
+function readSafeInteger(value: unknown, name: string, minimum: number): number {
   if (!Number.isSafeInteger(value) || (value as number) < minimum) {
-    throw new SaveGameError(
-      `${name} must be a safe integer of at least ${minimum}`,
-    );
+    throw new SaveGameError(`${name} must be a safe integer of at least ${minimum}`);
   }
-
   return value as number;
+}
+
+function readNumber(value: unknown, name: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new SaveGameError(`${name} must be non-negative and finite`);
+  }
+  return value;
 }
 
 function readPoint(value: unknown, name: string): Point {
@@ -90,28 +114,17 @@ function readPoint(value: unknown, name: string): Point {
   ) {
     throw new SaveGameError(`${name} must contain finite x and y coordinates`);
   }
-
   return Object.freeze({ x: value.x, y: value.y });
 }
 
 function readRoadSegment(value: unknown, index: number): RoadSegment {
-  if (
-    !isRecord(value) ||
-    typeof value.id !== "string" ||
-    value.id.length === 0
-  ) {
+  if (!isRecord(value) || typeof value.id !== "string" || value.id.length === 0) {
     throw new SaveGameError(`road segment ${index} must have a non-empty id`);
   }
-
   const roadClass = value.roadClass ?? "arterial";
-  if (
-    roadClass !== "local" &&
-    roadClass !== "arterial" &&
-    roadClass !== "highway"
-  ) {
+  if (roadClass !== "local" && roadClass !== "arterial" && roadClass !== "highway") {
     throw new SaveGameError(`road segment ${index} has an unknown road class`);
   }
-
   return Object.freeze({
     id: value.id,
     roadClass,
@@ -130,101 +143,82 @@ function readStringArray(value: unknown, name: string): readonly string[] {
   return Object.freeze([...value]);
 }
 
-function readRoadTrafficState(value: unknown): RoadTrafficStateSnapshot {
+function readNullableStringArray(
+  value: unknown,
+  name: string,
+): readonly string[] | null {
+  return value === null ? null : readStringArray(value, name);
+}
+
+function readLegacyRoadTrafficState(value: unknown): LegacyRoadTrafficStateV3 {
   if (!isRecord(value)) {
     throw new SaveGameError("road traffic state must be an object");
   }
-  const routeNodeIds =
-    value.routeNodeIds === null
-      ? null
-      : readStringArray(value.routeNodeIds, "road traffic routeNodeIds");
-  const routeLinkIds =
-    value.routeLinkIds === null
-      ? null
-      : readStringArray(value.routeLinkIds, "road traffic routeLinkIds");
-  if (
-    typeof value.assignedFlowUnitsPerDay !== "number" ||
-    !Number.isFinite(value.assignedFlowUnitsPerDay) ||
-    value.assignedFlowUnitsPerDay < 0
-  ) {
-    throw new SaveGameError(
-      "road traffic assignedFlowUnitsPerDay must be non-negative and finite",
-    );
+  return Object.freeze({
+    lastAssignmentTick: readSafeInteger(value.lastAssignmentTick, "road traffic lastAssignmentTick", 0),
+    nextAssignmentTick: readSafeInteger(value.nextAssignmentTick, "road traffic nextAssignmentTick", 0),
+    assignedFlowUnitsPerDay: readNumber(value.assignedFlowUnitsPerDay, "road traffic assignedFlowUnitsPerDay"),
+    routeNodeIds: readNullableStringArray(value.routeNodeIds, "road traffic routeNodeIds"),
+    routeLinkIds: readNullableStringArray(value.routeLinkIds, "road traffic routeLinkIds"),
+  });
+}
+
+function readRoadTrafficFlow(
+  value: unknown,
+  index: number,
+): RoadTrafficFlowStateSnapshot {
+  if (!isRecord(value) || typeof value.id !== "string" || value.id.length === 0) {
+    throw new SaveGameError(`road traffic flow ${index} must have a non-empty id`);
   }
   return Object.freeze({
-    lastAssignmentTick: readSafeInteger(
-      value.lastAssignmentTick,
-      "road traffic lastAssignmentTick",
-      0,
+    id: value.id,
+    assignedFlowUnitsPerDay: readNumber(
+      value.assignedFlowUnitsPerDay,
+      `road traffic flow ${index} assignedFlowUnitsPerDay`,
     ),
-    nextAssignmentTick: readSafeInteger(
-      value.nextAssignmentTick,
-      "road traffic nextAssignmentTick",
-      0,
+    routeNodeIds: readNullableStringArray(
+      value.routeNodeIds,
+      `road traffic flow ${index} routeNodeIds`,
     ),
-    assignedFlowUnitsPerDay: value.assignedFlowUnitsPerDay,
-    routeNodeIds,
-    routeLinkIds,
+    routeLinkIds: readNullableStringArray(
+      value.routeLinkIds,
+      `road traffic flow ${index} routeLinkIds`,
+    ),
+  });
+}
+
+function readRoadTrafficState(value: unknown): RoadTrafficStateSnapshot {
+  if (!isRecord(value) || !Array.isArray(value.flows)) {
+    throw new SaveGameError("road traffic state must contain flows");
+  }
+  return Object.freeze({
+    lastAssignmentTick: readSafeInteger(value.lastAssignmentTick, "road traffic lastAssignmentTick", 0),
+    nextAssignmentTick: readSafeInteger(value.nextAssignmentTick, "road traffic nextAssignmentTick", 0),
+    flows: Object.freeze(value.flows.map(readRoadTrafficFlow)),
   });
 }
 
 function readDevelopmentState(value: unknown): DevelopmentStateSnapshot {
-  if (
-    !isRecord(value) ||
-    !Array.isArray(value.locations) ||
-    !Array.isArray(value.pendingConstruction)
-  ) {
+  if (!isRecord(value) || !Array.isArray(value.locations) || !Array.isArray(value.pendingConstruction)) {
     throw new SaveGameError("development state must contain state arrays");
   }
-
-  const lastEvaluationTick =
-    value.lastEvaluationTick === null
-      ? null
-      : readSafeInteger(
-          value.lastEvaluationTick,
-          "development lastEvaluationTick",
-          0,
-        );
   return Object.freeze({
-    processedTick: readSafeInteger(
-      value.processedTick,
-      "development processedTick",
-      0,
-    ),
-    evaluationNumber: readSafeInteger(
-      value.evaluationNumber,
-      "development evaluationNumber",
-      0,
-    ),
-    lastEvaluationTick,
-    nextEvaluationTick: readSafeInteger(
-      value.nextEvaluationTick,
-      "development nextEvaluationTick",
-      1,
-    ),
-    nextConstructionNumber: readSafeInteger(
-      value.nextConstructionNumber,
-      "development nextConstructionNumber",
-      1,
-    ),
+    processedTick: readSafeInteger(value.processedTick, "development processedTick", 0),
+    evaluationNumber: readSafeInteger(value.evaluationNumber, "development evaluationNumber", 0),
+    lastEvaluationTick:
+      value.lastEvaluationTick === null
+        ? null
+        : readSafeInteger(value.lastEvaluationTick, "development lastEvaluationTick", 0),
+    nextEvaluationTick: readSafeInteger(value.nextEvaluationTick, "development nextEvaluationTick", 1),
+    nextConstructionNumber: readSafeInteger(value.nextConstructionNumber, "development nextConstructionNumber", 1),
     locations: Object.freeze(
       value.locations.map((location, index) => {
-        if (
-          !isRecord(location) ||
-          typeof location.locationId !== "string" ||
-          location.locationId.length === 0
-        ) {
-          throw new SaveGameError(
-            `development location ${index} must have a non-empty id`,
-          );
+        if (!isRecord(location) || typeof location.locationId !== "string" || location.locationId.length === 0) {
+          throw new SaveGameError(`development location ${index} must have a non-empty id`);
         }
         return Object.freeze({
           locationId: location.locationId,
-          growthPopulation: readSafeInteger(
-            location.growthPopulation,
-            `development location ${index} growthPopulation`,
-            0,
-          ),
+          growthPopulation: readSafeInteger(location.growthPopulation, `development location ${index} growthPopulation`, 0),
         });
       }),
     ),
@@ -237,31 +231,64 @@ function readDevelopmentState(value: unknown): DevelopmentStateSnapshot {
           typeof project.locationId !== "string" ||
           project.locationId.length === 0
         ) {
-          throw new SaveGameError(
-            `pending construction ${index} must have non-empty ids`,
-          );
+          throw new SaveGameError(`pending construction ${index} must have non-empty ids`);
         }
         return Object.freeze({
           id: project.id,
           locationId: project.locationId,
-          population: readSafeInteger(
-            project.population,
-            `pending construction ${index} population`,
-            1,
-          ),
-          startedTick: readSafeInteger(
-            project.startedTick,
-            `pending construction ${index} startedTick`,
-            0,
-          ),
-          completesTick: readSafeInteger(
-            project.completesTick,
-            `pending construction ${index} completesTick`,
-            1,
-          ),
+          population: readSafeInteger(project.population, `pending construction ${index} population`, 1),
+          startedTick: readSafeInteger(project.startedTick, `pending construction ${index} startedTick`, 0),
+          completesTick: readSafeInteger(project.completesTick, `pending construction ${index} completesTick`, 1),
         });
       }),
     ),
+  });
+}
+
+function readFreightFactor(value: unknown, name: string): FreightLimitingFactor {
+  if (
+    value !== "no-route" &&
+    value !== "route-cost" &&
+    value !== "production" &&
+    value !== "input-storage" &&
+    value !== "inventory" &&
+    value !== "market-demand"
+  ) {
+    throw new SaveGameError(`${name} is unknown`);
+  }
+  return value;
+}
+
+function readStoneworksFactor(value: unknown): StoneworksLimitingFactor {
+  if (value !== "input-shortage" && value !== "processing-capacity" && value !== "output-storage") {
+    throw new SaveGameError("stoneworks limiting factor is unknown");
+  }
+  return value;
+}
+
+function readSupplyChainState(value: unknown): StoneSupplyChainStateSnapshot {
+  if (!isRecord(value)) {
+    throw new SaveGameError("supply-chain state must be an object");
+  }
+  return Object.freeze({
+    processedTick: readSafeInteger(value.processedTick, "supply-chain processedTick", 0),
+    lastUpdateTick:
+      value.lastUpdateTick === null
+        ? null
+        : readSafeInteger(value.lastUpdateTick, "supply-chain lastUpdateTick", 0),
+    nextUpdateTick: readSafeInteger(value.nextUpdateTick, "supply-chain nextUpdateTick", 1),
+    inputInventoryTons: readNumber(value.inputInventoryTons, "supply-chain inputInventoryTons"),
+    finishedStoneInventoryTons: readNumber(value.finishedStoneInventoryTons, "supply-chain finishedStoneInventoryTons"),
+    inboundAvailableTonsPerDay: readNumber(value.inboundAvailableTonsPerDay, "supply-chain inboundAvailableTonsPerDay"),
+    inboundRequestedTonsPerDay: readNumber(value.inboundRequestedTonsPerDay, "supply-chain inboundRequestedTonsPerDay"),
+    inboundShippedTonsPerDay: readNumber(value.inboundShippedTonsPerDay, "supply-chain inboundShippedTonsPerDay"),
+    inboundLimitingFactor: readFreightFactor(value.inboundLimitingFactor, "inbound limiting factor"),
+    processedTonsPerDay: readNumber(value.processedTonsPerDay, "supply-chain processedTonsPerDay"),
+    stoneworksLimitingFactor: readStoneworksFactor(value.stoneworksLimitingFactor),
+    outboundAvailableTonsPerDay: readNumber(value.outboundAvailableTonsPerDay, "supply-chain outboundAvailableTonsPerDay"),
+    outboundRequestedTonsPerDay: readNumber(value.outboundRequestedTonsPerDay, "supply-chain outboundRequestedTonsPerDay"),
+    outboundShippedTonsPerDay: readNumber(value.outboundShippedTonsPerDay, "supply-chain outboundShippedTonsPerDay"),
+    outboundLimitingFactor: readFreightFactor(value.outboundLimitingFactor, "outbound limiting factor"),
   });
 }
 
@@ -269,78 +296,57 @@ export function validateSaveGame(value: unknown): SaveGame {
   if (!isRecord(value)) {
     throw new SaveGameError("save data must be an object");
   }
-  if (
-    value.formatVersion !== 1 &&
-    value.formatVersion !== 2 &&
-    value.formatVersion !== SAVE_FORMAT_VERSION
-  ) {
-    throw new SaveGameError(
-      `unsupported save format version: ${String(value.formatVersion)}`,
-    );
+  if (value.formatVersion !== 1 && value.formatVersion !== 2 && value.formatVersion !== 3 && value.formatVersion !== SAVE_FORMAT_VERSION) {
+    throw new SaveGameError(`unsupported save format version: ${String(value.formatVersion)}`);
   }
   if (value.scenarioId !== "millford-valley") {
     throw new SaveGameError(`unsupported scenario: ${String(value.scenarioId)}`);
   }
-  if (typeof value.scenarioSeed !== "string") {
-    throw new SaveGameError("scenarioSeed must be a string");
+  if (typeof value.scenarioSeed !== "string" || !isRecord(value.simulation) || !Array.isArray(value.simulation.roadSegments)) {
+    throw new SaveGameError("save must contain a scenario seed and simulation state");
   }
-  if (!isRecord(value.simulation)) {
-    throw new SaveGameError("simulation state must be an object");
-  }
-  if (!Array.isArray(value.simulation.roadSegments)) {
-    throw new SaveGameError("simulation roadSegments must be an array");
-  }
-
   const simulation = Object.freeze({
     tick: readSafeInteger(value.simulation.tick, "simulation tick", 0),
-    roadSegments: Object.freeze(
-      value.simulation.roadSegments.map(readRoadSegment),
-    ),
-    nextRoadSegmentNumber: readSafeInteger(
-      value.simulation.nextRoadSegmentNumber,
-      "nextRoadSegmentNumber",
-      1,
-    ),
+    roadSegments: Object.freeze(value.simulation.roadSegments.map(readRoadSegment)),
+    nextRoadSegmentNumber: readSafeInteger(value.simulation.nextRoadSegmentNumber, "nextRoadSegmentNumber", 1),
   });
   if (value.formatVersion === 1) {
-    return Object.freeze({
-      formatVersion: 1,
-      scenarioId: "millford-valley",
-      scenarioSeed: value.scenarioSeed,
-      simulation,
-    });
+    return Object.freeze({ formatVersion: 1, scenarioId: "millford-valley", scenarioSeed: value.scenarioSeed, simulation });
   }
-
   const development = readDevelopmentState(value.simulation.development);
   if (value.formatVersion === 2) {
+    return Object.freeze({ formatVersion: 2, scenarioId: "millford-valley", scenarioSeed: value.scenarioSeed, simulation: Object.freeze({ ...simulation, development }) });
+  }
+  if (value.formatVersion === 3) {
     return Object.freeze({
-      formatVersion: 2,
+      formatVersion: 3,
       scenarioId: "millford-valley",
       scenarioSeed: value.scenarioSeed,
-      simulation: Object.freeze({ ...simulation, development }),
+      simulation: Object.freeze({
+        ...simulation,
+        development,
+        roadTraffic: readLegacyRoadTrafficState(value.simulation.roadTraffic),
+      }),
     });
   }
-
   return Object.freeze({
-    formatVersion: 3,
+    formatVersion: 4,
     scenarioId: "millford-valley",
     scenarioSeed: value.scenarioSeed,
     simulation: Object.freeze({
       ...simulation,
       development,
+      supplyChain: readSupplyChainState(value.simulation.supplyChain),
       roadTraffic: readRoadTrafficState(value.simulation.roadTraffic),
     }),
   });
 }
 
-export function createSaveGame(simulation: Simulation): SaveGameV3 {
+export function createSaveGame(simulation: Simulation): SaveGameV4 {
   const state = simulation.getState();
-  if (!state.development || !state.roadTraffic) {
-    throw new SaveGameError(
-      "simulation did not provide development and road traffic state",
-    );
+  if (!state.development || !state.roadTraffic || !state.supplyChain) {
+    throw new SaveGameError("simulation did not provide complete authoritative state");
   }
-
   return validateSaveGame({
     formatVersion: SAVE_FORMAT_VERSION,
     scenarioId: "millford-valley",
@@ -350,9 +356,10 @@ export function createSaveGame(simulation: Simulation): SaveGameV3 {
       roadSegments: state.roadSegments,
       nextRoadSegmentNumber: state.nextRoadSegmentNumber,
       development: state.development,
+      supplyChain: state.supplyChain,
       roadTraffic: state.roadTraffic,
     },
-  }) as SaveGameV3;
+  }) as SaveGameV4;
 }
 
 export function restoreSaveGame(save: SaveGame): Simulation {
@@ -365,22 +372,14 @@ export function restoreSaveGame(save: SaveGame): Simulation {
       roadClass: segment.roadClass ?? "arterial",
     })),
     nextRoadSegmentNumber: validated.simulation.nextRoadSegmentNumber,
-    development:
-      validated.formatVersion !== 1
-        ? validated.simulation.development
-        : undefined,
-    roadTraffic:
-      validated.formatVersion === SAVE_FORMAT_VERSION
-        ? validated.simulation.roadTraffic
-        : undefined,
+    development: validated.formatVersion !== 1 ? validated.simulation.development : undefined,
+    supplyChain: validated.formatVersion === SAVE_FORMAT_VERSION ? validated.simulation.supplyChain : undefined,
+    roadTraffic: validated.formatVersion === SAVE_FORMAT_VERSION ? validated.simulation.roadTraffic : undefined,
   };
-
   try {
     return restoreSimulation(state);
   } catch (error) {
-    throw new SaveGameError("save contains invalid simulation state", {
-      cause: error,
-    });
+    throw new SaveGameError("save contains invalid simulation state", { cause: error });
   }
 }
 
@@ -395,14 +394,11 @@ export function deserializeSaveGame(contents: string): SaveGame {
   } catch (error) {
     throw new SaveGameError("save file is not valid JSON", { cause: error });
   }
-
   return validateSaveGame(parsed);
 }
 
 export function createSaveFile(save: SaveGame): Blob {
-  return new Blob([serializeSaveGame(save)], {
-    type: "application/json",
-  });
+  return new Blob([serializeSaveGame(save)], { type: "application/json" });
 }
 
 export async function readSaveFile(file: Blob): Promise<SaveGame> {

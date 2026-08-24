@@ -18,6 +18,7 @@ describe("selectable map features", () => {
       { id: "fertile-land-eastbank", kind: "resource" },
       { id: "crossing-millford", kind: "infrastructure" },
       { id: "market-connection-east", kind: "infrastructure" },
+      { id: "stoneworks-millford", kind: "infrastructure" },
       { id: "quarry-granite-ridge", kind: "resource" },
       { id: "settlement-millford", kind: "settlement" },
       { id: "settlement-eastbank", kind: "settlement" },
@@ -79,6 +80,7 @@ describe("selectable map features", () => {
 
     expect(getRoadSnapAnchors(geography)).toEqual([
       geography.quarry.position,
+      geography.stoneworks.position,
       geography.externalMarketConnection.position,
       ...geography.settlementSeeds.map(({ position }) => position),
       fertileCenter,

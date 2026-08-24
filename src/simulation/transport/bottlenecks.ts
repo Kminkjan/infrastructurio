@@ -1,9 +1,9 @@
 import type {
-  AggregateFreightSnapshot,
   BottleneckAnalysisSnapshot,
   Point,
   RoadNetwork,
   ScenarioGeography,
+  StoneSupplyChainSnapshot,
 } from "../../shared";
 import type { RoadTrafficStateSnapshot } from "./road-traffic";
 
@@ -96,10 +96,15 @@ export function createBottleneckAnalysis(
   geography: ScenarioGeography,
   roadNetwork: RoadNetwork,
   roadTraffic: RoadTrafficStateSnapshot,
-  freight: AggregateFreightSnapshot,
+  supplyChain: StoneSupplyChainSnapshot,
 ): BottleneckAnalysisSnapshot {
-  const affectedRouteLinkIds = freight.route?.linkIds ?? [];
-  const routeLinkIds = new Set(affectedRouteLinkIds);
+  const freightLegs = [
+    supplyChain.inboundFreight,
+    supplyChain.outboundFreight,
+  ];
+  const affectedRouteLinkIds = [
+    ...new Set(freightLegs.flatMap((freight) => freight.route?.linkIds ?? [])),
+  ];
   const roadBottlenecks = roadNetwork.links
     .filter(
       (link) =>
@@ -118,18 +123,27 @@ export function createBottleneckAnalysis(
         end.position,
         geography,
       );
-      const affectedFlows = routeLinkIds.has(link.id)
-        ? [
-            Object.freeze({
-              id: "quarry-market-granite" as const,
-              commodity: "granite" as const,
-              originName: geography.quarry.name,
-              destinationName: geography.externalMarketConnection.name,
-              demandUnitsPerDay: freight.demandTonsPerDay,
-              assignedUnitsPerDay: link.assignedFlowUnitsPerDay,
-            }),
-          ]
-        : [];
+      const affectedFlows = freightLegs
+        .filter((freight) => freight.route?.linkIds.includes(link.id))
+        .map((freight) =>
+          Object.freeze({
+            id: freight.id,
+            commodity: freight.commodity,
+            originName:
+              freight.originId === geography.quarry.id
+                ? geography.quarry.name
+                : geography.stoneworks.name,
+            destinationName:
+              freight.destinationId === geography.stoneworks.id
+                ? geography.stoneworks.name
+                : geography.externalMarketConnection.name,
+            demandUnitsPerDay: freight.requestedTonsPerDay,
+            assignedUnitsPerDay: freight.shippedTonsPerDay,
+          }),
+        );
+      const representativeFreight = freightLegs.find((freight) =>
+        freight.route?.linkIds.includes(link.id),
+      );
 
       return Object.freeze({
         id: `bottleneck:${link.id}`,
@@ -151,8 +165,9 @@ export function createBottleneckAnalysis(
             link.assignedFlowUnitsPerDay / link.capacityUnitsPerDay,
         }),
         routeChoice: Object.freeze({
-          routeGeneralizedCostHours: freight.route?.generalizedCostHours ?? 0,
-          routeLinkCount: freight.route?.linkIds.length ?? 0,
+          routeGeneralizedCostHours:
+            representativeFreight?.route?.generalizedCostHours ?? 0,
+          routeLinkCount: representativeFreight?.route?.linkIds.length ?? 0,
           lastAssignmentTick: roadTraffic.lastAssignmentTick,
           nextAssignmentTick: roadTraffic.nextAssignmentTick,
         }),

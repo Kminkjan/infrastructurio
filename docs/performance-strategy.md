@@ -67,11 +67,12 @@ guardrails rather than a frame-time claim. Representative traffic now establishe
 the scenario-specific display count below; a hardware frame-time budget remains
 future measurement work.
 
-The M0 quarry renderer now uses one representative vehicle per 20 assigned tons
-per day. The current scenario's 100-ton daily demand therefore produces at most
-five freight graphics. Those graphics are reused while their visual trips are
-active and removed at destinations, on route changes, or on disconnection. This
-is a scenario-specific display count, not a general traffic capacity target.
+The freight renderer uses one representative vehicle per 20 assigned tons per
+day per leg. At the current 120-ton inbound and 100-ton outbound maxima, the
+two-leg supply chain therefore produces at most eleven freight graphics. Those
+graphics are reused while their visual trips are active and removed at
+destinations, on route changes, or on disconnection. This is a scenario-specific
+display count, not a general traffic capacity target.
 
 The accessibility research prototype caches results per candidate location. A
 location's first dependency boundary is its complete reachable road component. A
@@ -92,6 +93,7 @@ development snapshot only when that snapshot changes.
 Road traffic assignment runs every eight simulated ticks (eight hours) and
 immediately after a network edit. A multi-tick advance processes each crossed
 assignment boundary deterministically, while representative freight motion
-continues on the render-frame clock. The current network and single freight
-origin-destination pair are intentionally small; incremental or equilibrium
-assignment is deferred until multiple measured flows make it necessary.
+continues on the render-frame clock. Stoneworks inventories and processing run
+only at crossed daily boundaries. The current network and two aggregate freight
+origin-destination pairs are intentionally small; incremental or equilibrium
+assignment is deferred until measured flow counts make it necessary.

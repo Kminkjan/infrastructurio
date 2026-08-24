@@ -29,6 +29,12 @@ export interface QuarryGeography {
   readonly position: Point;
 }
 
+export interface StoneworksGeography {
+  readonly id: string;
+  readonly name: string;
+  readonly position: Point;
+}
+
 export interface FertileLandGeography {
   readonly id: string;
   readonly name: string;
@@ -55,6 +61,7 @@ export interface ScenarioGeography {
   readonly river: RiverGeography;
   readonly crossingArea: CrossingAreaGeography;
   readonly quarry: QuarryGeography;
+  readonly stoneworks: StoneworksGeography;
   readonly fertileLand: FertileLandGeography;
   readonly settlementSeeds: readonly SettlementSeedGeography[];
   readonly externalMarketConnection: ExternalMarketConnectionGeography;

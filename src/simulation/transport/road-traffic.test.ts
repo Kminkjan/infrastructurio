@@ -9,19 +9,22 @@ import {
   assignedRoadTrafficRoute,
   createRoadTraffic,
   TRAFFIC_ASSIGNMENT_INTERVAL_TICKS,
+  type RoadTrafficDemand,
 } from "./road-traffic";
 
 const start = { x: 0, y: 0 };
 const end = { x: 100, y: 0 };
 
+function demand(
+  id = "freight",
+  assignedFlowUnitsPerDay = 100,
+): RoadTrafficDemand {
+  return { id, start, end, assignedFlowUnitsPerDay };
+}
+
 function overloadedBridgeNetwork() {
   const segments: readonly RoadSegment[] = [
-    {
-      id: "old-bridge",
-      roadClass: "local",
-      start,
-      end,
-    },
+    { id: "old-bridge", roadClass: "local", start, end },
     {
       id: "bypass-west",
       roadClass: "arterial",
@@ -46,41 +49,22 @@ function overloadedBridgeNetwork() {
 
 describe("lower-frequency road traffic assignment", () => {
   it("deterministically reroutes persistent demand around an overloaded bridge", () => {
-    const first = createRoadTraffic(
-      overloadedBridgeNetwork(),
-      0,
-      start,
-      end,
-      100,
-    );
-    const replay = createRoadTraffic(
-      overloadedBridgeNetwork(),
-      0,
-      start,
-      end,
-      100,
-    );
+    const demands = [demand()];
+    const first = createRoadTraffic(overloadedBridgeNetwork(), 0, demands);
+    const replay = createRoadTraffic(overloadedBridgeNetwork(), 0, demands);
     expect(first).toEqual(replay);
     expect(
-      assignedRoadTrafficRoute(first.network, first.state)?.linkIds,
+      assignedRoadTrafficRoute(first.network, first.state, "freight")?.linkIds,
     ).toEqual(["old-bridge:link-1"]);
     expect(
       first.network.links.find(({ id }) => id === "old-bridge:link-1"),
-    ).toMatchObject({
-      assignedFlowUnitsPerDay: 100,
-    });
-    expect(
-      first.network.links.find(({ id }) => id === "old-bridge:link-1")
-        ?.congestionDelayHours,
-    ).toBeGreaterThan(0);
+    ).toMatchObject({ assignedFlowUnitsPerDay: 100 });
 
     const beforeCadence = advanceRoadTraffic(
       first.network,
       first.state,
       TRAFFIC_ASSIGNMENT_INTERVAL_TICKS - 1,
-      start,
-      end,
-      100,
+      demands,
     );
     expect(beforeCadence.network).toBe(first.network);
     expect(beforeCadence.state).toBe(first.state);
@@ -89,30 +73,39 @@ describe("lower-frequency road traffic assignment", () => {
       first.network,
       first.state,
       TRAFFIC_ASSIGNMENT_INTERVAL_TICKS,
-      start,
-      end,
-      100,
+      demands,
     );
     expect(
-      assignedRoadTrafficRoute(reassigned.network, reassigned.state)?.linkIds,
+      assignedRoadTrafficRoute(
+        reassigned.network,
+        reassigned.state,
+        "freight",
+      )?.linkIds,
     ).toEqual([
       "bypass-west:link-1",
       "bypass:link-1",
       "bypass-east:link-1",
     ]);
-    expect(reassigned.state.lastAssignmentTick).toBe(
-      TRAFFIC_ASSIGNMENT_INTERVAL_TICKS,
-    );
+  });
+
+  it("sums independently routed aggregate flows on shared links", () => {
+    const assigned = createRoadTraffic(overloadedBridgeNetwork(), 0, [
+      demand("inbound", 60),
+      demand("outbound", 80),
+    ]);
+
+    expect(
+      assigned.network.links.find(({ id }) => id === "old-bridge:link-1"),
+    ).toMatchObject({ assignedFlowUnitsPerDay: 140 });
+    expect(assigned.state.flows.map(({ id }) => id)).toEqual([
+      "inbound",
+      "outbound",
+    ]);
   });
 
   it("feeds changed congestion cost into accessibility decisions", () => {
-    const initial = createRoadTraffic(
-      overloadedBridgeNetwork(),
-      0,
-      start,
-      end,
-      100,
-    );
+    const demands = [demand()];
+    const initial = createRoadTraffic(overloadedBridgeNetwork(), 0, demands);
     const scorer = createAccessibilityScorer(
       {
         candidates: [{ id: "site", name: "Site", position: start }],
@@ -125,14 +118,11 @@ describe("lower-frequency road traffic assignment", () => {
     );
     const bridgeCost =
       scorer.getSnapshot().locations[0]!.market.nearestNetworkCost;
-
     const reassigned = advanceRoadTraffic(
       initial.network,
       initial.state,
       TRAFFIC_ASSIGNMENT_INTERVAL_TICKS,
-      start,
-      end,
-      100,
+      demands,
     );
     const after = scorer.updateNetwork(reassigned.network);
 

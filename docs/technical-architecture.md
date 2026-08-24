@@ -161,33 +161,38 @@ Collinear overlapping segments are rejected
 because lanes, parallel links, bridges, tunnels, and junction configuration are
 outside the issue's simple-road scope.
 
-The M0 quarry freight assignment is a pure simulation-core calculation derived
-from scenario terminals and the authoritative road graph. Its serializable
-snapshot contains daily production, market demand, the selected route and cost,
-shipped volume, and a limiting-factor explanation. React formats those values for
-the quarry and market inspector but does not recalculate economic outcomes.
+The M3 stone supply chain is a pure simulation-core reducer over bounded input
+and output inventories. It advances once per simulated day in inbound,
+processing, then outbound order. Its serializable snapshot contains both
+aggregate freight legs, stoneworks activity and inventory, selected routes and
+costs, shipped volumes, and limiting-factor explanations. React formats those
+values for terminal inspectors but does not recalculate economic outcomes.
 
 Representative freight vehicles remain renderer-owned. A pure rendering helper
-validates the assigned route against the snapshot road graph, resolves its ordered
-node geometry, and deterministically samples positions for the current animation
-time. PixiJS reconciles only those short-lived graphics. A snapshot route or flow
-change resets the visual plan, while disconnection clears it immediately; no
-vehicle identity or animation phase crosses into the simulation protocol.
+validates each assigned route against the snapshot road graph, resolves its
+ordered node geometry, and deterministically samples positions for the current
+animation time. PixiJS reconciles only those short-lived graphics. Each leg has a
+distinct visual identity namespace; a route or flow change resets its visual
+plan, while disconnection clears it immediately. No vehicle identity or animation
+phase crosses into the simulation protocol.
 
 ## Save format
 
-Saves use an explicit versioned JSON document. Format version 3 contains the
+Saves use an explicit versioned JSON document. Format version 4 contains the
 Millford Valley scenario ID and seed plus the authoritative mutable state: the
-simulation tick, authored road segments, the next road-segment number, completed
-growth, pending construction, development evaluation counters, and current road
-traffic assignment cadence and route. Derived geography, road nodes, and link
-costs are rebuilt; the saved assigned route is validated against that topology
-and reapplied so persistent congestion resumes identically. The freight snapshot
-is then derived from the restored assignment.
+simulation tick, authored roads, development history, bounded stoneworks
+inventories and daily update cadence, both current aggregate flow rates, and the
+eight-hour route-assignment state for both legs. Derived geography, road nodes,
+link costs, accessibility, explanations, and presentation state are rebuilt.
+Saved routes are validated against rebuilt topology and reapplied so congestion
+and future supply-chain steps replay identically.
 
-Format versions 1 and 2 remain loadable. Roads without a class migrate to the
+Format versions 1 through 3 remain loadable. Roads without a class migrate to the
 current default arterial profile, and a traffic assignment is derived at the
-saved tick. Because version 1 contains no command history or development state,
+saved tick. Version 3 represented the superseded direct quarry-export flow and
+therefore cannot contain stoneworks history; migration starts the new stoneworks
+dormant at the saved tick rather than inventing past inventory. Because version 1
+contains no command history or development state,
 it resumes at its saved tick with zero infrastructure-enabled growth and begins
 evaluating from the next weekly boundary;
 the loader does not invent past growth from the final road layout.
@@ -226,11 +231,12 @@ values and labels the outcome but does not recalculate pressure or weighted
 choice. The explanation is deliberately not persisted because its inputs are
 already deterministically rebuilt from saved road and development state.
 
-M2 road traffic state remains simulation-owned. Network edits trigger an immediate
+Road traffic state remains simulation-owned. Network edits trigger an immediate
 assignment; time advancement processes fixed eight-tick boundaries even when the
-caller advances many ticks at once. Each assignment routes quarry demand using
-the previous link costs, replaces assigned link flows, and derives new congestion
-costs. The accessibility scorer fingerprints generalized link cost as well as
-topology, so only candidates whose routed opportunity costs changed receive new
-score objects. PixiJS continues to animate representative vehicles every render
-frame from the assigned freight snapshot and never updates congestion.
+caller advances many ticks at once. Each assignment independently routes the two
+supply-chain legs using previous link costs, sums their rates on shared links, and
+derives new congestion costs. Daily economy boundaries are interleaved with those
+assignments deterministically. Realized processing adds a dynamic stoneworks labor
+opportunity before development consumes the updated accessibility snapshot.
+PixiJS continues to animate representative vehicles every render frame and never
+updates congestion, inventories, or processing.

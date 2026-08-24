@@ -40,7 +40,7 @@ export function getBottleneckOverlayFeatures(
         id: `affected-flow:${linkId}`,
         role: "affected-flow",
         ...line,
-        label: "Granite freight affected by the current route choice",
+        label: "Stone supply freight affected by the current route choice",
       });
     }
   }

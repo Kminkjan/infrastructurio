@@ -16,6 +16,7 @@ function polygonCenter(boundary: readonly Point[]): Point {
 
 export function createMillfordAccessibilityModel(
   geography: ScenarioGeography,
+  stoneworksLaborOpportunity = 0,
 ): AccessibilityModel {
   const [millford, eastbank] = geography.settlementSeeds;
   if (!millford || !eastbank) {
@@ -51,6 +52,16 @@ export function createMillfordAccessibilityModel(
         position: eastbank.position,
         weight: 40,
       }),
+      ...(stoneworksLaborOpportunity > 0
+        ? [
+            Object.freeze({
+              id: `${geography.stoneworks.id}:labor`,
+              factor: "labor" as const,
+              position: geography.stoneworks.position,
+              weight: stoneworksLaborOpportunity,
+            }),
+          ]
+        : []),
       Object.freeze({
         id: geography.quarry.id,
         factor: "resource" as const,

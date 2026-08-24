@@ -167,20 +167,42 @@ Deleting a player-authored segment removes all links derived from it and rebuild
 the remaining topology. The M0 graph intentionally does not model collinear
 overlaps, grade-separated crossings, curved roads, or configurable junctions.
 
-### M0 aggregate quarry freight
+### M3 Millford stone supply chain
 
-The Millford Valley quarry-to-market flow is a daily aggregate rate rather than
-an inventory or a collection of persistent shipments. The quarry offers at most
-120 tons of granite per day, while the external market requests at most 100 tons
-per day. No freight is assigned unless the road graph contains a route whose
-end nodes coincide with the quarry and market terminals.
+The original quarry export toy is now a two-leg aggregate supply chain:
+
+```text
+Granite Ridge Quarry -> Millford Stoneworks -> Eastern External Market
+```
+
+The quarry offers at most 120 tons of raw granite per day. The stoneworks has a
+240-ton input store, processes at most 100 tons per day at a one-to-one prototype
+conversion, and has a 160-ton finished-stone store. The market requests at most
+100 tons of finished stone per day. These are explicit vertical-slice balancing
+values rather than real-world production claims.
+
+The economy advances at fixed daily boundaries in stable order: inbound granite
+is delivered, available input is processed subject to processing and output-store
+capacity, then finished stone is shipped from inventory. A large advance processes
+every crossed daily boundary. This order is intentionally simple and means a full
+output store can constrain that day's processing before outbound sales free space.
+No persistent shipment or per-vehicle inventory exists.
 
 The M2 cost model supersedes the original geometric freight cost. A route at or
 below 16 generalized hours can carry all otherwise available freight. Between 16
 and 32 hours, shipped volume declines linearly; at 32 hours the route becomes
 unviable. These explicit scenario values remain balancing inputs. The freight
 snapshot records the assigned route and the same production, demand, generalized
-cost, and limiting-factor values shown by the inspector.
+cost, and limiting-factor values shown by the inspector. The two freight legs and
+the stoneworks separately expose route, production or storage, input shortage,
+processing capacity, finished inventory, and market-demand constraints from the
+same values used by the reducer.
+
+Realized processing creates up to 40 labor-opportunity weight at the stoneworks,
+scaled linearly from zero to full processing. That opportunity is routed through
+the existing accessibility scorer and therefore affects settlement pressure only
+where the stoneworks is reachable. Residential development still evaluates on
+its weekly cadence, so the response remains delayed.
 
 ### M2 road capacity and congestion
 
@@ -206,16 +228,15 @@ generalized cost = t0 + delay
 ```
 
 The deliberately steep curve makes a toy-scale overloaded crossing capable of
-changing a route decision. Quarry-to-market demand supplies 100 assigned flow
-units per day, with one prototype flow unit corresponding to one ton of requested
-daily freight. Assignment runs immediately after a network edit and then every
-eight simulated hours. It chooses one minimum-cost route using the previous
-assignment's persistent costs, applies all demand to that route, and publishes
-the resulting link costs. Accessibility is recalculated from those same costs,
-so congestion can change the inputs used by weekly development decisions.
+changing a route decision. Each active supply-chain leg contributes one assigned
+flow unit per shipped ton per day. Assignment runs immediately after a network
+edit and then every eight simulated hours. Each leg chooses one minimum-cost route
+using the previous assignment's persistent costs; link demand is the sum of every
+leg using it. Accessibility is recalculated from those same costs, so congestion
+can change the inputs used by weekly development decisions.
 
-This is capacity-restraint scaffolding, not a traffic equilibrium. It has one
-freight demand source, does not split flow across routes, and does not yet generate
+This is capacity-restraint scaffolding, not a traffic equilibrium. It has two
+aggregate freight legs, does not split a leg across routes, and does not yet generate
 commuter traffic from development. With competing routes, all-or-nothing demand
 can shift again on later assignment boundaries. Queue length and spillback remain
 out of scope.
@@ -247,14 +268,14 @@ the geographic crossing as an independently editable segment.
 
 ### M0 representative freight traffic
 
-Visible quarry trucks are presentation samples of the assigned daily freight
-rate, not authoritative shipments. The renderer resolves the freight snapshot's
+Visible trucks are presentation samples of both assigned daily freight rates,
+not authoritative shipments. The renderer resolves each freight snapshot's
 ordered route nodes into a polyline and displays one representative vehicle per
 20 shipped tons per day, rounded up for any positive flow. Samples move at a
 presentation speed of 90 map units per real-time second.
 
-Each sample is removed when it reaches the market and a later visual trip starts
-at the quarry. A changed route or shipped volume replaces the current visual
+Each sample is removed when it reaches its leg's destination and a later visual
+trip starts at that leg's origin. A changed route or shipped volume replaces the current visual
 sampling plan; a missing or unviable route clears it. These animation phases are
 intentionally absent from simulation snapshots and saves.
 

@@ -108,6 +108,7 @@ export async function createWorldRenderer(
 
   const world = new Container();
   const geographyLayer = new Container();
+  const industryLayer = new Container();
   const developmentLayer = new Container();
   const roadLayer = new Container();
   const analysisOverlayLayer = new Container();
@@ -123,6 +124,7 @@ export async function createWorldRenderer(
   analysisOverlayLayer.eventMode = "none";
   world.addChild(
     geographyLayer,
+    industryLayer,
     developmentLayer,
     roadLayer,
     analysisOverlayLayer,
@@ -137,6 +139,7 @@ export async function createWorldRenderer(
 
   let currentSnapshot = initialSnapshot;
   let renderedGeography: SimulationSnapshot["geography"] | undefined;
+  let renderedSupplyChain: SimulationSnapshot["stoneSupplyChain"] | undefined;
   let renderedDevelopment: SimulationSnapshot["development"] | undefined;
   let renderedRoadNetwork: SimulationSnapshot["roadNetwork"] | undefined;
   let renderedBottlenecks: SimulationSnapshot["bottlenecks"] | undefined;
@@ -158,7 +161,7 @@ export async function createWorldRenderer(
   let constructionEnd: Point | undefined;
   let suppressNextSelection = false;
   let selectionSuppressionTimer: number | undefined;
-  let representativeTrafficPlan: RepresentativeFreightTrafficPlan | undefined;
+  let representativeTrafficPlans: readonly RepresentativeFreightTrafficPlan[] = [];
   let representativeTrafficElapsedSeconds = 0;
   const representativeVehicleGraphics = new Map<string, Graphics>();
 
@@ -382,6 +385,31 @@ export async function createWorldRenderer(
     refreshSelectableFeatures();
   }
 
+  function drawIndustry(snapshot: SimulationSnapshot): void {
+    if (renderedSupplyChain === snapshot.stoneSupplyChain) {
+      return;
+    }
+    destroyChildren(industryLayer);
+    renderedSupplyChain = snapshot.stoneSupplyChain;
+    const stoneworks = snapshot.geography.stoneworks.position;
+    const state = snapshot.stoneSupplyChain.stoneworks;
+    const graphic = new Graphics()
+      .roundRect(stoneworks.x - 30, stoneworks.y - 24, 60, 48, 5)
+      .fill({ color: state.active ? 0xb8783e : 0x716d65 })
+      .rect(stoneworks.x - 20, stoneworks.y - 36, 12, 20)
+      .fill({ color: state.active ? 0x665044 : 0x514f4b })
+      .circle(stoneworks.x + 16, stoneworks.y - 8, 7)
+      .fill({ color: state.active ? 0xf0c56c : 0x99968e });
+    const inventoryShare =
+      state.finishedStoneInventoryTons / state.outputStorageCapacityTons;
+    if (inventoryShare > 0) {
+      graphic
+        .rect(stoneworks.x - 25, stoneworks.y + 15, 50 * inventoryShare, 5)
+        .fill({ color: 0xe9d7a9 });
+    }
+    industryLayer.addChild(graphic);
+  }
+
   function drawBottleneckOverlay(snapshot: SimulationSnapshot): void {
     if (
       renderedBottlenecks === snapshot.bottlenecks &&
@@ -479,26 +507,35 @@ export async function createWorldRenderer(
   }
 
   function updateRepresentativeTraffic(snapshot: SimulationSnapshot): void {
-    const nextPlan = createRepresentativeFreightTrafficPlan(
-      snapshot.quarryMarketFreight,
-      snapshot.roadNetwork,
-    );
-    if (nextPlan?.key === representativeTrafficPlan?.key) {
+    const nextPlans = [
+      snapshot.stoneSupplyChain.inboundFreight,
+      snapshot.stoneSupplyChain.outboundFreight,
+    ].flatMap((freight) => {
+      const plan = createRepresentativeFreightTrafficPlan(
+        freight,
+        snapshot.roadNetwork,
+      );
+      return plan ? [plan] : [];
+    });
+    if (
+      nextPlans.map(({ key }) => key).join(";") ===
+      representativeTrafficPlans.map(({ key }) => key).join(";")
+    ) {
       return;
     }
 
-    representativeTrafficPlan = nextPlan;
+    representativeTrafficPlans = nextPlans;
     representativeTrafficElapsedSeconds = 0;
     clearRepresentativeVehicles();
   }
 
   function drawRepresentativeVehicles(): void {
-    const samples = representativeTrafficPlan
-      ? sampleRepresentativeFreightVehicles(
-          representativeTrafficPlan,
+    const samples = representativeTrafficPlans.flatMap((plan) =>
+      sampleRepresentativeFreightVehicles(
+          plan,
           representativeTrafficElapsedSeconds,
-        )
-      : [];
+        ),
+    );
     const activeIds = new Set(samples.map(({ id }) => id));
 
     for (const [id, graphic] of representativeVehicleGraphics) {
@@ -747,6 +784,7 @@ export async function createWorldRenderer(
   function drawSnapshot(snapshot: SimulationSnapshot): void {
     currentSnapshot = snapshot;
     drawGeography(snapshot);
+    drawIndustry(snapshot);
     drawDevelopment(snapshot);
     drawRoads(snapshot);
     drawBottleneckOverlay(snapshot);
@@ -755,7 +793,7 @@ export async function createWorldRenderer(
   }
 
   function animateRepresentativeTraffic(): void {
-    if (!representativeTrafficPlan) {
+    if (representativeTrafficPlans.length === 0) {
       return;
     }
 

@@ -15,6 +15,7 @@ interface RouteSegment {
 }
 
 export interface RepresentativeFreightTrafficPlan {
+  readonly flowId: string;
   readonly key: string;
   readonly vehicleCount: number;
   readonly routeLength: number;
@@ -113,7 +114,8 @@ export function createRepresentativeFreightTrafficPlan(
     .join(";");
 
   return {
-    key: `${routeKey}|${geometryKey}|${freight.shippedTonsPerDay}`,
+    flowId: freight.id,
+    key: `${freight.id}|${routeKey}|${geometryKey}|${freight.shippedTonsPerDay}`,
     vehicleCount,
     routeLength,
     travelDurationSeconds: routeLength / REPRESENTATIVE_VEHICLE_SPEED,
@@ -169,7 +171,7 @@ export function sampleRepresentativeFreightVehicles(
     const { position, rotation } = samplePosition(plan, progress);
 
     return {
-      id: `representative-freight-${slot}-trip-${trip}`,
+      id: `representative-freight-${plan.flowId}-${slot}-trip-${trip}`,
       position,
       rotation,
       progress,

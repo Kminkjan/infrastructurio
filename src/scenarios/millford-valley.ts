@@ -59,6 +59,10 @@ export function generateMillfordValley(seed: string): ScenarioGeography {
     MAP_WIDTH,
     180 + randomInteger(random, -14, 14),
   );
+  const millfordPosition = point(
+    crossingCenter.x - 105,
+    crossingCenter.y + 82,
+  );
 
   return Object.freeze({
     scenarioId: "millford-valley",
@@ -82,6 +86,11 @@ export function generateMillfordValley(seed: string): ScenarioGeography {
       name: "Granite Ridge Quarry",
       position: quarryPosition,
     }),
+    stoneworks: Object.freeze({
+      id: "stoneworks-millford",
+      name: "Millford Stoneworks",
+      position: point(millfordPosition.x + 62, millfordPosition.y - 18),
+    }),
     fertileLand: Object.freeze({
       id: "fertile-land-eastbank",
       name: "Eastbank Fields",
@@ -96,7 +105,7 @@ export function generateMillfordValley(seed: string): ScenarioGeography {
       Object.freeze({
         id: "settlement-millford",
         name: "Millford",
-        position: point(crossingCenter.x - 105, crossingCenter.y + 82),
+        position: millfordPosition,
       }),
       Object.freeze({
         id: "settlement-eastbank",

@@ -12,12 +12,24 @@ import {
 
 export const TRAFFIC_ASSIGNMENT_INTERVAL_TICKS = TICKS_PER_DAY / 3;
 
-export interface RoadTrafficStateSnapshot {
-  readonly lastAssignmentTick: number;
-  readonly nextAssignmentTick: number;
+export interface RoadTrafficDemand {
+  readonly id: string;
+  readonly start: Point;
+  readonly end: Point;
+  readonly assignedFlowUnitsPerDay: number;
+}
+
+export interface RoadTrafficFlowStateSnapshot {
+  readonly id: string;
   readonly assignedFlowUnitsPerDay: number;
   readonly routeNodeIds: readonly string[] | null;
   readonly routeLinkIds: readonly string[] | null;
+}
+
+export interface RoadTrafficStateSnapshot {
+  readonly lastAssignmentTick: number;
+  readonly nextAssignmentTick: number;
+  readonly flows: readonly RoadTrafficFlowStateSnapshot[];
 }
 
 export interface RoadTrafficUpdate {
@@ -31,11 +43,23 @@ function safeTick(value: number, name: string): void {
   }
 }
 
-function assignedFlow(value: number): number {
-  if (!Number.isFinite(value) || value < 0) {
-    throw new RangeError("road traffic demand must be non-negative and finite");
+function validateDemands(
+  demands: readonly RoadTrafficDemand[],
+): readonly RoadTrafficDemand[] {
+  const ids = new Set<string>();
+  for (const demand of demands) {
+    if (demand.id.length === 0 || ids.has(demand.id)) {
+      throw new RangeError("road traffic demand ids must be non-empty and unique");
+    }
+    if (
+      !Number.isFinite(demand.assignedFlowUnitsPerDay) ||
+      demand.assignedFlowUnitsPerDay < 0
+    ) {
+      throw new RangeError("road traffic demand must be non-negative and finite");
+    }
+    ids.add(demand.id);
   }
-  return value;
+  return demands;
 }
 
 function samePoint(first: Point, second: Point): boolean {
@@ -63,35 +87,52 @@ function routeEndpointsMatch(
   );
 }
 
+function flowMap(
+  flows: readonly RoadTrafficFlowStateSnapshot[],
+): ReadonlyMap<string, number> {
+  const totals = new Map<string, number>();
+  for (const flow of flows) {
+    for (const linkId of flow.routeLinkIds ?? []) {
+      totals.set(
+        linkId,
+        (totals.get(linkId) ?? 0) + flow.assignedFlowUnitsPerDay,
+      );
+    }
+  }
+  return totals;
+}
+
 function assignAtTick(
   network: RoadNetwork,
   tick: number,
-  start: Point,
-  end: Point,
-  demandInput: number,
+  demandsInput: readonly RoadTrafficDemand[],
 ): RoadTrafficUpdate {
   safeTick(tick, "traffic assignment tick");
-  const demand = assignedFlow(demandInput);
+  const demands = validateDemands(demandsInput);
   if (!Number.isSafeInteger(tick + TRAFFIC_ASSIGNMENT_INTERVAL_TICKS)) {
     throw new RangeError(
       "next traffic assignment tick exceeds the safe integer range",
     );
   }
-  const route = findRoadRoute(network, start, end);
-  const flow = route ? demand : 0;
-  const flowByLinkId = new Map(
-    route?.linkIds.map((linkId) => [linkId, flow] as const) ?? [],
+  const flows = Object.freeze(
+    demands.map((demand) => {
+      const route = findRoadRoute(network, demand.start, demand.end);
+      return Object.freeze({
+        id: demand.id,
+        assignedFlowUnitsPerDay: route
+          ? demand.assignedFlowUnitsPerDay
+          : 0,
+        routeNodeIds: route ? Object.freeze([...route.nodeIds]) : null,
+        routeLinkIds: route ? Object.freeze([...route.linkIds]) : null,
+      });
+    }),
   );
-  const assignedNetwork = applyRoadLinkFlows(network, flowByLinkId);
-
   return Object.freeze({
-    network: assignedNetwork,
+    network: applyRoadLinkFlows(network, flowMap(flows)),
     state: Object.freeze({
       lastAssignmentTick: tick,
       nextAssignmentTick: tick + TRAFFIC_ASSIGNMENT_INTERVAL_TICKS,
-      assignedFlowUnitsPerDay: flow,
-      routeNodeIds: route ? Object.freeze([...route.nodeIds]) : null,
-      routeLinkIds: route ? Object.freeze([...route.linkIds]) : null,
+      flows,
     }),
   });
 }
@@ -99,20 +140,16 @@ function assignAtTick(
 export function createRoadTraffic(
   network: RoadNetwork,
   tick: number,
-  start: Point,
-  end: Point,
-  demand: number,
+  demands: readonly RoadTrafficDemand[],
 ): RoadTrafficUpdate {
-  return assignAtTick(network, tick, start, end, demand);
+  return assignAtTick(network, tick, demands);
 }
 
 export function advanceRoadTraffic(
   network: RoadNetwork,
   state: RoadTrafficStateSnapshot,
   targetTick: number,
-  start: Point,
-  end: Point,
-  demand: number,
+  demands: readonly RoadTrafficDemand[],
 ): RoadTrafficUpdate {
   safeTick(targetTick, "traffic target tick");
   if (targetTick < state.lastAssignmentTick) {
@@ -127,14 +164,11 @@ export function advanceRoadTraffic(
     const update = assignAtTick(
       currentNetwork,
       currentState.nextAssignmentTick,
-      start,
-      end,
-      demand,
+      demands,
     );
     currentNetwork = update.network;
     currentState = update.state;
   }
-
   return Object.freeze({ network: currentNetwork, state: currentState });
 }
 
@@ -142,69 +176,57 @@ export function restoreRoadTraffic(
   network: RoadNetwork,
   state: RoadTrafficStateSnapshot,
   simulationTick: number,
-  start: Point,
-  end: Point,
-  demandInput: number,
+  demandsInput: readonly RoadTrafficDemand[],
 ): RoadTrafficUpdate {
   safeTick(simulationTick, "simulation tick");
   safeTick(state.lastAssignmentTick, "last traffic assignment tick");
   safeTick(state.nextAssignmentTick, "next traffic assignment tick");
-  const demand = assignedFlow(demandInput);
+  const demands = validateDemands(demandsInput);
   if (
     state.lastAssignmentTick > simulationTick ||
     state.nextAssignmentTick <= simulationTick ||
     state.nextAssignmentTick - state.lastAssignmentTick !==
-      TRAFFIC_ASSIGNMENT_INTERVAL_TICKS
+      TRAFFIC_ASSIGNMENT_INTERVAL_TICKS ||
+    state.flows.length !== demands.length
   ) {
     throw new RangeError("saved traffic assignment cadence is inconsistent");
   }
 
-  const hasRoute = state.routeNodeIds !== null || state.routeLinkIds !== null;
-  if (
-    (state.routeNodeIds === null) !== (state.routeLinkIds === null) ||
-    !Number.isFinite(state.assignedFlowUnitsPerDay) ||
-    state.assignedFlowUnitsPerDay < 0
-  ) {
-    throw new RangeError("saved road traffic route is inconsistent");
-  }
-  if (!hasRoute) {
+  const restoredFlows = demands.map((demand) => {
+    const saved = state.flows.find(({ id }) => id === demand.id);
     if (
-      state.assignedFlowUnitsPerDay !== 0 ||
-      findRoadRoute(network, start, end)
+      !saved ||
+      saved.assignedFlowUnitsPerDay !== demand.assignedFlowUnitsPerDay ||
+      (saved.routeNodeIds === null) !== (saved.routeLinkIds === null)
     ) {
-      throw new RangeError(
-        "saved road traffic without a route does not match its network",
-      );
+      throw new RangeError("saved road traffic flow does not match its demand");
+    }
+    if (saved.routeNodeIds === null || saved.routeLinkIds === null) {
+      if (findRoadRoute(network, demand.start, demand.end)) {
+        throw new RangeError("saved road traffic route does not match its network");
+      }
+      return Object.freeze({ ...saved, routeNodeIds: null, routeLinkIds: null });
+    }
+    const route = createRoadRouteFromIds(
+      network,
+      saved.routeNodeIds,
+      saved.routeLinkIds,
+    );
+    if (!route || !routeEndpointsMatch(network, route, demand.start, demand.end)) {
+      throw new RangeError("saved road traffic route does not match its demand");
     }
     return Object.freeze({
-      network: applyRoadLinkFlows(network, new Map()),
-      state: Object.freeze({ ...state, routeNodeIds: null, routeLinkIds: null }),
-    });
-  }
-
-  const route = createRoadRouteFromIds(
-    network,
-    state.routeNodeIds ?? [],
-    state.routeLinkIds ?? [],
-  );
-  if (
-    !route ||
-    !routeEndpointsMatch(network, route, start, end) ||
-    state.assignedFlowUnitsPerDay !== demand
-  ) {
-    throw new RangeError("saved road traffic route does not match its demand");
-  }
-  const flowByLinkId = new Map(
-    route.linkIds.map(
-      (linkId) => [linkId, state.assignedFlowUnitsPerDay] as const,
-    ),
-  );
-  return Object.freeze({
-    network: applyRoadLinkFlows(network, flowByLinkId),
-    state: Object.freeze({
-      ...state,
+      ...saved,
       routeNodeIds: Object.freeze([...route.nodeIds]),
       routeLinkIds: Object.freeze([...route.linkIds]),
+    });
+  });
+
+  return Object.freeze({
+    network: applyRoadLinkFlows(network, flowMap(restoredFlows)),
+    state: Object.freeze({
+      ...state,
+      flows: Object.freeze(restoredFlows),
     }),
   });
 }
@@ -212,13 +234,15 @@ export function restoreRoadTraffic(
 export function assignedRoadTrafficRoute(
   network: RoadNetwork,
   state: RoadTrafficStateSnapshot,
+  flowId: string,
 ): RoadRoute | undefined {
-  if (state.routeNodeIds === null || state.routeLinkIds === null) {
+  const flow = state.flows.find(({ id }) => id === flowId);
+  if (!flow || flow.routeNodeIds === null || flow.routeLinkIds === null) {
     return undefined;
   }
   return createRoadRouteFromIds(
     network,
-    state.routeNodeIds,
-    state.routeLinkIds,
+    flow.routeNodeIds,
+    flow.routeLinkIds,
   );
 }
