@@ -63,6 +63,9 @@ Proof points:
 - Simulation explanations make important outcomes understandable.
 - Performance remains smooth at the intended prototype scale.
 
+The playable scenario contract and delivery order are defined in
+[M3 Millford Valley Vertical Slice](docs/m3-vertical-slice-plan.md).
+
 ## Later — Scalable Prototype
 
 Possible work after the vertical slice:
@@ -76,4 +79,3 @@ Possible work after the vertical slice:
 - Modding and data-driven content
 
 These are intentionally not commitments until the vertical slice validates the game.
-
