@@ -1,6 +1,7 @@
 import {
   restoreSimulation,
   type DevelopmentStateSnapshot,
+  type FinanceStateSnapshot,
   type RoadTrafficFlowStateSnapshot,
   type RoadTrafficStateSnapshot,
   type Simulation,
@@ -9,13 +10,14 @@ import {
 } from "../simulation";
 import type {
   FreightLimitingFactor,
+  InfrastructureCostBreakdown,
   Point,
   RoadClass,
   RoadSegment,
   StoneworksLimitingFactor,
 } from "../shared";
 
-export const SAVE_FORMAT_VERSION = 4 as const;
+export const SAVE_FORMAT_VERSION = 5 as const;
 export const SAVE_FILE_NAME = "millford-valley-save.json";
 
 interface SavedRoadSegment {
@@ -66,7 +68,7 @@ export interface SaveGameV3 {
 }
 
 export interface SaveGameV4 {
-  readonly formatVersion: typeof SAVE_FORMAT_VERSION;
+  readonly formatVersion: 4;
   readonly scenarioId: "millford-valley";
   readonly scenarioSeed: string;
   readonly simulation: SaveBaseSimulation & {
@@ -77,7 +79,25 @@ export interface SaveGameV4 {
   };
 }
 
-export type SaveGame = SaveGameV1 | SaveGameV2 | SaveGameV3 | SaveGameV4;
+export interface SaveGameV5 {
+  readonly formatVersion: typeof SAVE_FORMAT_VERSION;
+  readonly scenarioId: "millford-valley";
+  readonly scenarioSeed: string;
+  readonly simulation: SaveBaseSimulation & {
+    readonly roadSegments: readonly RoadSegment[];
+    readonly development: DevelopmentStateSnapshot;
+    readonly supplyChain: StoneSupplyChainStateSnapshot;
+    readonly roadTraffic: RoadTrafficStateSnapshot;
+    readonly finances: FinanceStateSnapshot;
+  };
+}
+
+export type SaveGame =
+  | SaveGameV1
+  | SaveGameV2
+  | SaveGameV3
+  | SaveGameV4
+  | SaveGameV5;
 
 export class SaveGameError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -100,6 +120,13 @@ function readSafeInteger(value: unknown, name: string, minimum: number): number 
 function readNumber(value: unknown, name: string): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
     throw new SaveGameError(`${name} must be non-negative and finite`);
+  }
+  return value;
+}
+
+function readFiniteNumber(value: unknown, name: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new SaveGameError(`${name} must be finite`);
   }
   return value;
 }
@@ -292,11 +319,133 @@ function readSupplyChainState(value: unknown): StoneSupplyChainStateSnapshot {
   });
 }
 
+function readInfrastructureCostBreakdown(
+  value: unknown,
+): InfrastructureCostBreakdown {
+  if (!isRecord(value)) {
+    throw new SaveGameError("infrastructure cost breakdown must be an object");
+  }
+  if (value.infrastructureKind !== "road" && value.infrastructureKind !== "rail") {
+    throw new SaveGameError("infrastructure cost breakdown has an unknown kind");
+  }
+  if (
+    value.transactionKind !== "construction" &&
+    value.transactionKind !== "upgrade" &&
+    value.transactionKind !== "removal"
+  ) {
+    throw new SaveGameError("infrastructure transaction has an unknown kind");
+  }
+  if (
+    typeof value.infrastructureClass !== "string" ||
+    value.infrastructureClass.length === 0
+  ) {
+    throw new SaveGameError("infrastructure transaction must name its class");
+  }
+  return Object.freeze({
+    infrastructureKind: value.infrastructureKind,
+    transactionKind: value.transactionKind,
+    infrastructureClass: value.infrastructureClass,
+    length: readNumber(value.length, "infrastructure length"),
+    baseCost: readNumber(value.baseCost, "infrastructure baseCost"),
+    landAcquisitionCost: readNumber(
+      value.landAcquisitionCost,
+      "infrastructure landAcquisitionCost",
+    ),
+    crossingWorkCost: readNumber(
+      value.crossingWorkCost,
+      "infrastructure crossingWorkCost",
+    ),
+    totalCost: readNumber(value.totalCost, "infrastructure totalCost"),
+    salvageCredit: readNumber(
+      value.salvageCredit,
+      "infrastructure salvageCredit",
+    ),
+    netCost: readFiniteNumber(value.netCost, "infrastructure netCost"),
+    affectedLandIds: readStringArray(
+      value.affectedLandIds,
+      "infrastructure affectedLandIds",
+    ),
+    riverCrossingCount: readSafeInteger(
+      value.riverCrossingCount,
+      "infrastructure riverCrossingCount",
+      0,
+    ),
+  });
+}
+
+function readFinanceState(value: unknown): FinanceStateSnapshot {
+  if (!isRecord(value)) {
+    throw new SaveGameError("finance state must be an object");
+  }
+  const lastTransaction = value.lastInfrastructureTransaction;
+  if (lastTransaction !== null && !isRecord(lastTransaction)) {
+    throw new SaveGameError("last infrastructure transaction must be an object or null");
+  }
+  let parsedLastTransaction: FinanceStateSnapshot["lastInfrastructureTransaction"] =
+    null;
+  if (lastTransaction) {
+    if (lastTransaction.affordable !== true) {
+      throw new SaveGameError("committed transaction must be affordable");
+    }
+    parsedLastTransaction = Object.freeze({
+      tick: readSafeInteger(lastTransaction.tick, "transaction tick", 0),
+      breakdown: readInfrastructureCostBreakdown(lastTransaction.breakdown),
+      balanceBefore: readFiniteNumber(
+        lastTransaction.balanceBefore,
+        "transaction balanceBefore",
+      ),
+      balanceAfter: readFiniteNumber(
+        lastTransaction.balanceAfter,
+        "transaction balanceAfter",
+      ),
+      affordable: true,
+    });
+  }
+  return Object.freeze({
+    processedTick: readSafeInteger(value.processedTick, "finance processedTick", 0),
+    balance: readFiniteNumber(value.balance, "finance balance"),
+    totalCapitalSpending: readNumber(
+      value.totalCapitalSpending,
+      "finance totalCapitalSpending",
+    ),
+    totalOperatingRevenue: readNumber(
+      value.totalOperatingRevenue,
+      "finance totalOperatingRevenue",
+    ),
+    totalMaintenancePaid: readNumber(
+      value.totalMaintenancePaid,
+      "finance totalMaintenancePaid",
+    ),
+    totalSalvageRevenue: readNumber(
+      value.totalSalvageRevenue,
+      "finance totalSalvageRevenue",
+    ),
+    lastDailyRevenue: readNumber(
+      value.lastDailyRevenue,
+      "finance lastDailyRevenue",
+    ),
+    lastDailyMaintenance: readNumber(
+      value.lastDailyMaintenance,
+      "finance lastDailyMaintenance",
+    ),
+    emergencyBondCount: readSafeInteger(
+      value.emergencyBondCount,
+      "finance emergencyBondCount",
+      0,
+    ),
+    totalEmergencyPenalties: readNumber(
+      value.totalEmergencyPenalties,
+      "finance totalEmergencyPenalties",
+    ),
+    lastInfrastructureTransaction: parsedLastTransaction,
+  });
+}
+
 export function validateSaveGame(value: unknown): SaveGame {
   if (!isRecord(value)) {
     throw new SaveGameError("save data must be an object");
   }
-  if (value.formatVersion !== 1 && value.formatVersion !== 2 && value.formatVersion !== 3 && value.formatVersion !== SAVE_FORMAT_VERSION) {
+  if (value.formatVersion !== 1 && value.formatVersion !== 2 && value.formatVersion !== 3 && value.formatVersion !== 4 && value.formatVersion !== SAVE_FORMAT_VERSION) {
     throw new SaveGameError(`unsupported save format version: ${String(value.formatVersion)}`);
   }
   if (value.scenarioId !== "millford-valley") {
@@ -329,22 +478,38 @@ export function validateSaveGame(value: unknown): SaveGame {
       }),
     });
   }
+  const supplyChain = readSupplyChainState(value.simulation.supplyChain);
+  const roadTraffic = readRoadTrafficState(value.simulation.roadTraffic);
+  if (value.formatVersion === 4) {
+    return Object.freeze({
+      formatVersion: 4,
+      scenarioId: "millford-valley",
+      scenarioSeed: value.scenarioSeed,
+      simulation: Object.freeze({
+        ...simulation,
+        development,
+        supplyChain,
+        roadTraffic,
+      }),
+    });
+  }
   return Object.freeze({
-    formatVersion: 4,
+    formatVersion: 5,
     scenarioId: "millford-valley",
     scenarioSeed: value.scenarioSeed,
     simulation: Object.freeze({
       ...simulation,
       development,
-      supplyChain: readSupplyChainState(value.simulation.supplyChain),
-      roadTraffic: readRoadTrafficState(value.simulation.roadTraffic),
+      supplyChain,
+      roadTraffic,
+      finances: readFinanceState(value.simulation.finances),
     }),
   });
 }
 
-export function createSaveGame(simulation: Simulation): SaveGameV4 {
+export function createSaveGame(simulation: Simulation): SaveGameV5 {
   const state = simulation.getState();
-  if (!state.development || !state.roadTraffic || !state.supplyChain) {
+  if (!state.development || !state.roadTraffic || !state.supplyChain || !state.finances) {
     throw new SaveGameError("simulation did not provide complete authoritative state");
   }
   return validateSaveGame({
@@ -358,8 +523,9 @@ export function createSaveGame(simulation: Simulation): SaveGameV4 {
       development: state.development,
       supplyChain: state.supplyChain,
       roadTraffic: state.roadTraffic,
+      finances: state.finances,
     },
-  }) as SaveGameV4;
+  }) as SaveGameV5;
 }
 
 export function restoreSaveGame(save: SaveGame): Simulation {
@@ -373,8 +539,15 @@ export function restoreSaveGame(save: SaveGame): Simulation {
     })),
     nextRoadSegmentNumber: validated.simulation.nextRoadSegmentNumber,
     development: validated.formatVersion !== 1 ? validated.simulation.development : undefined,
-    supplyChain: validated.formatVersion === SAVE_FORMAT_VERSION ? validated.simulation.supplyChain : undefined,
-    roadTraffic: validated.formatVersion === SAVE_FORMAT_VERSION ? validated.simulation.roadTraffic : undefined,
+    supplyChain:
+      validated.formatVersion === 4 || validated.formatVersion === 5
+        ? validated.simulation.supplyChain
+        : undefined,
+    roadTraffic:
+      validated.formatVersion === 4 || validated.formatVersion === 5
+        ? validated.simulation.roadTraffic
+        : undefined,
+    finances: validated.formatVersion === SAVE_FORMAT_VERSION ? validated.simulation.finances : undefined,
   };
   try {
     return restoreSimulation(state);

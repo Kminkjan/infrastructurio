@@ -168,6 +168,21 @@ aggregate freight legs, stoneworks activity and inventory, selected routes and
 costs, shipped volumes, and limiting-factor explanations. React formats those
 values for terminal inspectors but does not recalculate economic outcomes.
 
+Infrastructure finance is a separate simulation-core reducer. Its shared cost
+contract identifies an infrastructure kind and class and serializes base,
+land-acquisition, crossing-work, salvage, and net values. The road evaluator
+derives those values from normalized geometry and scenario constraints; a later
+rail evaluator can emit the same contract without importing road rules. Quote
+queries and edit commands call the same pure evaluators. Commands validate a
+prospective topology before committing the network and finance state together,
+so an invalid or unaffordable edit cannot partially mutate either system.
+
+Daily finance transitions are interleaved immediately after the authoritative
+stone-supply transition. They consume that day's delivered finished stone and
+the current authored road network, then record bounded revenue, maintenance, and
+the emergency-bond penalty. React displays the resulting snapshot and quote
+breakdowns without calculating costs.
+
 Representative freight vehicles remain renderer-owned. A pure rendering helper
 validates each assigned route against the snapshot road graph, resolves its
 ordered node geometry, and deterministically samples positions for the current
@@ -178,16 +193,19 @@ phase crosses into the simulation protocol.
 
 ## Save format
 
-Saves use an explicit versioned JSON document. Format version 4 contains the
+Saves use an explicit versioned JSON document. Format version 5 contains the
 Millford Valley scenario ID and seed plus the authoritative mutable state: the
 simulation tick, authored roads, development history, bounded stoneworks
 inventories and daily update cadence, both current aggregate flow rates, and the
-eight-hour route-assignment state for both legs. Derived geography, road nodes,
-link costs, accessibility, explanations, and presentation state are rebuilt.
+eight-hour route-assignment state for both legs. It also stores the treasury,
+cumulative capital, revenue, maintenance and salvage totals, emergency-bond
+state and penalties, and the last committed infrastructure transaction. Derived
+geography, road nodes, link costs, accessibility, current maintenance,
+explanations, and presentation state are rebuilt.
 Saved routes are validated against rebuilt topology and reapplied so congestion
 and future supply-chain steps replay identically.
 
-Format versions 1 through 3 remain loadable. Roads without a class migrate to the
+Format versions 1 through 4 remain loadable. Roads without a class migrate to the
 current default arterial profile, and a traffic assignment is derived at the
 saved tick. Version 3 represented the superseded direct quarry-export flow and
 therefore cannot contain stoneworks history; migration starts the new stoneworks
@@ -196,6 +214,9 @@ contains no command history or development state,
 it resumes at its saved tick with zero infrastructure-enabled growth and begins
 evaluating from the next weekly boundary;
 the loader does not invent past growth from the final road layout.
+Version 4 contains the complete stone supply chain but predates finance history;
+it starts with the current initial treasury at its saved tick and does not invent
+past road spending, revenue, maintenance, salvage, or emergency support.
 
 Imported data is structurally validated before it crosses into the simulation,
 and restored road topology is checked against simulation invariants and scenario

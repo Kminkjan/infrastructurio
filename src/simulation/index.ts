@@ -16,4 +16,5 @@ export type {
 } from "./growth/accessibility";
 export type { DevelopmentStateSnapshot } from "./growth/development";
 export type { StoneSupplyChainStateSnapshot } from "./economy/stone-supply-chain";
+export type { FinanceStateSnapshot } from "./economy/infrastructure-finance";
 export { SUPPLY_CHAIN_UPDATE_INTERVAL_TICKS } from "./economy/stone-supply-chain";

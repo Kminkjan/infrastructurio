@@ -1,5 +1,6 @@
 import {
   TICKS_PER_DAY,
+  type InfrastructureTransactionQuote,
   type Point,
   type RoadClass,
   type RoadNetwork,
@@ -10,6 +11,19 @@ import {
   type SimulationSnapshot,
 } from "../shared";
 import { generateMillfordValley } from "../scenarios";
+import {
+  advanceFinanceDay,
+  commitInfrastructureTransaction,
+  createFinanceSnapshot,
+  createFinanceState,
+  issueEmergencyBond,
+  markFinanceProcessed,
+  quoteRoadConstruction,
+  quoteRoadRemoval,
+  quoteRoadUpgrade,
+  validateFinanceState,
+  type FinanceStateSnapshot,
+} from "./economy/infrastructure-finance";
 import {
   advanceStoneSupplyChainDay,
   createStoneSupplyChainSnapshot,
@@ -53,6 +67,7 @@ interface SimulationState {
   readonly roadTraffic: RoadTrafficStateSnapshot;
   readonly nextRoadSegmentNumber: number;
   readonly supplyChain: StoneSupplyChainStateSnapshot;
+  readonly finances: FinanceStateSnapshot;
   readonly development: DevelopmentStateSnapshot;
 }
 
@@ -63,6 +78,7 @@ export interface SimulationStateSnapshot {
   readonly nextRoadSegmentNumber: number;
   readonly roadTraffic?: RoadTrafficStateSnapshot;
   readonly supplyChain?: StoneSupplyChainStateSnapshot;
+  readonly finances?: FinanceStateSnapshot;
   readonly development?: DevelopmentStateSnapshot;
 }
 
@@ -71,6 +87,13 @@ export interface Simulation {
   getSnapshot(): SimulationSnapshot;
   getState(): SimulationStateSnapshot;
   findRoute(start: Point, end: Point): RoadRoute | undefined;
+  quoteRoadConstruction(
+    start: Point,
+    end: Point,
+    roadClass?: RoadClass,
+  ): InfrastructureTransactionQuote;
+  quoteRoadUpgrade(roadSegmentId: string): InfrastructureTransactionQuote;
+  quoteRoadRemoval(roadSegmentId: string): InfrastructureTransactionQuote;
 }
 
 function trafficDemands(
@@ -143,6 +166,11 @@ function snapshot(
     geography: state.geography,
     roadNetwork: state.roadNetwork,
     stoneSupplyChain,
+    finances: createFinanceSnapshot(
+      state.finances,
+      state.geography,
+      state.roadNetwork,
+    ),
     bottlenecks: createBottleneckAnalysis(
       state.geography,
       state.roadNetwork,
@@ -171,14 +199,25 @@ function upgradeRoad(
   if (existing.roadClass === "highway") {
     return state;
   }
+  const roadNetwork = createRoadNetwork(
+    state.roadNetwork.segments.map((segment) =>
+      segment.id === roadSegmentId
+        ? Object.freeze({ ...segment, roadClass: "highway" as const })
+        : segment,
+    ),
+  );
+  const transactionQuote = quoteRoadUpgrade(
+    state.finances.balance,
+    state.geography,
+    existing,
+  );
   return {
     ...state,
-    roadNetwork: createRoadNetwork(
-      state.roadNetwork.segments.map((segment) =>
-        segment.id === roadSegmentId
-          ? Object.freeze({ ...segment, roadClass: "highway" as const })
-          : segment,
-      ),
+    roadNetwork,
+    finances: commitInfrastructureTransaction(
+      state.finances,
+      transactionQuote,
+      state.tick,
     ),
   };
 }
@@ -225,10 +264,21 @@ function buildRoad(
     start,
     end,
   });
+  const roadNetwork = createRoadNetwork([...state.roadNetwork.segments, segment]);
+  const transactionQuote = quoteRoadConstruction(
+    state.finances.balance,
+    state.geography,
+    segment,
+  );
   return {
     ...state,
-    roadNetwork: createRoadNetwork([...state.roadNetwork.segments, segment]),
+    roadNetwork,
     nextRoadSegmentNumber: state.nextRoadSegmentNumber + 1,
+    finances: commitInfrastructureTransaction(
+      state.finances,
+      transactionQuote,
+      state.tick,
+    ),
   };
 }
 
@@ -236,12 +286,25 @@ function removeRoad(
   state: SimulationState,
   roadSegmentId: string,
 ): SimulationState {
+  const existing = state.roadNetwork.segments.find(
+    ({ id }) => id === roadSegmentId,
+  );
+  if (!existing) {
+    return state;
+  }
   const segments = state.roadNetwork.segments.filter(
     ({ id }) => id !== roadSegmentId,
   );
-  return segments.length === state.roadNetwork.segments.length
-    ? state
-    : { ...state, roadNetwork: createRoadNetwork(segments) };
+  const transactionQuote = quoteRoadRemoval(state.finances.balance, existing);
+  return {
+    ...state,
+    roadNetwork: createRoadNetwork(segments),
+    finances: commitInfrastructureTransaction(
+      state.finances,
+      transactionQuote,
+      state.tick,
+    ),
+  };
 }
 
 function createSimulationState(
@@ -252,6 +315,7 @@ function createSimulationState(
   savedDevelopment?: DevelopmentStateSnapshot,
   savedSupplyChain?: StoneSupplyChainStateSnapshot,
   savedRoadTraffic?: RoadTrafficStateSnapshot,
+  savedFinances?: FinanceStateSnapshot,
 ): SimulationState {
   if (!Number.isSafeInteger(tick) || tick < 0) {
     throw new RangeError("simulation tick must be a non-negative safe integer");
@@ -293,6 +357,9 @@ function createSimulationState(
   const supplyChain = savedSupplyChain
     ? validateStoneSupplyChainState(savedSupplyChain, tick)
     : createStoneSupplyChainState(tick);
+  const finances = savedFinances
+    ? validateFinanceState(savedFinances, tick)
+    : createFinanceState(tick);
   const demands = trafficDemands(geography, supplyChain);
   const traffic = savedRoadTraffic
     ? restoreRoadTraffic(baseRoadNetwork, savedRoadTraffic, tick, demands)
@@ -306,6 +373,7 @@ function createSimulationState(
     roadTraffic: traffic.state,
     nextRoadSegmentNumber,
     supplyChain,
+    finances,
     development,
   });
 }
@@ -319,6 +387,7 @@ function runSimulation(initialState: SimulationState): Simulation {
       nextRoadSegmentNumber: state.nextRoadSegmentNumber,
       roadTraffic: state.roadTraffic,
       supplyChain: state.supplyChain,
+      finances: state.finances,
       development: state.development,
     });
 
@@ -364,6 +433,7 @@ function runSimulation(initialState: SimulationState): Simulation {
           let network = state.roadNetwork;
           let trafficState = state.roadTraffic;
           let supplyChain = state.supplyChain;
+          let finances = state.finances;
           let activityChanged = false;
 
           while (supplyChain.nextUpdateTick <= targetTick) {
@@ -393,6 +463,13 @@ function runSimulation(initialState: SimulationState): Simulation {
             );
             activityChanged ||=
               previousProcessing !== supplyChain.processedTonsPerDay;
+            finances = advanceFinanceDay(
+              finances,
+              updateTick,
+              supplyChain.outboundShippedTonsPerDay,
+              state.geography,
+              network,
+            );
             const atBoundary = createRoadTraffic(
               network,
               updateTick,
@@ -409,12 +486,14 @@ function runSimulation(initialState: SimulationState): Simulation {
             trafficDemands(state.geography, supplyChain),
           );
           supplyChain = markStoneSupplyChainProcessed(supplyChain, targetTick);
+          finances = markFinanceProcessed(finances, targetTick);
           state = {
             ...state,
             tick: targetTick,
             roadNetwork: traffic.network,
             roadTraffic: traffic.state,
             supplyChain,
+            finances,
           };
           updateAccessibility(state.roadNetwork, activityChanged);
           state = {
@@ -444,6 +523,9 @@ function runSimulation(initialState: SimulationState): Simulation {
           break;
         case "remove-road":
           state = removeRoad(state, command.roadSegmentId);
+          break;
+        case "issue-emergency-bond":
+          state = { ...state, finances: issueEmergencyBond(state.finances) };
           break;
       }
 
@@ -487,6 +569,39 @@ function runSimulation(initialState: SimulationState): Simulation {
         normalizePoint(end, state.geography),
       );
     },
+    quoteRoadConstruction(start, end, roadClass = DEFAULT_PLAYER_ROAD_CLASS) {
+      const normalizedStart = normalizePoint(start, state.geography);
+      const normalizedEnd = normalizePoint(end, state.geography);
+      if (
+        normalizedStart.x === normalizedEnd.x &&
+        normalizedStart.y === normalizedEnd.y
+      ) {
+        throw new RangeError("a road segment must have two distinct endpoints");
+      }
+      return quoteRoadConstruction(state.finances.balance, state.geography, {
+        roadClass,
+        start: normalizedStart,
+        end: normalizedEnd,
+      });
+    },
+    quoteRoadUpgrade(roadSegmentId) {
+      const segment = state.roadNetwork.segments.find(
+        ({ id }) => id === roadSegmentId,
+      );
+      if (!segment) {
+        throw new RangeError(`road segment ${roadSegmentId} does not exist`);
+      }
+      return quoteRoadUpgrade(state.finances.balance, state.geography, segment);
+    },
+    quoteRoadRemoval(roadSegmentId) {
+      const segment = state.roadNetwork.segments.find(
+        ({ id }) => id === roadSegmentId,
+      );
+      if (!segment) {
+        throw new RangeError(`road segment ${roadSegmentId} does not exist`);
+      }
+      return quoteRoadRemoval(state.finances.balance, segment);
+    },
   };
 }
 
@@ -506,6 +621,7 @@ export function restoreSimulation(
       savedState.development,
       savedState.supplyChain,
       savedState.roadTraffic,
+      savedState.finances,
     ),
   );
 }

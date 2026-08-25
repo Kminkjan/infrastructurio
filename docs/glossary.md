@@ -39,3 +39,7 @@ A compact view of authoritative simulation state sent to rendering or UI systems
 **Strategic infrastructure**  
 High-impact corridors and facilities reserved for the player, such as arterials, major crossings, highways, railways, and terminals.
 
+**Treasury**
+Authoritative regional funds available for infrastructure transactions after
+capital spending, operating revenue, maintenance, salvage, and emergency-finance
+penalties.

@@ -41,6 +41,10 @@ export interface WorldRenderer {
 export interface WorldRendererOptions {
   readonly onSelectionChange?: (selection: MapSelection | undefined) => void;
   readonly onBuildRoad?: (start: Point, end: Point) => void;
+  readonly onBuildRoadPreview?: (
+    start: Point | undefined,
+    end: Point | undefined,
+  ) => void;
   readonly onRemoveRoad?: (roadSegmentId: string) => void;
 }
 
@@ -667,6 +671,7 @@ export async function createWorldRenderer(
       suppressNextSelection = true;
       canvas.classList.add("is-building");
       drawConstructionPreview();
+      options.onBuildRoadPreview?.(constructionStart, constructionEnd);
     }
   }
 
@@ -686,6 +691,7 @@ export async function createWorldRenderer(
     if (roadTool === "build") {
       constructionEnd = snapRoadPoint(positionInWorld(event));
       drawConstructionPreview();
+      options.onBuildRoadPreview?.(constructionStart, constructionEnd);
       return;
     }
     if (dragDistance < 4) {
@@ -722,6 +728,7 @@ export async function createWorldRenderer(
     constructionStart = undefined;
     constructionEnd = undefined;
     drawConstructionPreview();
+    options.onBuildRoadPreview?.(undefined, undefined);
     if (canvas.hasPointerCapture(event.pointerId)) {
       canvas.releasePointerCapture(event.pointerId);
     }
@@ -774,6 +781,7 @@ export async function createWorldRenderer(
     constructionStart = undefined;
     constructionEnd = undefined;
     drawConstructionPreview();
+    options.onBuildRoadPreview?.(undefined, undefined);
     canvas.classList.toggle("road-tool-build", tool === "build");
     canvas.classList.toggle("road-tool-remove", tool === "remove");
     for (const child of roadHitLayer.children) {

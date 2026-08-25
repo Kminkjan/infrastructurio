@@ -67,6 +67,14 @@ and drag across the map to construct that road class; endpoints snap to
 settlements, resources, the market, nearby roads, and junctions. Choose
 **Remove road** and select a player-built segment to delete it.
 
+The scenario begins with a $60,000 treasury. Dragging a road shows the
+simulation-owned construction breakdown before release, including base work,
+Eastbank land acquisition, and constrained river work. Inspect a road to preview
+its highway-upgrade cost and removal salvage. Unaffordable construction is
+rejected without changing the network. The finance summary reports capital
+spending, finished-stone operating revenue, current daily maintenance, and any
+emergency-finance penalty.
+
 Granite Ridge Quarry produces up to 120 tons of raw granite per day. It must first
 reach the bounded Millford Stoneworks, which can store 240 tons of input, process
 100 tons per day, and store 160 tons of finished stone. The Eastern External
@@ -80,9 +88,11 @@ amber and the overloaded link in red. Select the highlighted road or Millford
 Crossing to separate its demand, capacity, and route-choice causes and see the
 affected freight. Upgrade the crossing segment to highway capacity to retain the
 route, or draw a connected highway bypass and advance time until the next
-eight-hour assignment redirects traffic. The prototype does not yet have a
-construction budget: the meaningful difference is whether capacity stays on the
-existing corridor or access and freight shift to a new one.
+eight-hour assignment redirects traffic. Finished-stone deliveries earn bounded
+revenue at the same daily boundary that charges road and crossing maintenance. A
+recovery bond becomes available below $15,000, adds $15,000, and permanently
+adds a visible $150 daily penalty. Further bonds require the treasury to fall
+below the threshold again, and their penalties stack.
 Each freight leg remains at zero until its terminals have a viable route and the
 daily economy has goods available to move. Orange private trucks animate along
 both selected routes. Each truck represents up to 20 tons of assigned daily flow,

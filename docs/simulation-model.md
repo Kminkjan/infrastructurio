@@ -260,11 +260,51 @@ causes. Two player interventions are available:
   congested crossing, the next eight-hour assignment redirects freight; the new
   network costs also feed accessibility and later weekly development evaluation.
 
-There is no construction budget, land acquisition, induced demand, commuter
-flow, or multi-route equilibrium yet. The present trade-off is corridor retention
-versus traffic and accessibility shifting to a new route. A long authored road
-that crosses the constraint is upgraded in full because the graph does not store
-the geographic crossing as an independently editable segment.
+Induced demand, commuter flow, and multi-route equilibrium remain out of scope.
+A long authored road that crosses the constraint is upgraded in full because the
+graph does not store the geographic crossing as an independently editable
+segment.
+
+### M3 infrastructure costs and treasury
+
+The scenario starts with a $60,000 treasury. Every road quote is produced by the
+simulation from normalized command geometry, then the same immutable breakdown
+is used for the committed transaction. A breakdown separates base work,
+Eastbank land acquisition, constrained river work, and salvage. The prototype
+rates are explicit balancing values:
+
+| Road class | Base construction / map unit | Eastbank land / intersected unit | Maintenance / map unit / day | River work / crossing | River maintenance / day |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Local | $6 | $4 | $0.03 | $1,500 | $15 |
+| Arterial | $16 | $8 | $0.08 | $3,500 | $35 |
+| Highway | $32 | $14 | $0.18 | $7,000 | $70 |
+
+The Eastbank premium uses the length of the authored road centerline inside the
+fertile-land polygon. River work is charged once for each intersection with the
+authored river centerline. These are aggregate scenario proxies, not parcel
+valuation or bridge engineering. A highway upgrade charges the positive
+difference between the existing and highway base and river-work rates; it does
+not reacquire land. Removing a road credits 20% of its current-class base work.
+Land acquisition and river work have no salvage value.
+
+Capital commands first build and validate a prospective network, then reject the
+whole command when its authoritative quote exceeds the balance. No road,
+identifier, traffic, accessibility, development, or finance state changes on
+rejection. Removal credits salvage in the same transaction.
+
+At each daily production boundary, finished-stone deliveries earn $25 per ton,
+bounded to 100 tons and therefore $2,500 per day. Current road maintenance and
+river-crossing maintenance are then charged. Maintenance may take the treasury
+below zero, preserving a recoverable state, but further unaffordable capital
+commands remain blocked.
+
+An emergency bond becomes available while the treasury is below $15,000. It adds
+$15,000 immediately and creates a permanent $150 charge at every later daily
+boundary. A later bond requires the treasury to fall below the threshold again,
+and each bond stacks another $150 daily penalty. This keeps recovery available
+without making repeated bonds free money. It is a deliberately small recovery
+rule rather than a loan model: there is no interest schedule, repayment term,
+tax system, inflation, or municipal budget.
 
 ### M0 representative freight traffic
 

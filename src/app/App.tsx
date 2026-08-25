@@ -20,6 +20,7 @@ import type {
   DevelopmentDecisionExplanation,
   DevelopmentDecisionOutcome,
   DevelopmentLocationSnapshot,
+  InfrastructureTransactionQuote,
   Point,
   RoadBottleneckSnapshot,
   RoadClass,
@@ -36,6 +37,63 @@ function errorMessage(error: unknown): string {
 
 function formatTons(value: number): string {
   return `${value.toLocaleString()} t/day`;
+}
+
+function formatMoney(value: number): string {
+  return `$${value.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function CostBreakdown({
+  quote,
+  label,
+}: {
+  readonly quote: InfrastructureTransactionQuote;
+  readonly label: string;
+}) {
+  const { breakdown } = quote;
+  return (
+    <section className="cost-preview" aria-label={`${label} cost preview`}>
+      <h3>{label}</h3>
+      <dl className="freight-details">
+        <div>
+          <dt>Base work · {breakdown.length.toFixed(1)} units</dt>
+          <dd>{formatMoney(breakdown.baseCost)}</dd>
+        </div>
+        {breakdown.landAcquisitionCost > 0 ? (
+          <div>
+            <dt>Eastbank land acquisition</dt>
+            <dd>{formatMoney(breakdown.landAcquisitionCost)}</dd>
+          </div>
+        ) : null}
+        {breakdown.crossingWorkCost > 0 ? (
+          <div>
+            <dt>
+              Constrained river work · {breakdown.riverCrossingCount}
+            </dt>
+            <dd>{formatMoney(breakdown.crossingWorkCost)}</dd>
+          </div>
+        ) : null}
+        {breakdown.salvageCredit > 0 ? (
+          <div>
+            <dt>Salvage credit</dt>
+            <dd>+{formatMoney(breakdown.salvageCredit)}</dd>
+          </div>
+        ) : null}
+        <div>
+          <dt>{breakdown.netCost < 0 ? "Treasury credit" : "Total"}</dt>
+          <dd>{formatMoney(Math.abs(breakdown.netCost))}</dd>
+        </div>
+      </dl>
+      <p className={quote.affordable ? "quote-affordable" : "quote-unaffordable"}>
+        {quote.affordable
+          ? `Treasury after transaction: ${formatMoney(quote.balanceAfter)}`
+          : `Unaffordable with ${formatMoney(quote.balanceBefore)} available.`}
+      </p>
+    </section>
+  );
 }
 
 function factorLabel(factor: DevelopmentAccessFactorExplanation): string {
@@ -196,10 +254,12 @@ function assignmentTime(tick: number): string {
 
 function BottleneckInspector({
   bottleneck,
+  upgradeQuote,
   onUpgrade,
   onPlanBypass,
 }: {
   readonly bottleneck: RoadBottleneckSnapshot;
+  readonly upgradeQuote: InfrastructureTransactionQuote;
   readonly onUpgrade: (roadSegmentId: string) => void;
   readonly onPlanBypass: () => void;
 }) {
@@ -252,7 +312,7 @@ function BottleneckInspector({
           type="button"
           onClick={() => onUpgrade(bottleneck.roadSegmentId)}
         >
-          Upgrade this crossing
+          Upgrade this crossing · {formatMoney(upgradeQuote.breakdown.netCost)}
         </button>
         <button className="secondary" type="button" onClick={onPlanBypass}>
           Draw highway bypass
@@ -365,6 +425,10 @@ interface WorldViewProps {
   readonly roadTool: RoadTool;
   readonly onSelectionChange: (selection: MapSelection | undefined) => void;
   readonly onBuildRoad: (start: Point, end: Point) => void;
+  readonly onBuildRoadPreview: (
+    start: Point | undefined,
+    end: Point | undefined,
+  ) => void;
   readonly onRemoveRoad: (roadSegmentId: string) => void;
 }
 
@@ -373,6 +437,7 @@ function WorldView({
   roadTool,
   onSelectionChange,
   onBuildRoad,
+  onBuildRoadPreview,
   onRemoveRoad,
 }: WorldViewProps) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -381,11 +446,13 @@ function WorldView({
   const latestRoadToolRef = useRef(roadTool);
   const selectionCallbackRef = useRef(onSelectionChange);
   const buildRoadCallbackRef = useRef(onBuildRoad);
+  const buildRoadPreviewCallbackRef = useRef(onBuildRoadPreview);
   const removeRoadCallbackRef = useRef(onRemoveRoad);
   latestSnapshotRef.current = snapshot;
   latestRoadToolRef.current = roadTool;
   selectionCallbackRef.current = onSelectionChange;
   buildRoadCallbackRef.current = onBuildRoad;
+  buildRoadPreviewCallbackRef.current = onBuildRoadPreview;
   removeRoadCallbackRef.current = onRemoveRoad;
 
   useEffect(() => {
@@ -401,6 +468,9 @@ function WorldView({
       },
       onBuildRoad(start, end) {
         buildRoadCallbackRef.current(start, end);
+      },
+      onBuildRoadPreview(start, end) {
+        buildRoadPreviewCallbackRef.current(start, end);
       },
       onRemoveRoad(roadSegmentId) {
         removeRoadCallbackRef.current(roadSegmentId);
@@ -475,6 +545,8 @@ export function App() {
   const [buildRoadClass, setBuildRoadClass] =
     useState<RoadClass>("arterial");
   const [constructionMessage, setConstructionMessage] = useState<string>();
+  const [constructionQuote, setConstructionQuote] =
+    useState<InfrastructureTransactionQuote>();
   const [persistenceMessage, setPersistenceMessage] = useState<string>();
   const [persistenceBusy, setPersistenceBusy] = useState(false);
   const [controlsOpen, setControlsOpen] = useState(true);
@@ -487,19 +559,38 @@ export function App() {
   function reset(): void {
     setSnapshot(simulation.dispatch({ type: "reset" }));
     setConstructionMessage(undefined);
+    setConstructionQuote(undefined);
+  }
+
+  function previewRoad(
+    start: Point | undefined,
+    end: Point | undefined,
+  ): void {
+    if (!start || !end || (start.x === end.x && start.y === end.y)) {
+      setConstructionQuote(undefined);
+      return;
+    }
+    try {
+      setConstructionQuote(
+        simulation.quoteRoadConstruction(start, end, buildRoadClass),
+      );
+    } catch {
+      setConstructionQuote(undefined);
+    }
   }
 
   function buildRoad(start: Point, end: Point): void {
     try {
-      setSnapshot(
-        simulation.dispatch({
+      const nextSnapshot = simulation.dispatch({
           type: "build-road",
           start,
           end,
           roadClass: buildRoadClass,
-        }),
+        });
+      setSnapshot(nextSnapshot);
+      setConstructionMessage(
+        `${buildRoadClass[0]!.toUpperCase()}${buildRoadClass.slice(1)} road built for ${formatMoney(nextSnapshot.finances.lastInfrastructureTransaction!.breakdown.netCost)}.`,
       );
-      setConstructionMessage(undefined);
     } catch (error) {
       setConstructionMessage(
         error instanceof Error ? error.message : "Road construction failed",
@@ -509,11 +600,13 @@ export function App() {
 
   function upgradeRoad(roadSegmentId: string): void {
     try {
-      setSnapshot(
-        simulation.dispatch({ type: "upgrade-road", roadSegmentId }),
-      );
+      const nextSnapshot = simulation.dispatch({
+        type: "upgrade-road",
+        roadSegmentId,
+      });
+      setSnapshot(nextSnapshot);
       setConstructionMessage(
-        "Crossing upgraded to highway capacity; current traffic has been reassigned.",
+        `Crossing upgraded for ${formatMoney(nextSnapshot.finances.lastInfrastructureTransaction!.breakdown.netCost)}; current traffic has been reassigned.`,
       );
     } catch (error) {
       setConstructionMessage(
@@ -531,10 +624,30 @@ export function App() {
   }
 
   function removeRoad(roadSegmentId: string): void {
-    setSnapshot(
-      simulation.dispatch({ type: "remove-road", roadSegmentId }),
+    const nextSnapshot = simulation.dispatch({
+      type: "remove-road",
+      roadSegmentId,
+    });
+    setSnapshot(nextSnapshot);
+    setConstructionMessage(
+      `Road removed; ${formatMoney(nextSnapshot.finances.lastInfrastructureTransaction!.breakdown.salvageCredit)} salvage credited.`,
     );
-    setConstructionMessage(undefined);
+  }
+
+  function issueBond(): void {
+    try {
+      const nextSnapshot = simulation.dispatch({
+        type: "issue-emergency-bond",
+      });
+      setSnapshot(nextSnapshot);
+      setConstructionMessage(
+        `Emergency bond issued. The permanent ${formatMoney(nextSnapshot.finances.emergencyFinance.dailyPenalty)}/day penalty begins at the next daily update.`,
+      );
+    } catch (error) {
+      setConstructionMessage(
+        error instanceof Error ? error.message : "Emergency bond failed",
+      );
+    }
   }
 
   function useLoadedSimulation(loadedSimulation: Simulation) {
@@ -544,6 +657,7 @@ export function App() {
     setRoadTool("inspect");
     setBuildRoadClass("arterial");
     setConstructionMessage(undefined);
+    setConstructionQuote(undefined);
   }
 
   async function saveLocally(): Promise<void> {
@@ -631,6 +745,15 @@ export function App() {
     snapshot.bottlenecks.roadBottlenecks.find(
       ({ isMillfordBridge }) => isMillfordBridge,
     );
+  const selectedRoad = snapshot.roadNetwork.segments.find(
+    ({ id }) => id === selection?.id,
+  );
+  const selectedUpgradeQuote = selectedRoad
+    ? simulation.quoteRoadUpgrade(selectedRoad.id)
+    : undefined;
+  const selectedRemovalQuote = selectedRoad
+    ? simulation.quoteRoadRemoval(selectedRoad.id)
+    : undefined;
 
   return (
     <main className="prototype-shell">
@@ -639,6 +762,7 @@ export function App() {
         roadTool={roadTool}
         onSelectionChange={setSelection}
         onBuildRoad={buildRoad}
+        onBuildRoadPreview={previewRoad}
         onRemoveRoad={removeRoad}
       />
       <button
@@ -668,6 +792,56 @@ export function App() {
           {snapshot.stoneSupplyChain.outboundFreight.shippedTonsPerDay} t/day stone exports
           {millfordBridgeBottleneck ? " · Bridge overloaded" : ""}
         </p>
+        <section className="finance-summary" aria-label="Regional finances">
+          <p className="eyebrow">Regional finances</p>
+          <dl className="freight-details">
+            <div>
+              <dt>Treasury</dt>
+              <dd>{formatMoney(snapshot.finances.balance)}</dd>
+            </div>
+            <div>
+              <dt>Capital spending</dt>
+              <dd>{formatMoney(snapshot.finances.totalCapitalSpending)}</dd>
+            </div>
+            <div>
+              <dt>Operating revenue</dt>
+              <dd>{formatMoney(snapshot.finances.totalOperatingRevenue)}</dd>
+            </div>
+            <div>
+              <dt>Daily maintenance</dt>
+              <dd>{formatMoney(snapshot.finances.dailyMaintenance)}</dd>
+            </div>
+            <div>
+              <dt>Daily bond penalty</dt>
+              <dd>
+                {formatMoney(snapshot.finances.emergencyFinance.dailyPenalty)}
+              </dd>
+            </div>
+            <div>
+              <dt>Emergency penalties paid</dt>
+              <dd>
+                {formatMoney(
+                  snapshot.finances.emergencyFinance.totalPenaltiesPaid,
+                )}
+              </dd>
+            </div>
+          </dl>
+          {snapshot.finances.emergencyFinance.bondAvailable ? (
+            <button className="emergency-bond" type="button" onClick={issueBond}>
+              Emergency bond · +
+              {formatMoney(snapshot.finances.emergencyFinance.bondProceeds)} · +
+              {formatMoney(
+                snapshot.finances.emergencyFinance.penaltyPerBondPerDay,
+              )}
+              /day
+            </button>
+          ) : null}
+          <p className="bond-penalty">
+            {snapshot.finances.emergencyFinance.bondsIssued > 0
+              ? `${snapshot.finances.emergencyFinance.bondsIssued} emergency bond${snapshot.finances.emergencyFinance.bondsIssued === 1 ? "" : "s"} active · −${formatMoney(snapshot.finances.emergencyFinance.dailyPenalty)}/day permanently.`
+              : `Emergency bonds become available below ${formatMoney(snapshot.finances.emergencyFinance.eligibilityBalance)}; each adds a permanent ${formatMoney(snapshot.finances.emergencyFinance.penaltyPerBondPerDay)}/day penalty.`}
+          </p>
+        </section>
         <section className="road-tools" aria-label="Road construction tools">
           <p className="eyebrow">Map tool</p>
           <div className="tool-buttons">
@@ -714,6 +888,9 @@ export function App() {
               Remove road
             </button>
           </div>
+          {constructionQuote ? (
+            <CostBreakdown quote={constructionQuote} label="Road cost preview" />
+          ) : null}
           {constructionMessage ? (
             <p className="construction-message" role="status">
               {constructionMessage}
@@ -739,6 +916,9 @@ export function App() {
               {selectedBottleneck ? (
                 <BottleneckInspector
                   bottleneck={selectedBottleneck}
+                  upgradeQuote={simulation.quoteRoadUpgrade(
+                    selectedBottleneck.roadSegmentId,
+                  )}
                   onUpgrade={upgradeRoad}
                   onPlanBypass={planBypass}
                 />
@@ -746,6 +926,25 @@ export function App() {
                 <p className="resolved-bottleneck">
                   No overloaded link is currently detected here.
                 </p>
+              ) : null}
+              {selectedRoad && selectedRemovalQuote ? (
+                <section className="road-finance" aria-label="Road finances">
+                  {selectedRoad.roadClass !== "highway" &&
+                  selectedUpgradeQuote ? (
+                    <CostBreakdown
+                      quote={selectedUpgradeQuote}
+                      label="Highway upgrade preview"
+                    />
+                  ) : null}
+                  <CostBreakdown
+                    quote={selectedRemovalQuote}
+                    label="Removal preview"
+                  />
+                  <p className="salvage-rule">
+                    Removal credits 20% of current-class base road work. Land
+                    acquisition and river work are not recoverable.
+                  </p>
+                </section>
               ) : null}
             </>
           ) : (

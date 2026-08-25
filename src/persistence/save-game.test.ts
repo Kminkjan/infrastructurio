@@ -68,6 +68,9 @@ describe("save games", () => {
     expect(restored.getState().supplyChain).toEqual(
       original.getState().supplyChain,
     );
+    expect(restored.getState().finances).toEqual(
+      original.getState().finances,
+    );
     expect(after.tick).toBe(before.tick);
     expect(after.elapsedDays).toBe(before.elapsedDays);
     expect(after.stoneSupplyChain).toEqual(before.stoneSupplyChain);
@@ -83,12 +86,25 @@ describe("save games", () => {
       original.dispatch(replayCommand).stoneSupplyChain,
     );
 
-    const continued = restored.dispatch({
-      type: "build-road",
+    const futureRoad = {
       start: { x: 0, y: 20 },
       end: { x: 20, y: 20 },
+    } as const;
+    expect(
+      restored.quoteRoadConstruction(futureRoad.start, futureRoad.end),
+    ).toEqual(
+      original.quoteRoadConstruction(futureRoad.start, futureRoad.end),
+    );
+    const continued = restored.dispatch({
+      type: "build-road",
+      ...futureRoad,
+    });
+    const originalContinued = original.dispatch({
+      type: "build-road",
+      ...futureRoad,
     });
     expect(continued.roadNetwork.segments.at(-1)?.id).toBe("road-segment-4");
+    expect(continued.finances).toEqual(originalContinued.finances);
   });
 
   it("preserves completed and pending development for deterministic continuation", () => {
@@ -112,6 +128,35 @@ describe("save games", () => {
     const command = { type: "advance", ticks: 24 * 7 } as const;
     expect(restored.dispatch(command).development).toEqual(
       original.dispatch(command).development,
+    );
+  });
+
+  it("preserves emergency finance and future daily penalties", () => {
+    const original = createSimulation("save-emergency-finance");
+    original.dispatch({
+      type: "build-road",
+      start: { x: 0, y: 0 },
+      end: { x: 960, y: 0 },
+      roadClass: "highway",
+    });
+    original.dispatch({
+      type: "build-road",
+      start: { x: 0, y: 20 },
+      end: { x: 960, y: 20 },
+      roadClass: "arterial",
+    });
+    original.dispatch({ type: "issue-emergency-bond" });
+    original.dispatch({ type: "advance", ticks: 24 });
+
+    const restored = restoreSaveGame(createSaveGame(original));
+    expect(restored.getState().finances).toEqual(original.getState().finances);
+    expect(restored.getSnapshot().finances.emergencyFinance).toEqual(
+      original.getSnapshot().finances.emergencyFinance,
+    );
+
+    const command = { type: "advance", ticks: 24 } as const;
+    expect(restored.dispatch(command).finances).toEqual(
+      original.dispatch(command).finances,
     );
   });
 
@@ -244,6 +289,39 @@ describe("save games", () => {
     );
   });
 
+  it("migrates version 4 saves with a fresh treasury at the saved tick", () => {
+    const current = createSaveGame(createConnectedSimulation());
+    const legacy = {
+      formatVersion: 4 as const,
+      scenarioId: current.scenarioId,
+      scenarioSeed: current.scenarioSeed,
+      simulation: {
+        tick: current.simulation.tick,
+        roadSegments: current.simulation.roadSegments,
+        nextRoadSegmentNumber: current.simulation.nextRoadSegmentNumber,
+        development: current.simulation.development,
+        supplyChain: current.simulation.supplyChain,
+        roadTraffic: current.simulation.roadTraffic,
+      },
+    };
+
+    const restored = restoreSaveGame(
+      deserializeSaveGame(JSON.stringify(legacy)),
+    );
+    expect(restored.getSnapshot().finances).toMatchObject({
+      balance: 60_000,
+      totalCapitalSpending: 0,
+      totalOperatingRevenue: 0,
+      totalMaintenancePaid: 0,
+    });
+    expect(restored.getState().finances?.processedTick).toBe(
+      current.simulation.tick,
+    );
+    expect(restored.getSnapshot().stoneSupplyChain).toEqual(
+      restoreSaveGame(current).getSnapshot().stoneSupplyChain,
+    );
+  });
+
   it("exports and imports the versioned save as a JSON file", async () => {
     const save = createSaveGame(createConnectedSimulation());
     const file = createSaveFile(save);
@@ -302,13 +380,13 @@ describe("save games", () => {
     expect(() =>
       deserializeSaveGame(
         JSON.stringify({
-          formatVersion: 5,
+          formatVersion: 6,
           scenarioId: "millford-valley",
           scenarioSeed: "future",
           simulation: {},
         }),
       ),
-    ).toThrow("unsupported save format version: 5");
+    ).toThrow("unsupported save format version: 6");
 
     const save = createSaveGame(createConnectedSimulation());
     const invalid = {
@@ -368,6 +446,20 @@ describe("save games", () => {
       },
     };
     expect(() => restoreSaveGame(invalidSupplyChain)).toThrow(
+      "save contains invalid simulation state",
+    );
+
+    const invalidFinances = {
+      ...save,
+      simulation: {
+        ...save.simulation,
+        finances: {
+          ...save.simulation.finances,
+          processedTick: save.simulation.tick + 1,
+        },
+      },
+    };
+    expect(() => restoreSaveGame(invalidFinances)).toThrow(
       "save contains invalid simulation state",
     );
   });

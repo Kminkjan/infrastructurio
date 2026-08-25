@@ -76,6 +76,147 @@ describe("headless simulation", () => {
     ).toBeUndefined();
   });
 
+  it("commits the exact simulation-owned quote and rejects unaffordable roads atomically", () => {
+    const simulation = createSimulation("finance-transactions");
+    const quote = simulation.quoteRoadConstruction(
+      { x: 0, y: 0 },
+      { x: 960, y: 0 },
+      "highway",
+    );
+    const committed = simulation.dispatch({
+      type: "build-road",
+      start: { x: 0, y: 0 },
+      end: { x: 960, y: 0 },
+      roadClass: "highway",
+    });
+
+    expect(committed.finances.lastInfrastructureTransaction).toEqual({
+      ...quote,
+      tick: 0,
+    });
+    expect(committed.finances).toMatchObject({
+      balance: quote.balanceAfter,
+      totalCapitalSpending: quote.breakdown.totalCost,
+      totalOperatingRevenue: 0,
+      dailyMaintenance: 172.8,
+    });
+
+    const unaffordableQuote = simulation.quoteRoadConstruction(
+      { x: 0, y: 20 },
+      { x: 960, y: 20 },
+      "highway",
+    );
+    expect(unaffordableQuote.affordable).toBe(false);
+    const before = simulation.getState();
+    expect(() =>
+      simulation.dispatch({
+        type: "build-road",
+        start: { x: 0, y: 20 },
+        end: { x: 960, y: 20 },
+        roadClass: "highway",
+      }),
+    ).toThrow("treasury has");
+    expect(simulation.getState()).toEqual(before);
+  });
+
+  it("uses the previewed upgrade and salvage breakdowns for committed edits", () => {
+    const simulation = createSimulation("finance-edit-quotes");
+    simulation.dispatch({
+      type: "build-road",
+      start: { x: 100, y: 50 },
+      end: { x: 200, y: 50 },
+      roadClass: "arterial",
+    });
+
+    const upgradeQuote = simulation.quoteRoadUpgrade("road-segment-1");
+    const upgraded = simulation.dispatch({
+      type: "upgrade-road",
+      roadSegmentId: "road-segment-1",
+    });
+    expect(upgraded.finances.lastInfrastructureTransaction).toEqual({
+      ...upgradeQuote,
+      tick: 0,
+    });
+
+    const removalQuote = simulation.quoteRoadRemoval("road-segment-1");
+    const removed = simulation.dispatch({
+      type: "remove-road",
+      roadSegmentId: "road-segment-1",
+    });
+    expect(removed.finances.lastInfrastructureTransaction).toEqual({
+      ...removalQuote,
+      tick: 0,
+    });
+    expect(removed.finances.totalSalvageRevenue).toBe(
+      removalQuote.breakdown.salvageCredit,
+    );
+  });
+
+  it("turns finished-stone deliveries into bounded revenue on the daily cadence", () => {
+    const simulation = createSimulation("finance-revenue");
+    const geography = simulation.getSnapshot().geography;
+    simulation.dispatch({
+      type: "build-road",
+      start: geography.quarry.position,
+      end: geography.stoneworks.position,
+    });
+    simulation.dispatch({
+      type: "build-road",
+      start: geography.stoneworks.position,
+      end: geography.externalMarketConnection.position,
+    });
+    const before = simulation.getSnapshot().finances;
+    const firstDay = simulation.dispatch({ type: "advance", ticks: 24 });
+    const secondDay = simulation.dispatch({ type: "advance", ticks: 24 });
+
+    expect(firstDay.finances.lastDailyRevenue).toBe(2_500);
+    expect(secondDay.stoneSupplyChain.outboundFreight.shippedTonsPerDay).toBe(100);
+    expect(secondDay.finances).toMatchObject({
+      lastDailyRevenue: 2_500,
+      totalOperatingRevenue: 5_000,
+      lastDailyMaintenance: before.dailyMaintenance,
+      totalMaintenancePaid: before.dailyMaintenance * 2,
+    });
+  });
+
+  it("makes emergency recovery visible, penalized, and impossible to stack immediately", () => {
+    const simulation = createSimulation("emergency-finance");
+    simulation.dispatch({
+      type: "build-road",
+      start: { x: 0, y: 0 },
+      end: { x: 960, y: 0 },
+      roadClass: "highway",
+    });
+    simulation.dispatch({
+      type: "build-road",
+      start: { x: 0, y: 20 },
+      end: { x: 960, y: 20 },
+      roadClass: "arterial",
+    });
+    const initial = simulation.getSnapshot().finances;
+    expect(initial.emergencyFinance.bondAvailable).toBe(true);
+    const issued = simulation.dispatch({ type: "issue-emergency-bond" });
+    expect(issued.finances).toMatchObject({
+      balance: initial.balance + initial.emergencyFinance.bondProceeds,
+      emergencyFinance: {
+        bondAvailable: false,
+        bondsIssued: 1,
+        dailyPenalty: 150,
+      },
+    });
+    const stateAfterIssue = simulation.getState();
+    expect(() =>
+      simulation.dispatch({ type: "issue-emergency-bond" }),
+    ).toThrow("available below");
+    expect(simulation.getState()).toEqual(stateAfterIssue);
+
+    const nextDay = simulation.dispatch({ type: "advance", ticks: 24 });
+    expect(nextDay.finances.emergencyFinance.totalPenaltiesPaid).toBe(150);
+    expect(nextDay.finances.balance).toBe(
+      issued.finances.balance - issued.finances.dailyMaintenance - 150,
+    );
+  });
+
   it("replays road commands deterministically and resets the network", () => {
     const first = createSimulation("road-determinism");
     const second = createSimulation("road-determinism");
