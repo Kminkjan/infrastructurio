@@ -589,7 +589,16 @@ export async function createWorldRenderer(
     }
   }
 
-  function createRepresentativeVehicleGraphic(): Graphics {
+  function createRepresentativeVehicleGraphic(mode: "road" | "rail"): Graphics {
+    if (mode === "rail") {
+      return new Graphics()
+        .roundRect(-18, -6, 36, 12, 2)
+        .fill({ color: 0x2c7f89 })
+        .rect(-13, -3, 8, 6)
+        .fill({ color: 0xbce8e5 })
+        .rect(2, -3, 11, 6)
+        .fill({ color: 0x15383d });
+    }
     return new Graphics()
       .roundRect(-9, -5, 13, 10, 2)
       .fill({ color: 0xd65f3f })
@@ -618,6 +627,7 @@ export async function createWorldRenderer(
       const plan = createRepresentativeFreightTrafficPlan(
         freight,
         snapshot.roadNetwork,
+        snapshot.railNetwork,
       );
       return plan ? [plan] : [];
     });
@@ -654,7 +664,7 @@ export async function createWorldRenderer(
     for (const sample of samples) {
       let graphic = representativeVehicleGraphics.get(sample.id);
       if (!graphic) {
-        graphic = createRepresentativeVehicleGraphic();
+        graphic = createRepresentativeVehicleGraphic(sample.mode);
         representativeVehicleGraphics.set(sample.id, graphic);
         representativeVehicleLayer.addChild(graphic);
       }

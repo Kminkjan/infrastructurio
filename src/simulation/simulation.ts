@@ -1,6 +1,7 @@
 import {
   TICKS_PER_DAY,
   type InfrastructureTransactionQuote,
+  type FreightRoute,
   type Point,
   type FreightRailTerminalState,
   type RailNetwork,
@@ -61,13 +62,16 @@ import {
 } from "./transport/rail-network";
 import { createBottleneckAnalysis } from "./transport/bottlenecks";
 import {
-  advanceRoadTraffic,
-  assignedRoadTrafficRoute,
-  createRoadTraffic,
-  restoreRoadTraffic,
-  type RoadTrafficDemand,
-  type RoadTrafficStateSnapshot,
-} from "./transport/road-traffic";
+  advanceFreightOperators,
+  assignedFreightRoute,
+  createFreightOperators,
+  freightServiceCandidates,
+  restoreFreightOperators,
+  setFreightServicePrice,
+  type FreightOperatorDemand,
+  type FreightOperatorStateSnapshot,
+} from "./transport/freight-operators";
+import type { RoadTrafficStateSnapshot } from "./transport/road-traffic";
 
 const DEFAULT_PLAYER_ROAD_CLASS: RoadClass = "arterial";
 export const INBOUND_TRAFFIC_FLOW_ID = "stone-supply-inbound";
@@ -78,7 +82,7 @@ interface SimulationState {
   readonly tick: number;
   readonly geography: ScenarioGeography;
   readonly roadNetwork: RoadNetwork;
-  readonly roadTraffic: RoadTrafficStateSnapshot;
+  readonly freightOperators: FreightOperatorStateSnapshot;
   readonly nextRoadSegmentNumber: number;
   readonly railNetwork: RailNetwork;
   readonly nextRailTrackNumber: number;
@@ -96,6 +100,7 @@ export interface SimulationStateSnapshot {
   readonly railTerminals?: readonly FreightRailTerminalState[];
   readonly nextRailTrackNumber?: number;
   readonly roadTraffic?: RoadTrafficStateSnapshot;
+  readonly freightOperators?: FreightOperatorStateSnapshot;
   readonly supplyChain?: StoneSupplyChainStateSnapshot;
   readonly finances?: FinanceStateSnapshot;
   readonly development?: DevelopmentStateSnapshot;
@@ -130,53 +135,47 @@ export interface Simulation {
   ): InfrastructureTransactionQuote;
 }
 
-function trafficDemands(
+function freightDemands(
   geography: ScenarioGeography,
   supplyChain: StoneSupplyChainStateSnapshot,
-): readonly RoadTrafficDemand[] {
+): readonly FreightOperatorDemand[] {
   return Object.freeze([
     Object.freeze({
       id: INBOUND_TRAFFIC_FLOW_ID,
       start: geography.quarry.position,
       end: geography.stoneworks.position,
-      assignedFlowUnitsPerDay: supplyChain.inboundShippedTonsPerDay,
+      originRailTerminalId: "rail-terminal-quarry",
+      destinationRailTerminalId: "rail-terminal-stoneworks",
+      demandTonsPerDay: supplyChain.inboundShippedTonsPerDay,
     }),
     Object.freeze({
       id: OUTBOUND_TRAFFIC_FLOW_ID,
       start: geography.stoneworks.position,
       end: geography.externalMarketConnection.position,
-      assignedFlowUnitsPerDay: supplyChain.outboundShippedTonsPerDay,
+      originRailTerminalId: "rail-terminal-stoneworks",
+      destinationRailTerminalId: "rail-terminal-market",
+      demandTonsPerDay: supplyChain.outboundShippedTonsPerDay,
     }),
   ]);
 }
 
 function supplyRoutes(state: SimulationState): {
-  readonly inbound: RoadRoute | undefined;
-  readonly outbound: RoadRoute | undefined;
+  readonly inbound: FreightRoute | undefined;
+  readonly outbound: FreightRoute | undefined;
 } {
   return {
-    inbound:
-      assignedRoadTrafficRoute(
-        state.roadNetwork,
-        state.roadTraffic,
-        INBOUND_TRAFFIC_FLOW_ID,
-      ) ??
-      findRoadRoute(
-        state.roadNetwork,
-        state.geography.quarry.position,
-        state.geography.stoneworks.position,
-      ),
-    outbound:
-      assignedRoadTrafficRoute(
-        state.roadNetwork,
-        state.roadTraffic,
-        OUTBOUND_TRAFFIC_FLOW_ID,
-      ) ??
-      findRoadRoute(
-        state.roadNetwork,
-        state.geography.stoneworks.position,
-        state.geography.externalMarketConnection.position,
-      ),
+    inbound: assignedFreightRoute(
+      state.roadNetwork,
+      state.railNetwork,
+      state.freightOperators,
+      INBOUND_TRAFFIC_FLOW_ID,
+    ),
+    outbound: assignedFreightRoute(
+      state.roadNetwork,
+      state.railNetwork,
+      state.freightOperators,
+      OUTBOUND_TRAFFIC_FLOW_ID,
+    ),
   };
 }
 
@@ -192,6 +191,18 @@ function snapshot(
     state.supplyChain,
     routes.inbound,
     routes.outbound,
+    freightServiceCandidates(
+      state.roadNetwork,
+      state.railNetwork,
+      state.freightOperators,
+      INBOUND_TRAFFIC_FLOW_ID,
+    ),
+    freightServiceCandidates(
+      state.roadNetwork,
+      state.railNetwork,
+      state.freightOperators,
+      OUTBOUND_TRAFFIC_FLOW_ID,
+    ),
   );
   return Object.freeze({
     seed: state.seed,
@@ -210,7 +221,7 @@ function snapshot(
     bottlenecks: createBottleneckAnalysis(
       state.geography,
       state.roadNetwork,
-      state.roadTraffic,
+      state.freightOperators,
       stoneSupplyChain,
     ),
     accessibility: accessibilitySnapshot,
@@ -484,6 +495,7 @@ function createSimulationState(
   savedSupplyChain?: StoneSupplyChainStateSnapshot,
   savedRoadTraffic?: RoadTrafficStateSnapshot,
   savedFinances?: FinanceStateSnapshot,
+  savedFreightOperators?: FreightOperatorStateSnapshot,
 ): SimulationState {
   if (!Number.isSafeInteger(tick) || tick < 0) {
     throw new RangeError("simulation tick must be a non-negative safe integer");
@@ -546,19 +558,28 @@ function createSimulationState(
   const finances = savedFinances
     ? validateFinanceState(savedFinances, tick)
     : createFinanceState(tick);
-  const demands = trafficDemands(geography, supplyChain);
-  const traffic = savedRoadTraffic
-    ? restoreRoadTraffic(baseRoadNetwork, savedRoadTraffic, tick, demands)
-    : createRoadTraffic(baseRoadNetwork, tick, demands);
+  // Versions before multimodal assignment carry road-only state. Their final
+  // topology and economy are retained, while assignment is rebuilt at load.
+  void savedRoadTraffic;
+  const demands = freightDemands(geography, supplyChain);
+  const operators = savedFreightOperators
+    ? restoreFreightOperators(
+        baseRoadNetwork,
+        railNetwork,
+        savedFreightOperators,
+        tick,
+        demands,
+      )
+    : createFreightOperators(baseRoadNetwork, railNetwork, tick, demands);
 
   return Object.freeze({
     seed,
     tick,
     geography,
-    roadNetwork: traffic.network,
-    roadTraffic: traffic.state,
+    roadNetwork: operators.roadNetwork,
+    freightOperators: operators.state,
     nextRoadSegmentNumber,
-    railNetwork,
+    railNetwork: operators.railNetwork,
     nextRailTrackNumber,
     supplyChain,
     finances,
@@ -580,7 +601,7 @@ function runSimulation(initialState: SimulationState): Simulation {
         Object.freeze({ id, site, siteId }),
       ),
       nextRailTrackNumber: state.nextRailTrackNumber,
-      roadTraffic: state.roadTraffic,
+      freightOperators: state.freightOperators,
       supplyChain: state.supplyChain,
       finances: state.finances,
       development: state.development,
@@ -622,38 +643,44 @@ function runSimulation(initialState: SimulationState): Simulation {
   return {
     dispatch(command) {
       const previousRoadNetwork = state.roadNetwork;
+      const previousRailNetwork = state.railNetwork;
       switch (command.type) {
         case "advance": {
           const targetTick = advanceTarget(state, command.ticks);
           let network = state.roadNetwork;
-          let trafficState = state.roadTraffic;
+          let railNetwork = state.railNetwork;
+          let operatorState = state.freightOperators;
           let supplyChain = state.supplyChain;
           let finances = state.finances;
           let activityChanged = false;
 
           while (supplyChain.nextUpdateTick <= targetTick) {
             const updateTick = supplyChain.nextUpdateTick;
-            const beforeBoundary = advanceRoadTraffic(
+            const beforeBoundary = advanceFreightOperators(
               network,
-              trafficState,
+              railNetwork,
+              operatorState,
               updateTick - 1,
-              trafficDemands(state.geography, supplyChain),
+              freightDemands(state.geography, supplyChain),
             );
-            network = beforeBoundary.network;
-            trafficState = beforeBoundary.state;
+            network = beforeBoundary.roadNetwork;
+            railNetwork = beforeBoundary.railNetwork;
+            operatorState = beforeBoundary.state;
             const previousProcessing = supplyChain.processedTonsPerDay;
             supplyChain = advanceStoneSupplyChainDay(
               supplyChain,
               updateTick,
-              findRoadRoute(
+              assignedFreightRoute(
                 network,
-                state.geography.quarry.position,
-                state.geography.stoneworks.position,
+                railNetwork,
+                operatorState,
+                INBOUND_TRAFFIC_FLOW_ID,
               ),
-              findRoadRoute(
+              assignedFreightRoute(
                 network,
-                state.geography.stoneworks.position,
-                state.geography.externalMarketConnection.position,
+                railNetwork,
+                operatorState,
+                OUTBOUND_TRAFFIC_FLOW_ID,
               ),
             );
             activityChanged ||=
@@ -664,30 +691,35 @@ function runSimulation(initialState: SimulationState): Simulation {
               supplyChain.outboundShippedTonsPerDay,
               state.geography,
               network,
-              state.railNetwork,
+              railNetwork,
             );
-            const atBoundary = createRoadTraffic(
+            const atBoundary = createFreightOperators(
               network,
+              railNetwork,
               updateTick,
-              trafficDemands(state.geography, supplyChain),
+              freightDemands(state.geography, supplyChain),
+              operatorState.pricing,
             );
-            network = atBoundary.network;
-            trafficState = atBoundary.state;
+            network = atBoundary.roadNetwork;
+            railNetwork = atBoundary.railNetwork;
+            operatorState = atBoundary.state;
           }
 
-          const traffic = advanceRoadTraffic(
+          const operators = advanceFreightOperators(
             network,
-            trafficState,
+            railNetwork,
+            operatorState,
             targetTick,
-            trafficDemands(state.geography, supplyChain),
+            freightDemands(state.geography, supplyChain),
           );
           supplyChain = markStoneSupplyChainProcessed(supplyChain, targetTick);
           finances = markFinanceProcessed(finances, targetTick);
           state = {
             ...state,
             tick: targetTick,
-            roadNetwork: traffic.network,
-            roadTraffic: traffic.state,
+            roadNetwork: operators.roadNetwork,
+            railNetwork: operators.railNetwork,
+            freightOperators: operators.state,
             supplyChain,
             finances,
           };
@@ -732,27 +764,47 @@ function runSimulation(initialState: SimulationState): Simulation {
         case "remove-freight-rail-terminal":
           state = removeFreightRailTerminal(state, command.railTerminalId);
           break;
+        case "set-freight-service-price":
+          state = {
+            ...state,
+            freightOperators: {
+              ...state.freightOperators,
+              pricing: setFreightServicePrice(
+                state.freightOperators.pricing,
+                command.mode,
+                command.adjustmentHours,
+              ),
+            },
+          };
+          break;
         case "issue-emergency-bond":
           state = { ...state, finances: issueEmergencyBond(state.finances) };
           break;
       }
 
       if (
-        state.roadNetwork !== previousRoadNetwork &&
+        (state.roadNetwork !== previousRoadNetwork ||
+          state.railNetwork !== previousRailNetwork ||
+          command.type === "set-freight-service-price") &&
         command.type !== "reset" &&
         command.type !== "advance"
       ) {
-        const traffic = createRoadTraffic(
+        const operators = createFreightOperators(
           state.roadNetwork,
+          state.railNetwork,
           state.tick,
-          trafficDemands(state.geography, state.supplyChain),
+          freightDemands(state.geography, state.supplyChain),
+          state.freightOperators.pricing,
         );
         state = {
           ...state,
-          roadNetwork: traffic.network,
-          roadTraffic: traffic.state,
+          roadNetwork: operators.roadNetwork,
+          railNetwork: operators.railNetwork,
+          freightOperators: operators.state,
         };
-        updateAccessibility(state.roadNetwork);
+        if (state.roadNetwork !== previousRoadNetwork) {
+          updateAccessibility(state.roadNetwork);
+        }
         state = {
           ...state,
           development: updateDevelopmentAccess(
@@ -875,6 +927,7 @@ export function restoreSimulation(
       savedState.supplyChain,
       savedState.roadTraffic,
       savedState.finances,
+      savedState.freightOperators,
     ),
   );
 }

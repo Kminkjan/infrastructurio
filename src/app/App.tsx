@@ -170,10 +170,10 @@ function FreightInspector({
   readonly freight: AggregateFreightSnapshot;
 }) {
   const routeDescription = freight.route
-    ? `${(freight.routeCost ?? 0).toFixed(1)} generalized hours · ${
+    ? `${freight.route.mode === "road" ? "Road" : "Rail"} · ${(freight.routeCost ?? 0).toFixed(1)} generalized hours · ${
         freight.route.linkIds.length
       } ${freight.route.linkIds.length === 1 ? "link" : "links"}`
-    : "No connected road route";
+    : "No viable road or rail service";
 
   return (
     <>
@@ -192,6 +192,14 @@ function FreightInspector({
           <dd>{formatTons(freight.requestedTonsPerDay)}</dd>
         </div>
         <div>
+          <dt>Demand</dt>
+          <dd>{formatTons(freight.demandTonsPerDay)}</dd>
+        </div>
+        <div>
+          <dt>Assigned</dt>
+          <dd>{formatTons(freight.assignedTonsPerDay)}</dd>
+        </div>
+        <div>
           <dt>Shipped</dt>
           <dd>{formatTons(freight.shippedTonsPerDay)}</dd>
         </div>
@@ -203,6 +211,21 @@ function FreightInspector({
       <p className="limiting-factor">
         <strong>Limiting factor:</strong> {freight.limitingReason}
       </p>
+      <p className="limiting-factor">
+        <strong>Private operator choice:</strong> {freight.serviceChoiceReason}
+      </p>
+      <dl className="freight-details" aria-label="Freight service comparison">
+        {freight.serviceCandidates.map((candidate) => (
+          <div key={candidate.mode}>
+            <dt>{candidate.mode === "road" ? "Road service" : "Rail service"}</dt>
+            <dd>
+              {candidate.viable
+                ? `${candidate.generalizedCostHours!.toFixed(1)} generalized hours; ${candidate.capacityTonsPerDay.toLocaleString()} t/day capacity; ${candidate.congestionDelayHours.toFixed(1)} hours congestion; ${candidate.terminalHandlingTimeHours.toFixed(1)} hours terminal handling; ${candidate.accessEgressTimeHours.toFixed(1)} hours access/egress; ${candidate.priceAdjustmentHours.toFixed(1)} hours price adjustment. ${candidate.reason}`
+                : candidate.reason}
+            </dd>
+          </div>
+        ))}
+      </dl>
     </>
   );
 }

@@ -129,6 +129,46 @@ describe("headless simulation", () => {
     ).toBeUndefined();
   });
 
+  it("reprices private services and immediately changes the selected mode", () => {
+    const simulation = createSimulation("operator-repricing");
+    const geography = simulation.getSnapshot().geography;
+    simulation.dispatch({
+      type: "build-road",
+      start: geography.quarry.position,
+      end: geography.stoneworks.position,
+    });
+    simulation.dispatch({ type: "place-freight-rail-terminal", site: "quarry" });
+    simulation.dispatch({ type: "place-freight-rail-terminal", site: "stoneworks" });
+    const withRail = simulation.dispatch({
+      type: "build-rail-track",
+      start: geography.quarry.position,
+      end: geography.stoneworks.position,
+    });
+    expect(withRail.stoneSupplyChain.inboundFreight.chosenMode).toBe("rail");
+
+    const repriced = simulation.dispatch({
+      type: "set-freight-service-price",
+      mode: "rail",
+      adjustmentHours: 10,
+    });
+    expect(repriced.stoneSupplyChain.inboundFreight.chosenMode).toBe("road");
+    expect(
+      repriced.stoneSupplyChain.inboundFreight.serviceCandidates.find(
+        ({ mode }) => mode === "rail",
+      )?.priceAdjustmentHours,
+    ).toBe(10);
+
+    expect(simulation.dispatch({
+      type: "set-freight-service-price",
+      mode: "rail",
+      adjustmentHours: 0,
+    }).stoneSupplyChain.inboundFreight.chosenMode).toBe("rail");
+    expect(simulation.dispatch({
+      type: "remove-rail-track",
+      railTrackId: "rail-track-1",
+    }).stoneSupplyChain.inboundFreight.chosenMode).toBe("road");
+  });
+
   it("rejects invalid and unaffordable rail edits without partial mutation", () => {
     const simulation = createSimulation("rail-invalid-input");
     const initial = simulation.getState();

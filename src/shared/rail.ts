@@ -32,6 +32,7 @@ export interface FreightRailTerminalSnapshot
   readonly freeFlowTransferTimeHours: number;
   readonly constructionCost: number;
   readonly maintenanceCostPerDay: number;
+  readonly assignedHandlingTonsPerDay: number;
 }
 
 export interface RailNode {
@@ -47,6 +48,9 @@ export interface RailLink {
   readonly length: number;
   readonly capacityTonsPerDay: number;
   readonly freeFlowTravelTimeHours: number;
+  readonly assignedFlowTonsPerDay: number;
+  readonly congestionDelayHours: number;
+  readonly generalizedCostHours: number;
 }
 
 export interface RailNetwork {
@@ -65,5 +69,7 @@ export interface RailRoute {
   readonly trackTravelTimeHours: number;
   readonly terminalTransferTimeHours: number;
   readonly freeFlowTravelTimeHours: number;
+  readonly congestionDelayHours: number;
+  readonly generalizedCostHours: number;
   readonly capacityTonsPerDay: number;
 }

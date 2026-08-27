@@ -41,6 +41,19 @@ function createConnectedSimulation() {
   return simulation;
 }
 
+function legacyRoadTraffic(save: ReturnType<typeof createSaveGame>) {
+  return {
+    lastAssignmentTick: save.simulation.freightOperators.lastAssignmentTick,
+    nextAssignmentTick: save.simulation.freightOperators.nextAssignmentTick,
+    flows: save.simulation.freightOperators.flows.map(({ id }) => ({
+      id,
+      assignedFlowUnitsPerDay: 0,
+      routeNodeIds: null,
+      routeLinkIds: null,
+    })),
+  };
+}
+
 describe("save games", () => {
   it("round-trips roads, time, economic state, and future road ids", () => {
     const original = createConnectedSimulation();
@@ -62,8 +75,8 @@ describe("save games", () => {
       },
     });
     expect(after.roadNetwork).toEqual(before.roadNetwork);
-    expect(restored.getState().roadTraffic).toEqual(
-      original.getState().roadTraffic,
+    expect(restored.getState().freightOperators).toEqual(
+      original.getState().freightOperators,
     );
     expect(restored.getState().supplyChain).toEqual(
       original.getState().supplyChain,
@@ -131,7 +144,7 @@ describe("save games", () => {
     const restored = restoreSaveGame(save);
 
     expect(save).toMatchObject({
-      formatVersion: 6,
+      formatVersion: SAVE_FORMAT_VERSION,
       simulation: {
         nextRailTrackNumber: 3,
         railTracks: [{ id: "rail-track-1" }],
@@ -157,6 +170,26 @@ describe("save games", () => {
       start: { x: 40, y: 20 },
       end: { x: 50, y: 20 },
     }).railNetwork.tracks.at(-1)?.id).toBe("rail-track-3");
+  });
+
+  it("round-trips private operator pricing and assignment cadence", () => {
+    const original = createConnectedSimulation();
+    original.dispatch({
+      type: "set-freight-service-price",
+      mode: "road",
+      adjustmentHours: 2.5,
+    });
+    const restored = restoreSaveGame(
+      deserializeSaveGame(serializeSaveGame(createSaveGame(original))),
+    );
+
+    expect(restored.getState().freightOperators).toEqual(
+      original.getState().freightOperators,
+    );
+    expect(
+      restored.getSnapshot().stoneSupplyChain.inboundFreight.serviceCandidates[0]
+        ?.priceAdjustmentHours,
+    ).toBe(2.5);
   });
 
   it("preserves completed and pending development for deterministic continuation", () => {
@@ -301,7 +334,7 @@ describe("save games", () => {
     expect(restored.getSnapshot().roadNetwork.segments.every(
       ({ roadClass }) => roadClass === "arterial",
     )).toBe(true);
-    expect(restored.getState().roadTraffic).toBeDefined();
+    expect(restored.getState().freightOperators).toBeDefined();
   });
 
   it("migrates version 3 quarry-export saves to a dormant stoneworks", () => {
@@ -353,7 +386,7 @@ describe("save games", () => {
         nextRoadSegmentNumber: current.simulation.nextRoadSegmentNumber,
         development: current.simulation.development,
         supplyChain: current.simulation.supplyChain,
-        roadTraffic: current.simulation.roadTraffic,
+        roadTraffic: legacyRoadTraffic(current),
       },
     };
 
@@ -369,9 +402,7 @@ describe("save games", () => {
     expect(restored.getState().finances?.processedTick).toBe(
       current.simulation.tick,
     );
-    expect(restored.getSnapshot().stoneSupplyChain).toEqual(
-      restoreSaveGame(current).getSnapshot().stoneSupplyChain,
-    );
+    expect(restored.getState().supplyChain).toEqual(current.simulation.supplyChain);
   });
 
   it("migrates version 5 saves with an empty rail network", () => {
@@ -386,7 +417,7 @@ describe("save games", () => {
         nextRoadSegmentNumber: current.simulation.nextRoadSegmentNumber,
         development: current.simulation.development,
         supplyChain: current.simulation.supplyChain,
-        roadTraffic: current.simulation.roadTraffic,
+        roadTraffic: legacyRoadTraffic(current),
         finances: current.simulation.finances,
       },
     };
@@ -459,13 +490,13 @@ describe("save games", () => {
     expect(() =>
       deserializeSaveGame(
         JSON.stringify({
-          formatVersion: 7,
+          formatVersion: 8,
           scenarioId: "millford-valley",
           scenarioSeed: "future",
           simulation: {},
         }),
       ),
-    ).toThrow("unsupported save format version: 7");
+    ).toThrow("unsupported save format version: 8");
 
     const save = createSaveGame(createConnectedSimulation());
     const invalid = {
@@ -504,8 +535,8 @@ describe("save games", () => {
       ...save,
       simulation: {
         ...save.simulation,
-        roadTraffic: {
-          ...save.simulation.roadTraffic,
+        freightOperators: {
+          ...save.simulation.freightOperators,
           nextAssignmentTick: save.simulation.tick,
         },
       },

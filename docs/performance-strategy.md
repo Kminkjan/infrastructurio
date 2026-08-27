@@ -67,7 +67,7 @@ guardrails rather than a frame-time claim. Representative traffic now establishe
 the scenario-specific display count below; a hardware frame-time budget remains
 future measurement work.
 
-The freight renderer uses one representative vehicle per 20 assigned tons per
+The freight renderer uses one representative truck or train per 20 assigned tons per
 day per leg. At the current 120-ton inbound and 100-ton outbound maxima, the
 two-leg supply chain therefore produces at most eleven freight graphics. Those
 graphics are reused while their visual trips are active and removed at
@@ -90,8 +90,8 @@ one new regional construction project per weekly evaluation, so it does not add
 per-frame simulation work. Building marks are reconstructed from the small
 development snapshot only when that snapshot changes.
 
-Road traffic assignment runs every eight simulated ticks (eight hours) and
-immediately after a network edit. A multi-tick advance processes each crossed
+Multimodal freight assignment runs every eight simulated ticks (eight hours) and
+immediately after a relevant infrastructure or price edit. A multi-tick advance processes each crossed
 assignment boundary deterministically, while representative freight motion
 continues on the render-frame clock. Stoneworks inventories and processing run
 only at crossed daily boundaries. The current network and two aggregate freight

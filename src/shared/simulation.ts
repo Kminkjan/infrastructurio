@@ -1,6 +1,7 @@
 import type { AccessibilitySnapshot } from "./accessibility";
 import type { BottleneckAnalysisSnapshot } from "./bottlenecks";
 import type { StoneSupplyChainSnapshot } from "./economy";
+import type { FreightMode } from "./economy";
 import type { FinanceSnapshot } from "./finances";
 import type { DevelopmentSnapshot } from "./development";
 import type { Point, ScenarioGeography } from "./geography";
@@ -33,6 +34,11 @@ export type SimulationCommand =
   | {
       readonly type: "remove-freight-rail-terminal";
       readonly railTerminalId: string;
+    }
+  | {
+      readonly type: "set-freight-service-price";
+      readonly mode: FreightMode;
+      readonly adjustmentHours: number;
     }
   | { readonly type: "issue-emergency-bond" };
 

@@ -177,6 +177,7 @@ function createTerminalSnapshot(
     position: freezePoint(compatibleSite.position),
     capacityTonsPerDay: FREIGHT_RAIL_TERMINAL_CAPACITY_TONS_PER_DAY,
     freeFlowTransferTimeHours: FREIGHT_RAIL_TERMINAL_TRANSFER_TIME_HOURS,
+    assignedHandlingTonsPerDay: 0,
     ...freightRailTerminalSnapshotEconomics(),
   });
 }
@@ -321,6 +322,10 @@ export function createRailNetwork(
           capacityTonsPerDay: track.capacityTonsPerDay,
           freeFlowTravelTimeHours:
             length / RAIL_TRACK_SPEED_MAP_UNITS_PER_HOUR,
+          assignedFlowTonsPerDay: 0,
+          congestionDelayHours: 0,
+          generalizedCostHours:
+            length / RAIL_TRACK_SPEED_MAP_UNITS_PER_HOUR,
         }),
       );
     }
@@ -331,6 +336,121 @@ export function createRailNetwork(
     terminals: Object.freeze(terminals),
     nodes: Object.freeze(nodes),
     links: Object.freeze(links),
+  });
+}
+
+function railDelayHours(
+  freeFlowTravelTimeHours: number,
+  assignedFlowTonsPerDay: number,
+  capacityTonsPerDay: number,
+): number {
+  return assignedFlowTonsPerDay <= capacityTonsPerDay
+    ? 0
+    : freeFlowTravelTimeHours *
+        0.5 *
+        ((assignedFlowTonsPerDay / capacityTonsPerDay) ** 4 - 1);
+}
+
+export function applyRailFlows(
+  network: RailNetwork,
+  flowByLinkId: ReadonlyMap<string, number>,
+  handlingByTerminalId: ReadonlyMap<string, number>,
+): RailNetwork {
+  for (const linkId of flowByLinkId.keys()) {
+    if (!network.links.some(({ id }) => id === linkId)) {
+      throw new RangeError(`assigned flow references unknown rail link ${linkId}`);
+    }
+  }
+  for (const terminalId of handlingByTerminalId.keys()) {
+    if (!network.terminals.some(({ id }) => id === terminalId)) {
+      throw new RangeError(
+        `assigned handling references unknown rail terminal ${terminalId}`,
+      );
+    }
+  }
+  return Object.freeze({
+    tracks: network.tracks,
+    nodes: network.nodes,
+    links: Object.freeze(network.links.map((link) => {
+      const assignedFlowTonsPerDay = flowByLinkId.get(link.id) ?? 0;
+      const congestionDelayHours = railDelayHours(
+        link.freeFlowTravelTimeHours,
+        assignedFlowTonsPerDay,
+        link.capacityTonsPerDay,
+      );
+      return Object.freeze({
+        ...link,
+        assignedFlowTonsPerDay,
+        congestionDelayHours,
+        generalizedCostHours:
+          link.freeFlowTravelTimeHours + congestionDelayHours,
+      });
+    })),
+    terminals: Object.freeze(network.terminals.map((terminal) =>
+      Object.freeze({
+        ...terminal,
+        assignedHandlingTonsPerDay: handlingByTerminalId.get(terminal.id) ?? 0,
+      }),
+    )),
+  });
+}
+
+export function createRailRouteFromIds(
+  network: RailNetwork,
+  originTerminalId: string,
+  destinationTerminalId: string,
+  nodeIdsInput: readonly string[],
+  linkIdsInput: readonly string[],
+): RailRoute | undefined {
+  const origin = network.terminals.find(({ id }) => id === originTerminalId);
+  const destination = network.terminals.find(({ id }) => id === destinationTerminalId);
+  if (!origin || !destination || nodeIdsInput.length !== linkIdsInput.length + 1) {
+    return undefined;
+  }
+  const startNode = network.nodes.find(({ id }) => id === nodeIdsInput[0]);
+  const endNode = network.nodes.find(({ id }) => id === nodeIdsInput.at(-1));
+  if (!startNode || !endNode || !samePoint(startNode.position, origin.position) ||
+      !samePoint(endNode.position, destination.position)) {
+    return undefined;
+  }
+  const links: RailLink[] = [];
+  for (let index = 0; index < linkIdsInput.length; index += 1) {
+    const link = network.links.find(({ id }) => id === linkIdsInput[index]);
+    const startNodeId = nodeIdsInput[index];
+    const endNodeId = nodeIdsInput[index + 1];
+    if (!link || !((link.startNodeId === startNodeId && link.endNodeId === endNodeId) ||
+      (link.startNodeId === endNodeId && link.endNodeId === startNodeId))) {
+      return undefined;
+    }
+    links.push(link);
+  }
+  const trackTravelTimeHours = links.reduce(
+    (total, link) => total + link.freeFlowTravelTimeHours,
+    0,
+  );
+  const congestionDelayHours = links.reduce(
+    (total, link) => total + link.congestionDelayHours,
+    0,
+  );
+  const terminalTransferTimeHours =
+    origin.freeFlowTransferTimeHours + destination.freeFlowTransferTimeHours;
+  return Object.freeze({
+    originTerminalId,
+    destinationTerminalId,
+    nodeIds: Object.freeze([...nodeIdsInput]),
+    linkIds: Object.freeze([...linkIdsInput]),
+    length: links.reduce((total, link) => total + link.length, 0),
+    trackTravelTimeHours,
+    terminalTransferTimeHours,
+    freeFlowTravelTimeHours: trackTravelTimeHours + terminalTransferTimeHours,
+    congestionDelayHours,
+    generalizedCostHours:
+      trackTravelTimeHours + terminalTransferTimeHours + congestionDelayHours,
+    capacityTonsPerDay: Math.min(
+      origin.capacityTonsPerDay,
+      destination.capacityTonsPerDay,
+      ...links.map(({ capacityTonsPerDay }) => capacityTonsPerDay),
+    ),
   });
 }
 
@@ -406,7 +526,7 @@ export function findRailRoute(
         continue;
       }
       const nextDistance =
-        currentDistance + connection.link.freeFlowTravelTimeHours;
+        currentDistance + connection.link.generalizedCostHours;
       if (
         nextDistance <
         (distances.get(connection.nodeId) ?? Number.POSITIVE_INFINITY) - EPSILON
@@ -438,30 +558,11 @@ export function findRailRoute(
   nodeIds.reverse();
   linkIds.reverse();
 
-  const links = linkIds.map(
-    (linkId) => network.links.find(({ id }) => id === linkId)!,
+  return createRailRouteFromIds(
+    network,
+    origin.id,
+    destination.id,
+    nodeIds,
+    linkIds,
   );
-  const length = links.reduce((total, link) => total + link.length, 0);
-  const trackTravelTimeHours = links.reduce(
-    (total, link) => total + link.freeFlowTravelTimeHours,
-    0,
-  );
-  const terminalTransferTimeHours =
-    origin.freeFlowTransferTimeHours + destination.freeFlowTransferTimeHours;
-  return Object.freeze({
-    originTerminalId: origin.id,
-    destinationTerminalId: destination.id,
-    nodeIds: Object.freeze(nodeIds),
-    linkIds: Object.freeze(linkIds),
-    length,
-    trackTravelTimeHours,
-    terminalTransferTimeHours,
-    freeFlowTravelTimeHours:
-      trackTravelTimeHours + terminalTransferTimeHours,
-    capacityTonsPerDay: Math.min(
-      origin.capacityTonsPerDay,
-      destination.capacityTonsPerDay,
-      ...links.map(({ capacityTonsPerDay }) => capacityTonsPerDay),
-    ),
-  });
 }

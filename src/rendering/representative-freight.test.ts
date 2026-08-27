@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { AggregateFreightSnapshot, RoadNetwork } from "../shared";
+import { createSimulation } from "../simulation";
 import {
   createRepresentativeFreightTrafficPlan,
   sampleRepresentativeFreightVehicles,
@@ -61,6 +62,7 @@ const roadNetwork: RoadNetwork = {
 function freight(
   shippedTonsPerDay: number,
   route: AggregateFreightSnapshot["route"] = {
+    mode: "road",
     nodeIds: ["quarry", "corner", "market"],
     linkIds: ["first", "second"],
     length: 200,
@@ -77,9 +79,14 @@ function freight(
     destinationId: "market",
     availableTonsPerDay: 120,
     requestedTonsPerDay: 100,
+    demandTonsPerDay: 100,
+    assignedTonsPerDay: shippedTonsPerDay,
     shippedTonsPerDay,
+    chosenMode: route?.mode ?? null,
     route,
     routeCost: route?.generalizedCostHours ?? null,
+    serviceCandidates: [],
+    serviceChoiceReason: "Test choice",
     limitingFactor: route ? "market-demand" : "no-route",
     limitingReason: "Test fixture",
   };
@@ -153,6 +160,7 @@ describe("representative freight traffic", () => {
     );
     const changed = createRepresentativeFreightTrafficPlan(
       freight(100, {
+        mode: "road",
         nodeIds: ["quarry", "alternate", "market"],
         linkIds: ["alternate-first", "alternate-second"],
         length: 200,
@@ -173,6 +181,7 @@ describe("representative freight traffic", () => {
     expect(
       createRepresentativeFreightTrafficPlan(
         freight(100, {
+          mode: "road",
           nodeIds: ["quarry", "market"],
           linkIds: ["missing-link"],
           length: 200,
@@ -198,5 +207,26 @@ describe("representative freight traffic", () => {
     expect(sampleRepresentativeFreightVehicles(inbound, 0)[0]?.id).not.toBe(
       sampleRepresentativeFreightVehicles(outbound, 0)[0]?.id,
     );
+  });
+
+  it("samples representative trains from an assigned aggregate rail flow", () => {
+    const simulation = createSimulation("representative-train");
+    const geography = simulation.getSnapshot().geography;
+    simulation.dispatch({ type: "place-freight-rail-terminal", site: "quarry" });
+    simulation.dispatch({ type: "place-freight-rail-terminal", site: "stoneworks" });
+    simulation.dispatch({
+      type: "build-rail-track",
+      start: geography.quarry.position,
+      end: geography.stoneworks.position,
+    });
+    const snapshot = simulation.dispatch({ type: "advance", ticks: 24 });
+    const plan = createRepresentativeFreightTrafficPlan(
+      snapshot.stoneSupplyChain.inboundFreight,
+      snapshot.roadNetwork,
+      snapshot.railNetwork,
+    );
+
+    expect(plan).toMatchObject({ mode: "rail", vehicleCount: 6 });
+    expect(sampleRepresentativeFreightVehicles(plan!, 0)[0]?.mode).toBe("rail");
   });
 });

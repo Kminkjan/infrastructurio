@@ -112,6 +112,7 @@ describe("selectable map features", () => {
         freeFlowTransferTimeHours: 0.75,
         constructionCost: 5_000,
         maintenanceCostPerDay: 35,
+        assignedHandlingTonsPerDay: 0,
       }],
       nodes: [{ id: "rail-node-1", position: { x: 10, y: 20 } }],
       links: [],

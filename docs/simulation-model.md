@@ -291,8 +291,35 @@ Prototype rail profiles are explicit vertical-slice balancing values:
 Track inside Eastbank Fields adds $12 per intersected map unit. Each river
 intersection adds $6,000 construction and $60 daily maintenance. Removing track
 or a terminal credits 20% of base construction; land and river work are not
-salvaged. Modal demand assignment, trains, timetables, signals, passenger rail,
-and detailed junction or grade-separated geometry remain outside this step.
+salvaged. Timetables, signals, passenger rail, and detailed junction or
+grade-separated geometry remain outside this step.
+
+### M3 private road and rail freight operators
+
+Each aggregate supply-chain leg is assigned independently to one private road or
+rail service. Assignment runs immediately after a relevant road, rail, terminal,
+or service-price edit and every eight simulated hours. Candidates retain the
+exact values used by the choice: generalized cost, practical capacity, free-flow
+time, congestion delay, terminal handling, access/egress, and a non-negative
+mode price adjustment. Stable ties use the mode ID; there is no random operator
+behavior.
+
+Road service uses the selected road route and its persistent congestion cost.
+Rail service requires compatible terminals at both leg endpoints and connected
+track. Because the M3 terminals are anchored at the quarry, stoneworks, and
+market, rail access and egress are explicitly zero; the two 0.75-hour terminal
+handling times remain part of generalized cost. Assigned road tons update road
+link flow, delay, bottleneck analysis, and the road costs consumed by
+accessibility. Assigned rail tons update track flow, delay, and terminal handling
+load from the same assignment.
+
+Choice is all-or-nothing per leg and does not split demand between modes. Rail
+uses the same prototype over-capacity delay curve as roads, but current scenario
+rail capacity exceeds either leg's maximum demand. The typed service-price
+command represents a generalized-cost adjustment for testing repricing without
+introducing toll zones, subsidies, or a full policy UI. Persistent vehicles,
+fleets, schedules, individual companies, passenger demand, and competition
+between same-mode operators remain out of scope.
 
 ### M3 infrastructure costs and treasury
 
@@ -335,13 +362,13 @@ without making repeated bonds free money. It is a deliberately small recovery
 rule rather than a loan model: there is no interest schedule, repayment term,
 tax system, inflation, or municipal budget.
 
-### M0 representative freight traffic
+### M3 representative freight traffic
 
-Visible trucks are presentation samples of both assigned daily freight rates,
+Visible trucks and trains are presentation samples of assigned daily freight rates,
 not authoritative shipments. The renderer resolves each freight snapshot's
 ordered route nodes into a polyline and displays one representative vehicle per
-20 shipped tons per day, rounded up for any positive flow. Samples move at a
-presentation speed of 90 map units per real-time second.
+20 shipped tons per day, rounded up for any positive flow. Trucks move at 90 map
+units per real-time second and trains at 120.
 
 Each sample is removed when it reaches its leg's destination and a later visual
 trip starts at that leg's origin. A changed route or shipped volume replaces the current visual

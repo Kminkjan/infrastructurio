@@ -2,6 +2,9 @@ import {
   restoreSimulation,
   type DevelopmentStateSnapshot,
   type FinanceStateSnapshot,
+  type FreightOperatorCandidateState,
+  type FreightOperatorFlowStateSnapshot,
+  type FreightOperatorStateSnapshot,
   type RoadTrafficFlowStateSnapshot,
   type RoadTrafficStateSnapshot,
   type Simulation,
@@ -20,7 +23,7 @@ import type {
   StoneworksLimitingFactor,
 } from "../shared";
 
-export const SAVE_FORMAT_VERSION = 6 as const;
+export const SAVE_FORMAT_VERSION = 7 as const;
 export const SAVE_FILE_NAME = "millford-valley-save.json";
 
 interface SavedRoadSegment {
@@ -96,7 +99,7 @@ export interface SaveGameV5 {
 }
 
 export interface SaveGameV6 {
-  readonly formatVersion: typeof SAVE_FORMAT_VERSION;
+  readonly formatVersion: 6;
   readonly scenarioId: "millford-valley";
   readonly scenarioSeed: string;
   readonly simulation: SaveBaseSimulation & {
@@ -111,13 +114,30 @@ export interface SaveGameV6 {
   };
 }
 
+export interface SaveGameV7 {
+  readonly formatVersion: typeof SAVE_FORMAT_VERSION;
+  readonly scenarioId: "millford-valley";
+  readonly scenarioSeed: string;
+  readonly simulation: SaveBaseSimulation & {
+    readonly roadSegments: readonly RoadSegment[];
+    readonly railTracks: readonly RailTrackSegment[];
+    readonly railTerminals: readonly FreightRailTerminalState[];
+    readonly nextRailTrackNumber: number;
+    readonly development: DevelopmentStateSnapshot;
+    readonly supplyChain: StoneSupplyChainStateSnapshot;
+    readonly freightOperators: FreightOperatorStateSnapshot;
+    readonly finances: FinanceStateSnapshot;
+  };
+}
+
 export type SaveGame =
   | SaveGameV1
   | SaveGameV2
   | SaveGameV3
   | SaveGameV4
   | SaveGameV5
-  | SaveGameV6;
+  | SaveGameV6
+  | SaveGameV7;
 
 export class SaveGameError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -276,6 +296,69 @@ function readRoadTrafficState(value: unknown): RoadTrafficStateSnapshot {
     lastAssignmentTick: readSafeInteger(value.lastAssignmentTick, "road traffic lastAssignmentTick", 0),
     nextAssignmentTick: readSafeInteger(value.nextAssignmentTick, "road traffic nextAssignmentTick", 0),
     flows: Object.freeze(value.flows.map(readRoadTrafficFlow)),
+  });
+}
+
+function readFreightOperatorCandidate(
+  value: unknown,
+  name: string,
+): FreightOperatorCandidateState {
+  if (!isRecord(value) || (value.mode !== "road" && value.mode !== "rail")) {
+    throw new SaveGameError(`${name} has an unknown mode`);
+  }
+  const nullableId = (entry: unknown, field: string): string | null => {
+    if (entry === null) return null;
+    if (typeof entry !== "string" || entry.length === 0) {
+      throw new SaveGameError(`${name} ${field} must be a non-empty string or null`);
+    }
+    return entry;
+  };
+  return Object.freeze({
+    mode: value.mode,
+    nodeIds: readNullableStringArray(value.nodeIds, `${name} nodeIds`),
+    linkIds: readNullableStringArray(value.linkIds, `${name} linkIds`),
+    originRailTerminalId: nullableId(value.originRailTerminalId, "origin terminal"),
+    destinationRailTerminalId: nullableId(value.destinationRailTerminalId, "destination terminal"),
+    generalizedCostHours: value.generalizedCostHours === null
+      ? null
+      : readNumber(value.generalizedCostHours, `${name} generalizedCostHours`),
+    capacityTonsPerDay: readNumber(value.capacityTonsPerDay, `${name} capacity`),
+    freeFlowTravelTimeHours: value.freeFlowTravelTimeHours === null
+      ? null
+      : readNumber(value.freeFlowTravelTimeHours, `${name} freeFlowTravelTimeHours`),
+    congestionDelayHours: readNumber(value.congestionDelayHours, `${name} congestionDelayHours`),
+    terminalHandlingTimeHours: readNumber(value.terminalHandlingTimeHours, `${name} terminalHandlingTimeHours`),
+    accessEgressTimeHours: readNumber(value.accessEgressTimeHours, `${name} accessEgressTimeHours`),
+    priceAdjustmentHours: readNumber(value.priceAdjustmentHours, `${name} priceAdjustmentHours`),
+  });
+}
+
+function readFreightOperatorState(value: unknown): FreightOperatorStateSnapshot {
+  if (!isRecord(value) || !isRecord(value.pricing) || !Array.isArray(value.flows)) {
+    throw new SaveGameError("freight operator state must contain pricing and flows");
+  }
+  return Object.freeze({
+    lastAssignmentTick: readSafeInteger(value.lastAssignmentTick, "freight lastAssignmentTick", 0),
+    nextAssignmentTick: readSafeInteger(value.nextAssignmentTick, "freight nextAssignmentTick", 1),
+    pricing: Object.freeze({
+      roadAdjustmentHours: readNumber(value.pricing.roadAdjustmentHours, "road price adjustment"),
+      railAdjustmentHours: readNumber(value.pricing.railAdjustmentHours, "rail price adjustment"),
+    }),
+    flows: Object.freeze(value.flows.map((flow, index): FreightOperatorFlowStateSnapshot => {
+      if (!isRecord(flow) || typeof flow.id !== "string" || !Array.isArray(flow.candidates) ||
+          (flow.chosenMode !== null && flow.chosenMode !== "road" && flow.chosenMode !== "rail")) {
+        throw new SaveGameError(`freight operator flow ${index} is invalid`);
+      }
+      return Object.freeze({
+        id: flow.id,
+        demandTonsPerDay: readNumber(flow.demandTonsPerDay, `freight flow ${index} demand`),
+        assignedTonsPerDay: readNumber(flow.assignedTonsPerDay, `freight flow ${index} assigned`),
+        chosenMode: flow.chosenMode,
+        candidates: Object.freeze(flow.candidates.map((candidate, candidateIndex) =>
+          readFreightOperatorCandidate(candidate, `freight flow ${index} candidate ${candidateIndex}`),
+        )),
+      });
+    })),
   });
 }
 
@@ -499,7 +582,7 @@ export function validateSaveGame(value: unknown): SaveGame {
   if (!isRecord(value)) {
     throw new SaveGameError("save data must be an object");
   }
-  if (value.formatVersion !== 1 && value.formatVersion !== 2 && value.formatVersion !== 3 && value.formatVersion !== 4 && value.formatVersion !== 5 && value.formatVersion !== SAVE_FORMAT_VERSION) {
+  if (value.formatVersion !== 1 && value.formatVersion !== 2 && value.formatVersion !== 3 && value.formatVersion !== 4 && value.formatVersion !== 5 && value.formatVersion !== 6 && value.formatVersion !== SAVE_FORMAT_VERSION) {
     throw new SaveGameError(`unsupported save format version: ${String(value.formatVersion)}`);
   }
   if (value.scenarioId !== "millford-valley") {
@@ -533,7 +616,9 @@ export function validateSaveGame(value: unknown): SaveGame {
     });
   }
   const supplyChain = readSupplyChainState(value.simulation.supplyChain);
-  const roadTraffic = readRoadTrafficState(value.simulation.roadTraffic);
+  const roadTraffic = value.formatVersion <= 6
+    ? readRoadTrafficState(value.simulation.roadTraffic)
+    : undefined;
   if (value.formatVersion === 4) {
     return Object.freeze({
       formatVersion: 4,
@@ -543,7 +628,7 @@ export function validateSaveGame(value: unknown): SaveGame {
         ...simulation,
         development,
         supplyChain,
-        roadTraffic,
+        roadTraffic: roadTraffic!,
       }),
     });
   }
@@ -557,7 +642,7 @@ export function validateSaveGame(value: unknown): SaveGame {
         ...simulation,
         development,
         supplyChain,
-        roadTraffic,
+        roadTraffic: roadTraffic!,
         finances,
       }),
     });
@@ -568,7 +653,18 @@ export function validateSaveGame(value: unknown): SaveGame {
   ) {
     throw new SaveGameError("version 6 save must contain rail state arrays");
   }
-  return Object.freeze({
+  const railState = {
+    railTracks: Object.freeze(value.simulation.railTracks.map(readRailTrack)),
+    railTerminals: Object.freeze(
+      value.simulation.railTerminals.map(readRailTerminal),
+    ),
+    nextRailTrackNumber: readSafeInteger(
+      value.simulation.nextRailTrackNumber,
+      "nextRailTrackNumber",
+      1,
+    ),
+  };
+  if (value.formatVersion === 6) return Object.freeze({
     formatVersion: 6,
     scenarioId: "millford-valley",
     scenarioSeed: value.scenarioSeed,
@@ -576,24 +672,29 @@ export function validateSaveGame(value: unknown): SaveGame {
       ...simulation,
       development,
       supplyChain,
-      roadTraffic,
+      roadTraffic: roadTraffic!,
       finances,
-      railTracks: Object.freeze(value.simulation.railTracks.map(readRailTrack)),
-      railTerminals: Object.freeze(
-        value.simulation.railTerminals.map(readRailTerminal),
-      ),
-      nextRailTrackNumber: readSafeInteger(
-        value.simulation.nextRailTrackNumber,
-        "nextRailTrackNumber",
-        1,
-      ),
+      ...railState,
+    }),
+  });
+  return Object.freeze({
+    formatVersion: 7,
+    scenarioId: "millford-valley",
+    scenarioSeed: value.scenarioSeed,
+    simulation: Object.freeze({
+      ...simulation,
+      development,
+      supplyChain,
+      finances,
+      ...railState,
+      freightOperators: readFreightOperatorState(value.simulation.freightOperators),
     }),
   });
 }
 
-export function createSaveGame(simulation: Simulation): SaveGameV6 {
+export function createSaveGame(simulation: Simulation): SaveGameV7 {
   const state = simulation.getState();
-  if (!state.development || !state.roadTraffic || !state.supplyChain || !state.finances || !state.railTracks || !state.railTerminals || !state.nextRailTrackNumber) {
+  if (!state.development || !state.freightOperators || !state.supplyChain || !state.finances || !state.railTracks || !state.railTerminals || !state.nextRailTrackNumber) {
     throw new SaveGameError("simulation did not provide complete authoritative state");
   }
   return validateSaveGame({
@@ -609,10 +710,10 @@ export function createSaveGame(simulation: Simulation): SaveGameV6 {
       nextRailTrackNumber: state.nextRailTrackNumber,
       development: state.development,
       supplyChain: state.supplyChain,
-      roadTraffic: state.roadTraffic,
+      freightOperators: state.freightOperators,
       finances: state.finances,
     },
-  }) as SaveGameV6;
+  }) as SaveGameV7;
 }
 
 export function restoreSaveGame(save: SaveGame): Simulation {
@@ -626,28 +727,32 @@ export function restoreSaveGame(save: SaveGame): Simulation {
     })),
     nextRoadSegmentNumber: validated.simulation.nextRoadSegmentNumber,
     railTracks:
-      validated.formatVersion === SAVE_FORMAT_VERSION
+      validated.formatVersion === 6 || validated.formatVersion === SAVE_FORMAT_VERSION
         ? validated.simulation.railTracks
         : [],
     railTerminals:
-      validated.formatVersion === SAVE_FORMAT_VERSION
+      validated.formatVersion === 6 || validated.formatVersion === SAVE_FORMAT_VERSION
         ? validated.simulation.railTerminals
         : [],
     nextRailTrackNumber:
-      validated.formatVersion === SAVE_FORMAT_VERSION
+      validated.formatVersion === 6 || validated.formatVersion === SAVE_FORMAT_VERSION
         ? validated.simulation.nextRailTrackNumber
         : 1,
     development: validated.formatVersion !== 1 ? validated.simulation.development : undefined,
     supplyChain:
-      validated.formatVersion === 4 || validated.formatVersion === 5 || validated.formatVersion === 6
+      validated.formatVersion === 4 || validated.formatVersion === 5 || validated.formatVersion === 6 || validated.formatVersion === 7
         ? validated.simulation.supplyChain
         : undefined,
     roadTraffic:
       validated.formatVersion === 4 || validated.formatVersion === 5 || validated.formatVersion === 6
         ? validated.simulation.roadTraffic
         : undefined,
+    freightOperators:
+      validated.formatVersion === 7
+        ? validated.simulation.freightOperators
+        : undefined,
     finances:
-      validated.formatVersion === 5 || validated.formatVersion === 6
+      validated.formatVersion === 5 || validated.formatVersion === 6 || validated.formatVersion === 7
         ? validated.simulation.finances
         : undefined,
   };

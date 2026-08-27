@@ -2,7 +2,8 @@ import {
   TICKS_PER_DAY,
   type AggregateFreightSnapshot,
   type FreightLimitingFactor,
-  type RoadRoute,
+  type FreightRoute,
+  type FreightServiceCandidateSnapshot,
   type ScenarioGeography,
   type StoneSupplyChainSnapshot,
   type StoneworksLimitingFactor,
@@ -45,7 +46,7 @@ function roundTons(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
-function routeShare(route: RoadRoute | undefined): number {
+function routeShare(route: FreightRoute | undefined): number {
   if (!route || route.generalizedCostHours >= MAXIMUM_VIABLE_ROUTE_COST) {
     return 0;
   }
@@ -58,7 +59,7 @@ function routeShare(route: RoadRoute | undefined): number {
 function assignFreight(
   availableTonsPerDay: number,
   requestedTonsPerDay: number,
-  route: RoadRoute | undefined,
+  route: FreightRoute | undefined,
   availableFactor: FreightLimitingFactor,
   requestedFactor: FreightLimitingFactor,
 ): FreightAssignment {
@@ -164,8 +165,8 @@ export function validateStoneSupplyChainState(
 export function advanceStoneSupplyChainDay(
   state: StoneSupplyChainStateSnapshot,
   updateTick: number,
-  inboundRoute: RoadRoute | undefined,
-  outboundRoute: RoadRoute | undefined,
+  inboundRoute: FreightRoute | undefined,
+  outboundRoute: FreightRoute | undefined,
 ): StoneSupplyChainStateSnapshot {
   if (updateTick !== state.nextUpdateTick) {
     throw new RangeError("supply chain must advance at its next daily boundary");
@@ -260,7 +261,7 @@ function freightReason(
 ): string {
   switch (factor) {
     case "no-route":
-      return `No connected road route can carry ${commodity}.`;
+      return `No viable road or rail service can carry ${commodity}.`;
     case "route-cost":
       return routeCost === null
         ? `No viable route can carry ${commodity}.`
@@ -279,7 +280,7 @@ function freightReason(
 function effectiveFreight(
   factor: FreightLimitingFactor,
   shippedTonsPerDay: number,
-  route: RoadRoute | undefined,
+  route: FreightRoute | undefined,
 ): Pick<AggregateFreightSnapshot, "shippedTonsPerDay" | "limitingFactor"> {
   if (!route) {
     return { shippedTonsPerDay: 0, limitingFactor: "no-route" };
@@ -293,8 +294,10 @@ function effectiveFreight(
 export function createStoneSupplyChainSnapshot(
   geography: ScenarioGeography,
   state: StoneSupplyChainStateSnapshot,
-  inboundRoute: RoadRoute | undefined,
-  outboundRoute: RoadRoute | undefined,
+  inboundRoute: FreightRoute | undefined,
+  outboundRoute: FreightRoute | undefined,
+  inboundCandidates: readonly FreightServiceCandidateSnapshot[] = [],
+  outboundCandidates: readonly FreightServiceCandidateSnapshot[] = [],
 ): StoneSupplyChainSnapshot {
   const inbound = effectiveFreight(
     state.inboundLimitingFactor,
@@ -328,9 +331,19 @@ export function createStoneSupplyChainSnapshot(
       destinationId: geography.stoneworks.id,
       availableTonsPerDay: state.inboundAvailableTonsPerDay,
       requestedTonsPerDay: state.inboundRequestedTonsPerDay,
+      demandTonsPerDay: Math.min(
+        state.inboundAvailableTonsPerDay,
+        state.inboundRequestedTonsPerDay,
+      ),
+      assignedTonsPerDay: inbound.shippedTonsPerDay,
       shippedTonsPerDay: inbound.shippedTonsPerDay,
+      chosenMode: inboundRoute?.mode ?? null,
       route: inboundRoute ?? null,
       routeCost: inboundRoute?.generalizedCostHours ?? null,
+      serviceCandidates: Object.freeze([...inboundCandidates]),
+      serviceChoiceReason:
+        inboundCandidates.find(({ mode }) => mode === inboundRoute?.mode)?.reason ??
+        "No viable private freight service is available.",
       limitingFactor: inbound.limitingFactor,
       limitingReason: freightReason(
         inbound.limitingFactor,
@@ -359,9 +372,19 @@ export function createStoneSupplyChainSnapshot(
       destinationId: geography.externalMarketConnection.id,
       availableTonsPerDay: state.outboundAvailableTonsPerDay,
       requestedTonsPerDay: state.outboundRequestedTonsPerDay,
+      demandTonsPerDay: Math.min(
+        state.outboundAvailableTonsPerDay,
+        state.outboundRequestedTonsPerDay,
+      ),
+      assignedTonsPerDay: outbound.shippedTonsPerDay,
       shippedTonsPerDay: outbound.shippedTonsPerDay,
+      chosenMode: outboundRoute?.mode ?? null,
       route: outboundRoute ?? null,
       routeCost: outboundRoute?.generalizedCostHours ?? null,
+      serviceCandidates: Object.freeze([...outboundCandidates]),
+      serviceChoiceReason:
+        outboundCandidates.find(({ mode }) => mode === outboundRoute?.mode)?.reason ??
+        "No viable private freight service is available.",
       limitingFactor: outbound.limitingFactor,
       limitingReason: freightReason(
         outbound.limitingFactor,

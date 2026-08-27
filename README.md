@@ -74,8 +74,8 @@ track reaches its anchored site. **Remove rail** deletes selected track or a
 terminal. Track, terminals, rail selection, and the cyan track preview are
 visually distinct from roads. Inspect rail infrastructure to see its capacity,
 free-flow time, construction cost, daily maintenance, and removal salvage. Rail
-is not yet assigned freight and does not render trains; operator mode choice is
-the next vertical-slice step.
+freight terminals are co-located with their compatible sites, so a complete rail
+service has no additional road access or egress in this prototype.
 
 The scenario begins with a $60,000 treasury. Dragging a road shows the
 simulation-owned construction breakdown before release, including base work,
@@ -106,9 +106,13 @@ adds a visible $150 daily penalty. Further bonds require the treasury to fall
 below the threshold again, and their penalties stack.
 Each freight leg remains at zero until its terminals have a viable route and the
 daily economy has goods available to move. Orange private trucks animate along
-both selected routes. Each truck represents up to 20 tons of assigned daily flow,
-so busier viable routes show more traffic without creating persistent shipment
-agents. Realized stoneworks processing also adds a bounded labor opportunity near
+road routes, while teal private trains animate along rail routes. Each vehicle
+represents up to 20 tons of assigned daily flow, so busier viable routes show
+more traffic without creating persistent shipment agents. Operators compare road
+and rail generalized cost, capacity, congestion, terminal handling, and
+co-located access/egress every eight simulated hours and immediately after a
+relevant infrastructure edit. The freight inspector exposes the exact comparison.
+Realized stoneworks processing also adds a bounded labor opportunity near
 Millford, feeding the same accessibility and delayed-development model as other
 opportunities.
 

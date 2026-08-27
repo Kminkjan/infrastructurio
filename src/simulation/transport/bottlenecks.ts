@@ -5,7 +5,7 @@ import type {
   ScenarioGeography,
   StoneSupplyChainSnapshot,
 } from "../../shared";
-import type { RoadTrafficStateSnapshot } from "./road-traffic";
+import type { FreightOperatorStateSnapshot } from "./freight-operators";
 
 const EPSILON = 1e-7;
 
@@ -95,15 +95,18 @@ function crossesMillfordConstraint(
 export function createBottleneckAnalysis(
   geography: ScenarioGeography,
   roadNetwork: RoadNetwork,
-  roadTraffic: RoadTrafficStateSnapshot,
+  freightOperators: FreightOperatorStateSnapshot,
   supplyChain: StoneSupplyChainSnapshot,
 ): BottleneckAnalysisSnapshot {
   const freightLegs = [
     supplyChain.inboundFreight,
     supplyChain.outboundFreight,
   ];
+  const roadFreightLegs = freightLegs.filter(
+    (freight) => freight.chosenMode === "road",
+  );
   const affectedRouteLinkIds = [
-    ...new Set(freightLegs.flatMap((freight) => freight.route?.linkIds ?? [])),
+    ...new Set(roadFreightLegs.flatMap((freight) => freight.route?.linkIds ?? [])),
   ];
   const roadBottlenecks = roadNetwork.links
     .filter(
@@ -123,7 +126,7 @@ export function createBottleneckAnalysis(
         end.position,
         geography,
       );
-      const affectedFlows = freightLegs
+      const affectedFlows = roadFreightLegs
         .filter((freight) => freight.route?.linkIds.includes(link.id))
         .map((freight) =>
           Object.freeze({
@@ -141,7 +144,7 @@ export function createBottleneckAnalysis(
             assignedUnitsPerDay: freight.shippedTonsPerDay,
           }),
         );
-      const representativeFreight = freightLegs.find((freight) =>
+      const representativeFreight = roadFreightLegs.find((freight) =>
         freight.route?.linkIds.includes(link.id),
       );
 
@@ -168,8 +171,8 @@ export function createBottleneckAnalysis(
           routeGeneralizedCostHours:
             representativeFreight?.route?.generalizedCostHours ?? 0,
           routeLinkCount: representativeFreight?.route?.linkIds.length ?? 0,
-          lastAssignmentTick: roadTraffic.lastAssignmentTick,
-          nextAssignmentTick: roadTraffic.nextAssignmentTick,
+          lastAssignmentTick: freightOperators.lastAssignmentTick,
+          nextAssignmentTick: freightOperators.nextAssignmentTick,
         }),
         freeFlowTravelTimeHours: link.freeFlowTravelTimeHours,
         congestionDelayHours: link.congestionDelayHours,

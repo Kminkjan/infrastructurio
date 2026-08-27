@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 import { describe, expect, it } from "vitest";
-import type { RoadRoute } from "../../shared";
+import type { FreightRoute } from "../../shared";
 import {
   FULL_VOLUME_ROUTE_COST,
   MAXIMUM_VIABLE_ROUTE_COST,
@@ -11,8 +11,9 @@ import {
   createStoneSupplyChainState,
 } from "./stone-supply-chain";
 
-function route(cost = FULL_VOLUME_ROUTE_COST): RoadRoute {
+function route(cost = FULL_VOLUME_ROUTE_COST): FreightRoute {
   return {
+    mode: "road",
     nodeIds: ["origin", "destination"],
     linkIds: ["road"],
     length: cost * 60,
@@ -24,8 +25,8 @@ function route(cost = FULL_VOLUME_ROUTE_COST): RoadRoute {
 
 function nextDay(
   state: ReturnType<typeof createStoneSupplyChainState>,
-  inbound: RoadRoute | undefined,
-  outbound: RoadRoute | undefined,
+  inbound: FreightRoute | undefined,
+  outbound: FreightRoute | undefined,
 ) {
   return advanceStoneSupplyChainDay(
     state,

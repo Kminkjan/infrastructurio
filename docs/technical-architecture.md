@@ -168,8 +168,17 @@ operate on terminal IDs and never traverse road links. Shared rail snapshots
 carry authored track and terminal identity plus capacity, free-flow time,
 construction cost, and maintenance. PixiJS derives track, terminal, hit-target,
 selection, and construction-preview graphics from that snapshot and owns no rail
-connectivity. Freight assignment to road or rail remains deferred to the
+connectivity. Freight assignment consumes this rail graph through the separate
 operator-choice layer.
+
+The operator-choice layer owns one persisted assignment record for each
+supply-chain leg. It queries road and rail independently, compares authoritative
+generalized-cost components and capacity, selects one mode with stable
+tie-breaking, and applies assigned aggregate tons back to road links, rail links,
+and rail terminals. Infrastructure and price edits reassign immediately; time
+advancement processes every crossed eight-tick boundary. Road link costs continue
+to feed accessibility, while both modal networks expose the same flows used by
+service explanations.
 
 The M3 stone supply chain is a pure simulation-core reducer over bounded input
 and output inventories. It advances once per simulated day in inbound,
@@ -194,7 +203,7 @@ the emergency-bond penalty. React displays the resulting snapshot and quote
 breakdowns without calculating costs.
 
 Representative freight vehicles remain renderer-owned. A pure rendering helper
-validates each assigned route against the snapshot road graph, resolves its
+validates each assigned route against the matching road or rail graph, resolves its
 ordered node geometry, and deterministically samples positions for the current
 animation time. PixiJS reconciles only those short-lived graphics. Each leg has a
 distinct visual identity namespace; a route or flow change resets its visual
@@ -203,12 +212,13 @@ phase crosses into the simulation protocol.
 
 ## Save format
 
-Saves use an explicit versioned JSON document. Format version 6 contains the
+Saves use an explicit versioned JSON document. Format version 7 contains the
 Millford Valley scenario ID and seed plus the authoritative mutable state: the
 simulation tick, authored roads and rail track, placed compatible freight
 terminals, future road/track identifiers, development history, bounded stoneworks
 inventories and daily update cadence, both current aggregate flow rates, and the
-eight-hour route-assignment state for both legs. It also stores the treasury,
+eight-hour multimodal assignment state, candidate comparison values, chosen mode,
+and service-price adjustments for both legs. It also stores the treasury,
 cumulative capital, revenue, maintenance and salvage totals, emergency-bond
 state and penalties, and the last committed infrastructure transaction. Derived
 geography, road nodes, link costs, accessibility, current maintenance,
@@ -218,7 +228,9 @@ from authored rail state.
 Saved routes are validated against rebuilt topology and reapplied so congestion
 and future supply-chain steps replay identically.
 
-Format versions 1 through 5 remain loadable. Version 5 predates rail and migrates
+Format versions 1 through 6 remain loadable. Version 6 predates multimodal
+operator state; it retains rail topology but rebuilds private assignment at the
+saved tick with zero price adjustments. Version 5 predates rail and migrates
 to an empty rail network with the first track identifier available. Roads
 without a class migrate to the current default arterial profile, and a traffic
 assignment is derived at the saved tick. Version 3 represented the superseded direct quarry-export flow and
@@ -266,11 +278,12 @@ values and labels the outcome but does not recalculate pressure or weighted
 choice. The explanation is deliberately not persisted because its inputs are
 already deterministically rebuilt from saved road and development state.
 
-Road traffic state remains simulation-owned. Network edits trigger an immediate
-assignment; time advancement processes fixed eight-tick boundaries even when the
-caller advances many ticks at once. Each assignment independently routes the two
-supply-chain legs using previous link costs, sums their rates on shared links, and
-derives new congestion costs. Daily economy boundaries are interleaved with those
+Freight operator state remains simulation-owned. Relevant infrastructure and
+price edits trigger an immediate assignment; time advancement processes fixed
+eight-tick boundaries even when the caller advances many ticks at once. Each
+assignment independently compares road and rail for both supply-chain legs,
+sums their rates on shared modal links, and derives new congestion costs. Daily
+economy boundaries are interleaved with those
 assignments deterministically. Realized processing adds a dynamic stoneworks labor
 opportunity before development consumes the updated accessibility snapshot.
 PixiJS continues to animate representative vehicles every render frame and never

@@ -1,6 +1,27 @@
+import type { RailRoute } from "./rail";
 import type { RoadRoute } from "./roads";
 
 export type FreightCommodity = "raw-granite" | "finished-stone";
+export type FreightMode = "road" | "rail";
+
+export type FreightRoute =
+  | (RoadRoute & { readonly mode: "road" })
+  | (RailRoute & { readonly mode: "rail" });
+
+export interface FreightServiceCandidateSnapshot {
+  readonly mode: FreightMode;
+  readonly viable: boolean;
+  readonly assignedTonsPerDay: number;
+  readonly generalizedCostHours: number | null;
+  readonly capacityTonsPerDay: number;
+  readonly freeFlowTravelTimeHours: number | null;
+  readonly congestionDelayHours: number;
+  readonly terminalHandlingTimeHours: number;
+  readonly accessEgressTimeHours: number;
+  readonly priceAdjustmentHours: number;
+  readonly route: FreightRoute | null;
+  readonly reason: string;
+}
 
 export type FreightLimitingFactor =
   | "no-route"
@@ -22,9 +43,14 @@ export interface AggregateFreightSnapshot {
   readonly destinationId: string;
   readonly availableTonsPerDay: number;
   readonly requestedTonsPerDay: number;
+  readonly demandTonsPerDay: number;
+  readonly assignedTonsPerDay: number;
   readonly shippedTonsPerDay: number;
-  readonly route: RoadRoute | null;
+  readonly chosenMode: FreightMode | null;
+  readonly route: FreightRoute | null;
   readonly routeCost: number | null;
+  readonly serviceCandidates: readonly FreightServiceCandidateSnapshot[];
+  readonly serviceChoiceReason: string;
   readonly limitingFactor: FreightLimitingFactor;
   readonly limitingReason: string;
 }

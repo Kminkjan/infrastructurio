@@ -1,11 +1,18 @@
 import type {
   AggregateFreightSnapshot,
   Point,
+  RailNetwork,
   RoadNetwork,
 } from "../shared";
 
 export const TONS_PER_REPRESENTATIVE_VEHICLE = 20;
 export const REPRESENTATIVE_VEHICLE_SPEED = 90;
+const EMPTY_RAIL_NETWORK: RailNetwork = Object.freeze({
+  tracks: Object.freeze([]),
+  terminals: Object.freeze([]),
+  nodes: Object.freeze([]),
+  links: Object.freeze([]),
+});
 
 interface RouteSegment {
   readonly start: Point;
@@ -16,6 +23,7 @@ interface RouteSegment {
 
 export interface RepresentativeFreightTrafficPlan {
   readonly flowId: string;
+  readonly mode: "road" | "rail";
   readonly key: string;
   readonly vehicleCount: number;
   readonly routeLength: number;
@@ -25,6 +33,7 @@ export interface RepresentativeFreightTrafficPlan {
 
 export interface RepresentativeFreightVehicleSample {
   readonly id: string;
+  readonly mode: "road" | "rail";
   readonly position: Point;
   readonly rotation: number;
   readonly progress: number;
@@ -56,13 +65,18 @@ function routeSegments(points: readonly Point[]): readonly RouteSegment[] {
 function routeMatchesNetwork(
   freight: AggregateFreightSnapshot,
   roadNetwork: RoadNetwork,
+  railNetwork: RailNetwork = EMPTY_RAIL_NETWORK,
 ): boolean {
   const route = freight.route;
   if (!route || route.nodeIds.length !== route.linkIds.length + 1) {
     return false;
   }
 
-  const links = new Map(roadNetwork.links.map((link) => [link.id, link]));
+  const links = new Map(
+    (route.mode === "road" ? roadNetwork.links : railNetwork.links).map(
+      (link) => [link.id, link],
+    ),
+  );
   return route.linkIds.every((linkId, index) => {
     const link = links.get(linkId);
     const startNodeId = route.nodeIds[index];
@@ -78,18 +92,18 @@ function routeMatchesNetwork(
 export function createRepresentativeFreightTrafficPlan(
   freight: AggregateFreightSnapshot,
   roadNetwork: RoadNetwork,
+  railNetwork: RailNetwork = EMPTY_RAIL_NETWORK,
 ): RepresentativeFreightTrafficPlan | undefined {
   if (
     freight.shippedTonsPerDay <= 0 ||
     !Number.isFinite(freight.shippedTonsPerDay) ||
-    !routeMatchesNetwork(freight, roadNetwork)
+    !routeMatchesNetwork(freight, roadNetwork, railNetwork)
   ) {
     return undefined;
   }
 
-  const nodes = new Map(
-    roadNetwork.nodes.map((node) => [node.id, node.position]),
-  );
+  const routeNetwork = freight.route?.mode === "rail" ? railNetwork : roadNetwork;
+  const nodes = new Map(routeNetwork.nodes.map((node) => [node.id, node.position]));
   const points = freight.route?.nodeIds.map((nodeId) => nodes.get(nodeId));
   if (!points || points.some((point) => point === undefined)) {
     return undefined;
@@ -115,10 +129,12 @@ export function createRepresentativeFreightTrafficPlan(
 
   return {
     flowId: freight.id,
-    key: `${freight.id}|${routeKey}|${geometryKey}|${freight.shippedTonsPerDay}`,
+    mode: freight.route!.mode,
+    key: `${freight.id}|${freight.route!.mode}|${routeKey}|${geometryKey}|${freight.shippedTonsPerDay}`,
     vehicleCount,
     routeLength,
-    travelDurationSeconds: routeLength / REPRESENTATIVE_VEHICLE_SPEED,
+    travelDurationSeconds:
+      routeLength / (freight.route!.mode === "rail" ? 120 : REPRESENTATIVE_VEHICLE_SPEED),
     segments,
   };
 }
@@ -172,6 +188,7 @@ export function sampleRepresentativeFreightVehicles(
 
     return {
       id: `representative-freight-${plan.flowId}-${slot}-trip-${trip}`,
+      mode: plan.mode,
       position,
       rotation,
       progress,

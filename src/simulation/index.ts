@@ -5,6 +5,13 @@ export type {
   RoadTrafficFlowStateSnapshot,
   RoadTrafficStateSnapshot,
 } from "./transport/road-traffic";
+export type {
+  FreightOperatorCandidateState,
+  FreightOperatorFlowStateSnapshot,
+  FreightOperatorStateSnapshot,
+  FreightServicePricingState,
+} from "./transport/freight-operators";
+export { FREIGHT_ASSIGNMENT_INTERVAL_TICKS } from "./transport/freight-operators";
 export { TRAFFIC_ASSIGNMENT_INTERVAL_TICKS } from "./transport/road-traffic";
 export { createRoadNetwork, findRoadRoute } from "./transport/road-network";
 export {
