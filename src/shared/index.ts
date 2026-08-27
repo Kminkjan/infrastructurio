@@ -60,4 +60,15 @@ export type {
   RoadRoute,
   RoadSegment,
 } from "./roads";
+export type {
+  FreightRailTerminalSnapshot,
+  FreightRailTerminalState,
+  RailLink,
+  RailNetwork,
+  RailNode,
+  RailRoute,
+  RailTerminalSite,
+  RailTrackSegment,
+  RailTrackSnapshot,
+} from "./rail";
 export type { SimulationCommand, SimulationSnapshot } from "./simulation";

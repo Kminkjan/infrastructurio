@@ -7,6 +7,11 @@ export type {
 } from "./transport/road-traffic";
 export { TRAFFIC_ASSIGNMENT_INTERVAL_TICKS } from "./transport/road-traffic";
 export { createRoadNetwork, findRoadRoute } from "./transport/road-network";
+export {
+  createFreightRailTerminalState,
+  createRailNetwork,
+  findRailRoute,
+} from "./transport/rail-network";
 export { createAccessibilityScorer } from "./growth/accessibility";
 export type {
   AccessibilityCandidate,

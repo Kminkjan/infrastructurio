@@ -107,6 +107,58 @@ describe("save games", () => {
     expect(continued.finances).toEqual(originalContinued.finances);
   });
 
+  it("round-trips rail topology, terminals, finances, routing, and future track ids", () => {
+    const original = createSimulation("save-rail-round-trip");
+    const geography = original.getSnapshot().geography;
+    original.dispatch({ type: "place-freight-rail-terminal", site: "quarry" });
+    original.dispatch({ type: "place-freight-rail-terminal", site: "stoneworks" });
+    original.dispatch({
+      type: "build-rail-track",
+      start: geography.quarry.position,
+      end: geography.stoneworks.position,
+    });
+    original.dispatch({
+      type: "build-rail-track",
+      start: { x: 20, y: 20 },
+      end: { x: 30, y: 20 },
+    });
+    original.dispatch({
+      type: "remove-rail-track",
+      railTrackId: "rail-track-2",
+    });
+
+    const save = deserializeSaveGame(serializeSaveGame(createSaveGame(original)));
+    const restored = restoreSaveGame(save);
+
+    expect(save).toMatchObject({
+      formatVersion: 6,
+      simulation: {
+        nextRailTrackNumber: 3,
+        railTracks: [{ id: "rail-track-1" }],
+        railTerminals: [
+          { id: "rail-terminal-quarry", site: "quarry" },
+          { id: "rail-terminal-stoneworks", site: "stoneworks" },
+        ],
+      },
+    });
+    expect(restored.getSnapshot().railNetwork).toEqual(
+      original.getSnapshot().railNetwork,
+    );
+    expect(restored.getState().finances).toEqual(original.getState().finances);
+    expect(restored.findRailRoute(
+      "rail-terminal-quarry",
+      "rail-terminal-stoneworks",
+    )).toEqual(original.findRailRoute(
+      "rail-terminal-quarry",
+      "rail-terminal-stoneworks",
+    ));
+    expect(restored.dispatch({
+      type: "build-rail-track",
+      start: { x: 40, y: 20 },
+      end: { x: 50, y: 20 },
+    }).railNetwork.tracks.at(-1)?.id).toBe("rail-track-3");
+  });
+
   it("preserves completed and pending development for deterministic continuation", () => {
     const original = createSimulation("save-development");
     const geography = original.getSnapshot().geography;
@@ -322,6 +374,33 @@ describe("save games", () => {
     );
   });
 
+  it("migrates version 5 saves with an empty rail network", () => {
+    const current = createSaveGame(createConnectedSimulation());
+    const legacy = {
+      formatVersion: 5 as const,
+      scenarioId: current.scenarioId,
+      scenarioSeed: current.scenarioSeed,
+      simulation: {
+        tick: current.simulation.tick,
+        roadSegments: current.simulation.roadSegments,
+        nextRoadSegmentNumber: current.simulation.nextRoadSegmentNumber,
+        development: current.simulation.development,
+        supplyChain: current.simulation.supplyChain,
+        roadTraffic: current.simulation.roadTraffic,
+        finances: current.simulation.finances,
+      },
+    };
+
+    const restored = restoreSaveGame(deserializeSaveGame(JSON.stringify(legacy)));
+    expect(restored.getSnapshot().railNetwork).toEqual({
+      tracks: [],
+      terminals: [],
+      nodes: [],
+      links: [],
+    });
+    expect(restored.getState().finances).toEqual(current.simulation.finances);
+  });
+
   it("exports and imports the versioned save as a JSON file", async () => {
     const save = createSaveGame(createConnectedSimulation());
     const file = createSaveFile(save);
@@ -380,13 +459,13 @@ describe("save games", () => {
     expect(() =>
       deserializeSaveGame(
         JSON.stringify({
-          formatVersion: 6,
+          formatVersion: 7,
           scenarioId: "millford-valley",
           scenarioSeed: "future",
           simulation: {},
         }),
       ),
-    ).toThrow("unsupported save format version: 6");
+    ).toThrow("unsupported save format version: 7");
 
     const save = createSaveGame(createConnectedSimulation());
     const invalid = {
@@ -460,6 +539,36 @@ describe("save games", () => {
       },
     };
     expect(() => restoreSaveGame(invalidFinances)).toThrow(
+      "save contains invalid simulation state",
+    );
+
+    const invalidRail = {
+      ...save,
+      simulation: {
+        ...save.simulation,
+        railTracks: [{
+          id: "rail-track-1",
+          start: { x: -1, y: 0 },
+          end: { x: 10, y: 0 },
+        }],
+      },
+    };
+    expect(() => restoreSaveGame(invalidRail)).toThrow(
+      "save contains invalid simulation state",
+    );
+
+    const incompatibleTerminal = {
+      ...save,
+      simulation: {
+        ...save.simulation,
+        railTerminals: [{
+          id: "rail-terminal-quarry",
+          site: "quarry" as const,
+          siteId: "market-connection-east",
+        }],
+      },
+    };
+    expect(() => restoreSaveGame(incompatibleTerminal)).toThrow(
       "save contains invalid simulation state",
     );
   });

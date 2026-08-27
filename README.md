@@ -67,12 +67,23 @@ and drag across the map to construct that road class; endpoints snap to
 settlements, resources, the market, nearby roads, and junctions. Choose
 **Remove road** and select a player-built segment to delete it.
 
+Choose **Build track** and drag a rail corridor between the quarry,
+stoneworks, market, existing track, or rail junctions. Place the three compatible
+freight terminals from the rail controls; a terminal becomes routable only when
+track reaches its anchored site. **Remove rail** deletes selected track or a
+terminal. Track, terminals, rail selection, and the cyan track preview are
+visually distinct from roads. Inspect rail infrastructure to see its capacity,
+free-flow time, construction cost, daily maintenance, and removal salvage. Rail
+is not yet assigned freight and does not render trains; operator mode choice is
+the next vertical-slice step.
+
 The scenario begins with a $60,000 treasury. Dragging a road shows the
 simulation-owned construction breakdown before release, including base work,
 Eastbank land acquisition, and constrained river work. Inspect a road to preview
 its highway-upgrade cost and removal salvage. Unaffordable construction is
 rejected without changing the network. The finance summary reports capital
-spending, finished-stone operating revenue, current daily maintenance, and any
+spending, finished-stone operating revenue, current road-and-rail daily
+maintenance, and any
 emergency-finance penalty.
 
 Granite Ridge Quarry produces up to 120 tons of raw granite per day. It must first

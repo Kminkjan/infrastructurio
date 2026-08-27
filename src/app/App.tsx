@@ -21,7 +21,10 @@ import type {
   DevelopmentDecisionOutcome,
   DevelopmentLocationSnapshot,
   InfrastructureTransactionQuote,
+  FreightRailTerminalSnapshot,
   Point,
+  RailTerminalSite,
+  RailTrackSnapshot,
   RoadBottleneckSnapshot,
   RoadClass,
   SimulationSnapshot,
@@ -246,6 +249,42 @@ function StoneworksInspector({
   );
 }
 
+function RailInfrastructureInspector({
+  track,
+  terminal,
+}: {
+  readonly track?: RailTrackSnapshot;
+  readonly terminal?: FreightRailTerminalSnapshot;
+}) {
+  const capacity = track?.capacityTonsPerDay ?? terminal!.capacityTonsPerDay;
+  const freeFlowTime = track
+    ? track.freeFlowTravelTimeHours
+    : terminal!.freeFlowTransferTimeHours;
+  const constructionCost = track?.constructionCost ?? terminal!.constructionCost;
+  const maintenance =
+    track?.maintenanceCostPerDay ?? terminal!.maintenanceCostPerDay;
+  return (
+    <dl className="freight-details" aria-label="Rail infrastructure properties">
+      <div>
+        <dt>Practical capacity</dt>
+        <dd>{capacity.toLocaleString()} t/day</dd>
+      </div>
+      <div>
+        <dt>{track ? "Free-flow travel" : "Free-flow transfer"}</dt>
+        <dd>{freeFlowTime.toFixed(2)} hours</dd>
+      </div>
+      <div>
+        <dt>Construction cost</dt>
+        <dd>{formatMoney(constructionCost)}</dd>
+      </div>
+      <div>
+        <dt>Daily maintenance</dt>
+        <dd>{formatMoney(maintenance)}</dd>
+      </div>
+    </dl>
+  );
+}
+
 function assignmentTime(tick: number): string {
   const day = Math.floor(tick / 24);
   const hour = tick % 24;
@@ -430,6 +469,13 @@ interface WorldViewProps {
     end: Point | undefined,
   ) => void;
   readonly onRemoveRoad: (roadSegmentId: string) => void;
+  readonly onBuildRailTrack: (start: Point, end: Point) => void;
+  readonly onBuildRailTrackPreview: (
+    start: Point | undefined,
+    end: Point | undefined,
+  ) => void;
+  readonly onRemoveRailTrack: (railTrackId: string) => void;
+  readonly onRemoveRailTerminal: (railTerminalId: string) => void;
 }
 
 function WorldView({
@@ -439,6 +485,10 @@ function WorldView({
   onBuildRoad,
   onBuildRoadPreview,
   onRemoveRoad,
+  onBuildRailTrack,
+  onBuildRailTrackPreview,
+  onRemoveRailTrack,
+  onRemoveRailTerminal,
 }: WorldViewProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<WorldRenderer | null>(null);
@@ -448,12 +498,20 @@ function WorldView({
   const buildRoadCallbackRef = useRef(onBuildRoad);
   const buildRoadPreviewCallbackRef = useRef(onBuildRoadPreview);
   const removeRoadCallbackRef = useRef(onRemoveRoad);
+  const buildRailTrackCallbackRef = useRef(onBuildRailTrack);
+  const buildRailTrackPreviewCallbackRef = useRef(onBuildRailTrackPreview);
+  const removeRailTrackCallbackRef = useRef(onRemoveRailTrack);
+  const removeRailTerminalCallbackRef = useRef(onRemoveRailTerminal);
   latestSnapshotRef.current = snapshot;
   latestRoadToolRef.current = roadTool;
   selectionCallbackRef.current = onSelectionChange;
   buildRoadCallbackRef.current = onBuildRoad;
   buildRoadPreviewCallbackRef.current = onBuildRoadPreview;
   removeRoadCallbackRef.current = onRemoveRoad;
+  buildRailTrackCallbackRef.current = onBuildRailTrack;
+  buildRailTrackPreviewCallbackRef.current = onBuildRailTrackPreview;
+  removeRailTrackCallbackRef.current = onRemoveRailTrack;
+  removeRailTerminalCallbackRef.current = onRemoveRailTerminal;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -474,6 +532,18 @@ function WorldView({
       },
       onRemoveRoad(roadSegmentId) {
         removeRoadCallbackRef.current(roadSegmentId);
+      },
+      onBuildRailTrack(start, end) {
+        buildRailTrackCallbackRef.current(start, end);
+      },
+      onBuildRailTrackPreview(start, end) {
+        buildRailTrackPreviewCallbackRef.current(start, end);
+      },
+      onRemoveRailTrack(railTrackId) {
+        removeRailTrackCallbackRef.current(railTrackId);
+      },
+      onRemoveRailTerminal(railTerminalId) {
+        removeRailTerminalCallbackRef.current(railTerminalId);
       },
     }).then((renderer) => {
       if (disposed) {
@@ -596,6 +666,78 @@ export function App() {
         error instanceof Error ? error.message : "Road construction failed",
       );
     }
+  }
+
+  function previewRailTrack(
+    start: Point | undefined,
+    end: Point | undefined,
+  ): void {
+    if (!start || !end || (start.x === end.x && start.y === end.y)) {
+      setConstructionQuote(undefined);
+      return;
+    }
+    try {
+      setConstructionQuote(simulation.quoteRailTrackConstruction(start, end));
+    } catch {
+      setConstructionQuote(undefined);
+    }
+  }
+
+  function buildRailTrack(start: Point, end: Point): void {
+    try {
+      const nextSnapshot = simulation.dispatch({
+        type: "build-rail-track",
+        start,
+        end,
+      });
+      setSnapshot(nextSnapshot);
+      setConstructionMessage(
+        `Rail track built for ${formatMoney(nextSnapshot.finances.lastInfrastructureTransaction!.breakdown.netCost)}.`,
+      );
+    } catch (error) {
+      setConstructionMessage(
+        error instanceof Error ? error.message : "Rail construction failed",
+      );
+    }
+  }
+
+  function placeFreightRailTerminal(site: RailTerminalSite): void {
+    try {
+      const nextSnapshot = simulation.dispatch({
+        type: "place-freight-rail-terminal",
+        site,
+      });
+      setSnapshot(nextSnapshot);
+      setConstructionMessage(
+        `Freight rail terminal placed for ${formatMoney(nextSnapshot.finances.lastInfrastructureTransaction!.breakdown.netCost)}.`,
+      );
+    } catch (error) {
+      setConstructionMessage(
+        error instanceof Error ? error.message : "Terminal placement failed",
+      );
+    }
+  }
+
+  function removeRailTrack(railTrackId: string): void {
+    const nextSnapshot = simulation.dispatch({
+      type: "remove-rail-track",
+      railTrackId,
+    });
+    setSnapshot(nextSnapshot);
+    setConstructionMessage(
+      `Rail track removed; ${formatMoney(nextSnapshot.finances.lastInfrastructureTransaction!.breakdown.salvageCredit)} salvage credited.`,
+    );
+  }
+
+  function removeRailTerminal(railTerminalId: string): void {
+    const nextSnapshot = simulation.dispatch({
+      type: "remove-freight-rail-terminal",
+      railTerminalId,
+    });
+    setSnapshot(nextSnapshot);
+    setConstructionMessage(
+      `Freight terminal removed; ${formatMoney(nextSnapshot.finances.lastInfrastructureTransaction!.breakdown.salvageCredit)} salvage credited.`,
+    );
   }
 
   function upgradeRoad(roadSegmentId: string): void {
@@ -754,6 +896,18 @@ export function App() {
   const selectedRemovalQuote = selectedRoad
     ? simulation.quoteRoadRemoval(selectedRoad.id)
     : undefined;
+  const selectedRailTrack = snapshot.railNetwork.tracks.find(
+    ({ id }) => id === selection?.id,
+  );
+  const selectedRailTerminal = snapshot.railNetwork.terminals.find(
+    ({ id }) => id === selection?.id,
+  );
+  const selectedRailRemovalQuote = selectedRailTrack
+    ? simulation.quoteRailTrackRemoval(selectedRailTrack.id)
+    : selectedRailTerminal
+      ? simulation.quoteFreightRailTerminalRemoval(selectedRailTerminal.id)
+      : undefined;
+  const railTerminalSites = ["quarry", "stoneworks", "market"] as const;
 
   return (
     <main className="prototype-shell">
@@ -764,6 +918,10 @@ export function App() {
         onBuildRoad={buildRoad}
         onBuildRoadPreview={previewRoad}
         onRemoveRoad={removeRoad}
+        onBuildRailTrack={buildRailTrack}
+        onBuildRailTrackPreview={previewRailTrack}
+        onRemoveRailTrack={removeRailTrack}
+        onRemoveRailTerminal={removeRailTerminal}
       />
       <button
         className="overlay-toggle"
@@ -786,6 +944,12 @@ export function App() {
           Simulation day {snapshot.elapsedDays} ·{" "}
           {snapshot.roadNetwork.segments.length} road{" "}
           {snapshot.roadNetwork.segments.length === 1 ? "segment" : "segments"}
+          {" · "}
+          {snapshot.railNetwork.tracks.length} rail track
+          {snapshot.railNetwork.tracks.length === 1 ? "" : "s"}
+          {" · "}
+          {snapshot.railNetwork.terminals.length} freight terminal
+          {snapshot.railNetwork.terminals.length === 1 ? "" : "s"}
           {" · "}
           {snapshot.development.demand.completedGrowthPopulation} regional growth
           {" · "}
@@ -842,7 +1006,7 @@ export function App() {
               : `Emergency bonds become available below ${formatMoney(snapshot.finances.emergencyFinance.eligibilityBalance)}; each adds a permanent ${formatMoney(snapshot.finances.emergencyFinance.penaltyPerBondPerDay)}/day penalty.`}
           </p>
         </section>
-        <section className="road-tools" aria-label="Road construction tools">
+        <section className="road-tools" aria-label="Infrastructure construction tools">
           <p className="eyebrow">Map tool</p>
           <div className="tool-buttons">
             <button
@@ -887,9 +1051,73 @@ export function App() {
             >
               Remove road
             </button>
+            <button
+              className="tool-button rail"
+              type="button"
+              aria-pressed={roadTool === "build-rail"}
+              onClick={() => setRoadTool("build-rail")}
+            >
+              Build track
+            </button>
+            <button
+              className="tool-button danger rail"
+              type="button"
+              aria-pressed={roadTool === "remove-rail"}
+              onClick={() => setRoadTool("remove-rail")}
+            >
+              Remove rail
+            </button>
+          </div>
+          <div className="terminal-tools" aria-label="Freight rail terminals">
+            <p className="eyebrow">Freight terminals</p>
+            <div className="tool-buttons">
+              {railTerminalSites.map((site) => {
+                const placed = snapshot.railNetwork.terminals.some(
+                  (terminal) => terminal.site === site,
+                );
+                const label =
+                  site === "quarry"
+                    ? "Quarry"
+                    : site === "stoneworks"
+                      ? "Stoneworks"
+                      : "Market";
+                return (
+                  <button
+                    className="tool-button rail"
+                    type="button"
+                    disabled={placed}
+                    key={site}
+                    onClick={() => placeFreightRailTerminal(site)}
+                  >
+                    {placed ? `${label} placed` : `Place ${label}`}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="salvage-rule">
+              Each compatible freight terminal costs {formatMoney(
+                snapshot.railNetwork.terminals.length < railTerminalSites.length
+                  ? simulation.quoteFreightRailTerminalConstruction(
+                      railTerminalSites.find(
+                        (site) =>
+                          !snapshot.railNetwork.terminals.some(
+                            (terminal) => terminal.site === site,
+                          ),
+                      )!,
+                    ).breakdown.netCost
+                  : snapshot.railNetwork.terminals[0]!.constructionCost,
+              )} and connects only where track reaches its site.
+            </p>
           </div>
           {constructionQuote ? (
-            <CostBreakdown quote={constructionQuote} label="Road cost preview" />
+            <CostBreakdown
+              quote={constructionQuote}
+              label={
+                roadTool === "build-rail"
+                  ? "Rail track cost preview"
+                  : "Road cost preview"
+              }
+            />
           ) : null}
           {constructionMessage ? (
             <p className="construction-message" role="status">
@@ -912,6 +1140,12 @@ export function App() {
               ))}
               {selectedDevelopment ? (
                 <DevelopmentInspector development={selectedDevelopment} />
+              ) : null}
+              {selectedRailTrack || selectedRailTerminal ? (
+                <RailInfrastructureInspector
+                  track={selectedRailTrack}
+                  terminal={selectedRailTerminal}
+                />
               ) : null}
               {selectedBottleneck ? (
                 <BottleneckInspector
@@ -946,13 +1180,25 @@ export function App() {
                   </p>
                 </section>
               ) : null}
+              {selectedRailRemovalQuote ? (
+                <section className="road-finance" aria-label="Rail finances">
+                  <CostBreakdown
+                    quote={selectedRailRemovalQuote}
+                    label="Rail removal preview"
+                  />
+                  <p className="salvage-rule">
+                    Removal credits 20% of base rail construction. Land and
+                    river work are not recoverable.
+                  </p>
+                </section>
+              ) : null}
             </>
           ) : (
             <>
               <h2>Nothing selected</h2>
               <p className="selection-description">
-                Select a road, crossing, market connection, resource, industry,
-                or settlement.
+                Select a road, rail track, freight terminal, crossing, market
+                connection, resource, industry, or settlement.
               </p>
             </>
           )}
@@ -1019,6 +1265,10 @@ export function App() {
             ? `Drag across the map to draw ${buildRoadClass === "arterial" ? "an" : "a"} ${buildRoadClass} road. Endpoints snap to settlements, resources, the market, nearby roads, and junctions.`
             : roadTool === "remove"
               ? "Select a player-built road segment to remove it. Drag empty map space to pan."
+              : roadTool === "build-rail"
+                ? "Drag to build track. Endpoints snap to compatible freight sites, existing track, and rail junctions."
+                : roadTool === "remove-rail"
+                  ? "Select a rail track or freight terminal to remove it."
               : "Drag the map to pan, scroll to zoom, and select a marked feature to inspect it."}
         </p>
       </section>

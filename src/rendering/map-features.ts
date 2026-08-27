@@ -1,4 +1,9 @@
-import type { Point, RoadNetwork, ScenarioGeography } from "../shared";
+import type {
+  Point,
+  RailNetwork,
+  RoadNetwork,
+  ScenarioGeography,
+} from "../shared";
 
 export type MapFeatureKind = "infrastructure" | "resource" | "settlement";
 
@@ -52,6 +57,18 @@ export function getRoadSnapAnchors(
     geography.externalMarketConnection.position,
     ...geography.settlementSeeds.map(({ position }) => position),
     fertileCenter,
+  ];
+}
+
+export function getRailSnapAnchors(
+  geography: ScenarioGeography,
+  railNetwork: RailNetwork,
+): readonly Point[] {
+  return [
+    geography.quarry.position,
+    geography.stoneworks.position,
+    geography.externalMarketConnection.position,
+    ...railNetwork.nodes.map(({ position }) => position),
   ];
 }
 
@@ -152,4 +169,33 @@ export function getSelectableRoadFeatures(
       end: segment.end,
     },
   }));
+}
+
+export function getSelectableRailFeatures(
+  railNetwork: RailNetwork,
+): readonly SelectableMapFeature[] {
+  return [
+    ...railNetwork.tracks.map((track) => ({
+      id: track.id,
+      name: "Rail track",
+      kind: "infrastructure" as const,
+      description: `${Math.round(track.length)} map units · ${track.capacityTonsPerDay} t/day rail corridor`,
+      geometry: {
+        type: "line" as const,
+        start: track.start,
+        end: track.end,
+      },
+    })),
+    ...railNetwork.terminals.map((terminal) => ({
+      id: terminal.id,
+      name: terminal.name,
+      kind: "infrastructure" as const,
+      description: `${terminal.capacityTonsPerDay} t/day freight rail terminal`,
+      geometry: {
+        type: "point" as const,
+        position: terminal.position,
+        radius: 25,
+      },
+    })),
+  ];
 }

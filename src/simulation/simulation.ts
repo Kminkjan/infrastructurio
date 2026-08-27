@@ -2,6 +2,11 @@ import {
   TICKS_PER_DAY,
   type InfrastructureTransactionQuote,
   type Point,
+  type FreightRailTerminalState,
+  type RailNetwork,
+  type RailRoute,
+  type RailTerminalSite,
+  type RailTrackSegment,
   type RoadClass,
   type RoadNetwork,
   type RoadRoute,
@@ -18,6 +23,10 @@ import {
   createFinanceState,
   issueEmergencyBond,
   markFinanceProcessed,
+  quoteFreightRailTerminalConstruction,
+  quoteFreightRailTerminalRemoval,
+  quoteRailTrackConstruction,
+  quoteRailTrackRemoval,
   quoteRoadConstruction,
   quoteRoadRemoval,
   quoteRoadUpgrade,
@@ -45,6 +54,11 @@ import {
 import { createMillfordAccessibilityModel } from "./growth/millford-accessibility";
 import { createMillfordDevelopmentModel } from "./growth/millford-development";
 import { createRoadNetwork, findRoadRoute } from "./transport/road-network";
+import {
+  createFreightRailTerminalState,
+  createRailNetwork,
+  findRailRoute as queryRailRoute,
+} from "./transport/rail-network";
 import { createBottleneckAnalysis } from "./transport/bottlenecks";
 import {
   advanceRoadTraffic,
@@ -66,6 +80,8 @@ interface SimulationState {
   readonly roadNetwork: RoadNetwork;
   readonly roadTraffic: RoadTrafficStateSnapshot;
   readonly nextRoadSegmentNumber: number;
+  readonly railNetwork: RailNetwork;
+  readonly nextRailTrackNumber: number;
   readonly supplyChain: StoneSupplyChainStateSnapshot;
   readonly finances: FinanceStateSnapshot;
   readonly development: DevelopmentStateSnapshot;
@@ -76,6 +92,9 @@ export interface SimulationStateSnapshot {
   readonly tick: number;
   readonly roadSegments: readonly RoadSegment[];
   readonly nextRoadSegmentNumber: number;
+  readonly railTracks?: readonly RailTrackSegment[];
+  readonly railTerminals?: readonly FreightRailTerminalState[];
+  readonly nextRailTrackNumber?: number;
   readonly roadTraffic?: RoadTrafficStateSnapshot;
   readonly supplyChain?: StoneSupplyChainStateSnapshot;
   readonly finances?: FinanceStateSnapshot;
@@ -87,6 +106,10 @@ export interface Simulation {
   getSnapshot(): SimulationSnapshot;
   getState(): SimulationStateSnapshot;
   findRoute(start: Point, end: Point): RoadRoute | undefined;
+  findRailRoute(
+    originTerminalId: string,
+    destinationTerminalId: string,
+  ): RailRoute | undefined;
   quoteRoadConstruction(
     start: Point,
     end: Point,
@@ -94,6 +117,17 @@ export interface Simulation {
   ): InfrastructureTransactionQuote;
   quoteRoadUpgrade(roadSegmentId: string): InfrastructureTransactionQuote;
   quoteRoadRemoval(roadSegmentId: string): InfrastructureTransactionQuote;
+  quoteRailTrackConstruction(
+    start: Point,
+    end: Point,
+  ): InfrastructureTransactionQuote;
+  quoteRailTrackRemoval(railTrackId: string): InfrastructureTransactionQuote;
+  quoteFreightRailTerminalConstruction(
+    site: RailTerminalSite,
+  ): InfrastructureTransactionQuote;
+  quoteFreightRailTerminalRemoval(
+    railTerminalId: string,
+  ): InfrastructureTransactionQuote;
 }
 
 function trafficDemands(
@@ -165,11 +199,13 @@ function snapshot(
     elapsedDays: state.tick / TICKS_PER_DAY,
     geography: state.geography,
     roadNetwork: state.roadNetwork,
+    railNetwork: state.railNetwork,
     stoneSupplyChain,
     finances: createFinanceSnapshot(
       state.finances,
       state.geography,
       state.roadNetwork,
+      state.railNetwork,
     ),
     bottlenecks: createBottleneckAnalysis(
       state.geography,
@@ -233,17 +269,25 @@ function advanceTarget(state: SimulationState, ticks: number): number {
   return tick;
 }
 
-function normalizeCoordinate(value: number, maximum: number): number {
+function normalizeCoordinate(
+  value: number,
+  maximum: number,
+  infrastructure = "road",
+): number {
   if (!Number.isFinite(value)) {
-    throw new RangeError("road coordinates must be finite numbers");
+    throw new RangeError(`${infrastructure} coordinates must be finite numbers`);
   }
   return Math.round(Math.min(maximum, Math.max(0, value)) * 1_000) / 1_000;
 }
 
-function normalizePoint(position: Point, geography: ScenarioGeography): Point {
+function normalizePoint(
+  position: Point,
+  geography: ScenarioGeography,
+  infrastructure = "road",
+): Point {
   return Object.freeze({
-    x: normalizeCoordinate(position.x, geography.bounds.width),
-    y: normalizeCoordinate(position.y, geography.bounds.height),
+    x: normalizeCoordinate(position.x, geography.bounds.width, infrastructure),
+    y: normalizeCoordinate(position.y, geography.bounds.height, infrastructure),
   });
 }
 
@@ -307,11 +351,135 @@ function removeRoad(
   };
 }
 
+function buildRailTrack(
+  state: SimulationState,
+  startInput: Point,
+  endInput: Point,
+): SimulationState {
+  const start = normalizePoint(startInput, state.geography, "rail track");
+  const end = normalizePoint(endInput, state.geography, "rail track");
+  if (start.x === end.x && start.y === end.y) {
+    throw new RangeError("a rail track must have two distinct endpoints");
+  }
+  const track: RailTrackSegment = Object.freeze({
+    id: `rail-track-${state.nextRailTrackNumber}`,
+    start,
+    end,
+  });
+  const railNetwork = createRailNetwork(
+    [...state.railNetwork.tracks, track],
+    state.railNetwork.terminals,
+    state.geography,
+  );
+  const transactionQuote = quoteRailTrackConstruction(
+    state.finances.balance,
+    state.geography,
+    track,
+  );
+  return Object.freeze({
+    ...state,
+    railNetwork,
+    nextRailTrackNumber: state.nextRailTrackNumber + 1,
+    finances: commitInfrastructureTransaction(
+      state.finances,
+      transactionQuote,
+      state.tick,
+    ),
+  });
+}
+
+function removeRailTrack(
+  state: SimulationState,
+  railTrackId: string,
+): SimulationState {
+  const existing = state.railNetwork.tracks.find(
+    ({ id }) => id === railTrackId,
+  );
+  if (!existing) {
+    return state;
+  }
+  const transactionQuote = quoteRailTrackRemoval(
+    state.finances.balance,
+    existing,
+  );
+  return Object.freeze({
+    ...state,
+    railNetwork: createRailNetwork(
+      state.railNetwork.tracks.filter(({ id }) => id !== railTrackId),
+      state.railNetwork.terminals,
+      state.geography,
+    ),
+    finances: commitInfrastructureTransaction(
+      state.finances,
+      transactionQuote,
+      state.tick,
+    ),
+  });
+}
+
+function placeFreightRailTerminal(
+  state: SimulationState,
+  site: RailTerminalSite,
+): SimulationState {
+  if (state.railNetwork.terminals.some((terminal) => terminal.site === site)) {
+    throw new RangeError(`a freight rail terminal already exists at ${site}`);
+  }
+  const terminal = createFreightRailTerminalState(state.geography, site);
+  const railNetwork = createRailNetwork(
+    state.railNetwork.tracks,
+    [...state.railNetwork.terminals, terminal],
+    state.geography,
+  );
+  const transactionQuote = quoteFreightRailTerminalConstruction(
+    state.finances.balance,
+  );
+  return Object.freeze({
+    ...state,
+    railNetwork,
+    finances: commitInfrastructureTransaction(
+      state.finances,
+      transactionQuote,
+      state.tick,
+    ),
+  });
+}
+
+function removeFreightRailTerminal(
+  state: SimulationState,
+  railTerminalId: string,
+): SimulationState {
+  const existing = state.railNetwork.terminals.find(
+    ({ id }) => id === railTerminalId,
+  );
+  if (!existing) {
+    return state;
+  }
+  const transactionQuote = quoteFreightRailTerminalRemoval(
+    state.finances.balance,
+  );
+  return Object.freeze({
+    ...state,
+    railNetwork: createRailNetwork(
+      state.railNetwork.tracks,
+      state.railNetwork.terminals.filter(({ id }) => id !== railTerminalId),
+      state.geography,
+    ),
+    finances: commitInfrastructureTransaction(
+      state.finances,
+      transactionQuote,
+      state.tick,
+    ),
+  });
+}
+
 function createSimulationState(
   seed: string,
   tick: number,
   roadSegments: readonly RoadSegment[],
   nextRoadSegmentNumber: number,
+  railTracks: readonly RailTrackSegment[] = [],
+  railTerminals: readonly FreightRailTerminalState[] = [],
+  nextRailTrackNumber = 1,
   savedDevelopment?: DevelopmentStateSnapshot,
   savedSupplyChain?: StoneSupplyChainStateSnapshot,
   savedRoadTraffic?: RoadTrafficStateSnapshot,
@@ -323,8 +491,15 @@ function createSimulationState(
   if (!Number.isSafeInteger(nextRoadSegmentNumber) || nextRoadSegmentNumber < 1) {
     throw new RangeError("next road segment number must be a positive safe integer");
   }
+  if (!Number.isSafeInteger(nextRailTrackNumber) || nextRailTrackNumber < 1) {
+    throw new RangeError("next rail track number must be a positive safe integer");
+  }
   const geography = generateMillfordValley(seed);
-  for (const segment of roadSegments) {
+  for (const [kind, segments] of [
+    ["road", roadSegments],
+    ["rail track", railTracks],
+  ] as const) {
+    for (const segment of segments) {
     for (const position of [segment.start, segment.end]) {
       if (
         !Number.isFinite(position.x) ||
@@ -334,7 +509,10 @@ function createSimulationState(
         position.y < 0 ||
         position.y > geography.bounds.height
       ) {
-        throw new RangeError("saved road coordinates must be within map bounds");
+          throw new RangeError(
+            `saved ${kind} coordinates must be within map bounds`,
+          );
+        }
       }
     }
   }
@@ -345,6 +523,14 @@ function createSimulationState(
     )
   ) {
     throw new RangeError("next road segment id must be unused");
+  }
+  const railNetwork = createRailNetwork(railTracks, railTerminals, geography);
+  if (
+    railNetwork.tracks.some(
+      ({ id }) => id === `rail-track-${nextRailTrackNumber}`,
+    )
+  ) {
+    throw new RangeError("next rail track id must be unused");
   }
 
   const developmentModel = createMillfordDevelopmentModel(geography);
@@ -372,6 +558,8 @@ function createSimulationState(
     roadNetwork: traffic.network,
     roadTraffic: traffic.state,
     nextRoadSegmentNumber,
+    railNetwork,
+    nextRailTrackNumber,
     supplyChain,
     finances,
     development,
@@ -385,6 +573,13 @@ function runSimulation(initialState: SimulationState): Simulation {
       tick: state.tick,
       roadSegments: state.roadNetwork.segments,
       nextRoadSegmentNumber: state.nextRoadSegmentNumber,
+      railTracks: state.railNetwork.tracks.map(({ id, start, end }) =>
+        Object.freeze({ id, start, end }),
+      ),
+      railTerminals: state.railNetwork.terminals.map(({ id, site, siteId }) =>
+        Object.freeze({ id, site, siteId }),
+      ),
+      nextRailTrackNumber: state.nextRailTrackNumber,
       roadTraffic: state.roadTraffic,
       supplyChain: state.supplyChain,
       finances: state.finances,
@@ -469,6 +664,7 @@ function runSimulation(initialState: SimulationState): Simulation {
               supplyChain.outboundShippedTonsPerDay,
               state.geography,
               network,
+              state.railNetwork,
             );
             const atBoundary = createRoadTraffic(
               network,
@@ -524,6 +720,18 @@ function runSimulation(initialState: SimulationState): Simulation {
         case "remove-road":
           state = removeRoad(state, command.roadSegmentId);
           break;
+        case "build-rail-track":
+          state = buildRailTrack(state, command.start, command.end);
+          break;
+        case "remove-rail-track":
+          state = removeRailTrack(state, command.railTrackId);
+          break;
+        case "place-freight-rail-terminal":
+          state = placeFreightRailTerminal(state, command.site);
+          break;
+        case "remove-freight-rail-terminal":
+          state = removeFreightRailTerminal(state, command.railTerminalId);
+          break;
         case "issue-emergency-bond":
           state = { ...state, finances: issueEmergencyBond(state.finances) };
           break;
@@ -569,6 +777,13 @@ function runSimulation(initialState: SimulationState): Simulation {
         normalizePoint(end, state.geography),
       );
     },
+    findRailRoute(originTerminalId, destinationTerminalId) {
+      return queryRailRoute(
+        state.railNetwork,
+        originTerminalId,
+        destinationTerminalId,
+      );
+    },
     quoteRoadConstruction(start, end, roadClass = DEFAULT_PLAYER_ROAD_CLASS) {
       const normalizedStart = normalizePoint(start, state.geography);
       const normalizedEnd = normalizePoint(end, state.geography);
@@ -602,11 +817,46 @@ function runSimulation(initialState: SimulationState): Simulation {
       }
       return quoteRoadRemoval(state.finances.balance, segment);
     },
+    quoteRailTrackConstruction(start, end) {
+      const normalizedStart = normalizePoint(start, state.geography, "rail track");
+      const normalizedEnd = normalizePoint(end, state.geography, "rail track");
+      if (
+        normalizedStart.x === normalizedEnd.x &&
+        normalizedStart.y === normalizedEnd.y
+      ) {
+        throw new RangeError("a rail track must have two distinct endpoints");
+      }
+      return quoteRailTrackConstruction(
+        state.finances.balance,
+        state.geography,
+        { start: normalizedStart, end: normalizedEnd },
+      );
+    },
+    quoteRailTrackRemoval(railTrackId) {
+      const track = state.railNetwork.tracks.find(({ id }) => id === railTrackId);
+      if (!track) {
+        throw new RangeError(`rail track ${railTrackId} does not exist`);
+      }
+      return quoteRailTrackRemoval(state.finances.balance, track);
+    },
+    quoteFreightRailTerminalConstruction(site) {
+      createFreightRailTerminalState(state.geography, site);
+      if (state.railNetwork.terminals.some((terminal) => terminal.site === site)) {
+        throw new RangeError(`a freight rail terminal already exists at ${site}`);
+      }
+      return quoteFreightRailTerminalConstruction(state.finances.balance);
+    },
+    quoteFreightRailTerminalRemoval(railTerminalId) {
+      if (!state.railNetwork.terminals.some(({ id }) => id === railTerminalId)) {
+        throw new RangeError(`rail terminal ${railTerminalId} does not exist`);
+      }
+      return quoteFreightRailTerminalRemoval(state.finances.balance);
+    },
   };
 }
 
 export function createSimulation(seed: string): Simulation {
-  return runSimulation(createSimulationState(seed, 0, [], 1));
+  return runSimulation(createSimulationState(seed, 0, [], 1, [], [], 1));
 }
 
 export function restoreSimulation(
@@ -618,6 +868,9 @@ export function restoreSimulation(
       savedState.tick,
       savedState.roadSegments,
       savedState.nextRoadSegmentNumber,
+      savedState.railTracks,
+      savedState.railTerminals,
+      savedState.nextRailTrackNumber,
       savedState.development,
       savedState.supplyChain,
       savedState.roadTraffic,

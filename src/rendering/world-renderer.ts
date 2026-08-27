@@ -15,7 +15,9 @@ import {
 } from "./map-camera";
 import {
   getSelectableMapFeatures,
+  getSelectableRailFeatures,
   getSelectableRoadFeatures,
+  getRailSnapAnchors,
   getRoadSnapAnchors,
   toMapSelection,
   type MapSelection,
@@ -28,7 +30,12 @@ import {
   type RepresentativeFreightTrafficPlan,
 } from "./representative-freight";
 
-export type RoadTool = "inspect" | "build" | "remove";
+export type RoadTool =
+  | "inspect"
+  | "build"
+  | "remove"
+  | "build-rail"
+  | "remove-rail";
 
 export interface WorldRenderer {
   update(snapshot: SimulationSnapshot): void;
@@ -46,6 +53,13 @@ export interface WorldRendererOptions {
     end: Point | undefined,
   ) => void;
   readonly onRemoveRoad?: (roadSegmentId: string) => void;
+  readonly onBuildRailTrack?: (start: Point, end: Point) => void;
+  readonly onBuildRailTrackPreview?: (
+    start: Point | undefined,
+    end: Point | undefined,
+  ) => void;
+  readonly onRemoveRailTrack?: (railTrackId: string) => void;
+  readonly onRemoveRailTerminal?: (railTerminalId: string) => void;
 }
 
 function drawFeatureShape(
@@ -106,7 +120,7 @@ export async function createWorldRenderer(
   canvas.className = "world-canvas";
   canvas.setAttribute(
     "aria-label",
-    "Interactive map of Millford Valley. Drag to pan, scroll to zoom, or choose a road tool.",
+    "Interactive map of Millford Valley. Drag to pan, scroll to zoom, or choose an infrastructure tool.",
   );
   host.append(canvas);
 
@@ -115,10 +129,12 @@ export async function createWorldRenderer(
   const industryLayer = new Container();
   const developmentLayer = new Container();
   const roadLayer = new Container();
+  const railLayer = new Container();
   const analysisOverlayLayer = new Container();
   const representativeVehicleLayer = new Container();
   const geographyHitLayer = new Container();
   const roadHitLayer = new Container();
+  const railHitLayer = new Container();
   const priorityGeographyHitLayer = new Container();
   const selectionLayer = new Graphics();
   const constructionPreviewLayer = new Graphics();
@@ -131,11 +147,13 @@ export async function createWorldRenderer(
     industryLayer,
     developmentLayer,
     roadLayer,
+    railLayer,
     analysisOverlayLayer,
     representativeVehicleLayer,
     geographyHitLayer,
     roadHitLayer,
     priorityGeographyHitLayer,
+    railHitLayer,
     selectionLayer,
     constructionPreviewLayer,
   );
@@ -146,9 +164,11 @@ export async function createWorldRenderer(
   let renderedSupplyChain: SimulationSnapshot["stoneSupplyChain"] | undefined;
   let renderedDevelopment: SimulationSnapshot["development"] | undefined;
   let renderedRoadNetwork: SimulationSnapshot["roadNetwork"] | undefined;
+  let renderedRailNetwork: SimulationSnapshot["railNetwork"] | undefined;
   let renderedBottlenecks: SimulationSnapshot["bottlenecks"] | undefined;
   let geographyFeatures: readonly SelectableMapFeature[] = [];
   let roadFeatures: readonly SelectableMapFeature[] = [];
+  let railFeatures: readonly SelectableMapFeature[] = [];
   let selectableFeatures: readonly SelectableMapFeature[] = [];
   let selectedFeatureId: string | undefined;
   let roadTool: RoadTool = "inspect";
@@ -220,7 +240,7 @@ export async function createWorldRenderer(
   }
 
   function refreshSelectableFeatures(): void {
-    selectableFeatures = [...geographyFeatures, ...roadFeatures];
+    selectableFeatures = [...geographyFeatures, ...roadFeatures, ...railFeatures];
     if (!selectableFeatures.some(({ id }) => id === selectedFeatureId)) {
       const hadSelection = selectedFeatureId !== undefined;
       selectedFeatureId = undefined;
@@ -384,6 +404,86 @@ export async function createWorldRenderer(
         handleFeatureSelection(feature, event);
       });
       roadHitLayer.addChild(hitTarget);
+    }
+
+    refreshSelectableFeatures();
+  }
+
+  function drawRail(snapshot: SimulationSnapshot): void {
+    if (renderedRailNetwork === snapshot.railNetwork) {
+      return;
+    }
+
+    destroyChildren(railLayer);
+    destroyChildren(railHitLayer);
+    renderedRailNetwork = snapshot.railNetwork;
+    railFeatures = getSelectableRailFeatures(snapshot.railNetwork);
+
+    for (const track of snapshot.railNetwork.tracks) {
+      const delta = { x: track.end.x - track.start.x, y: track.end.y - track.start.y };
+      const length = Math.hypot(delta.x, delta.y);
+      const normal = { x: -delta.y / length, y: delta.x / length };
+      const visual = new Graphics()
+        .moveTo(track.start.x, track.start.y)
+        .lineTo(track.end.x, track.end.y)
+        .stroke({ color: 0x283438, width: 15 })
+        .moveTo(track.start.x + normal.x * 4, track.start.y + normal.y * 4)
+        .lineTo(track.end.x + normal.x * 4, track.end.y + normal.y * 4)
+        .stroke({ color: 0xb9ced2, width: 2.5 })
+        .moveTo(track.start.x - normal.x * 4, track.start.y - normal.y * 4)
+        .lineTo(track.end.x - normal.x * 4, track.end.y - normal.y * 4)
+        .stroke({ color: 0xb9ced2, width: 2.5 });
+      const tieCount = Math.floor(length / 14);
+      for (let index = 1; index < tieCount; index += 1) {
+        const parameter = index / tieCount;
+        const x = track.start.x + delta.x * parameter;
+        const y = track.start.y + delta.y * parameter;
+        visual
+          .moveTo(x - normal.x * 7, y - normal.y * 7)
+          .lineTo(x + normal.x * 7, y + normal.y * 7)
+          .stroke({ color: 0x806b55, width: 2 });
+      }
+      railLayer.addChild(visual);
+    }
+
+    for (const terminal of snapshot.railNetwork.terminals) {
+      railLayer.addChild(
+        new Graphics()
+          .roundRect(terminal.position.x - 21, terminal.position.y - 15, 42, 30, 4)
+          .fill({ color: 0x224f58 })
+          .stroke({ color: 0x9de6e4, width: 4 })
+          .moveTo(terminal.position.x - 15, terminal.position.y)
+          .lineTo(terminal.position.x + 15, terminal.position.y)
+          .stroke({ color: 0xe9f3ef, width: 3 }),
+      );
+    }
+
+    for (const feature of railFeatures) {
+      const hitTarget = feature.geometry.type === "line"
+        ? drawFeatureShape(new Graphics(), feature).stroke({
+            color: 0xffffff,
+            width: 24,
+            alpha: 0.001,
+          })
+        : drawFeatureShape(new Graphics(), feature).fill({
+            color: 0xffffff,
+            alpha: 0.001,
+          });
+      hitTarget.eventMode = "static";
+      hitTarget.cursor = "pointer";
+      hitTarget.on("pointertap", (event) => {
+        if (roadTool === "remove-rail") {
+          event.stopPropagation();
+          if (feature.geometry.type === "line") {
+            options.onRemoveRailTrack?.(feature.id);
+          } else {
+            options.onRemoveRailTerminal?.(feature.id);
+          }
+          return;
+        }
+        handleFeatureSelection(feature, event);
+      });
+      railHitLayer.addChild(hitTarget);
     }
 
     refreshSelectableFeatures();
@@ -569,6 +669,21 @@ export async function createWorldRenderer(
       return;
     }
 
+    if (roadTool === "build-rail") {
+      constructionPreviewLayer
+        .moveTo(constructionStart.x, constructionStart.y)
+        .lineTo(constructionEnd.x, constructionEnd.y)
+        .stroke({ color: 0x16363d, width: 17, alpha: 0.9 })
+        .moveTo(constructionStart.x, constructionStart.y)
+        .lineTo(constructionEnd.x, constructionEnd.y)
+        .stroke({ color: 0x75dedb, width: 7, alpha: 0.96 })
+        .circle(constructionStart.x, constructionStart.y, 9)
+        .fill({ color: 0x9de6e4 })
+        .circle(constructionEnd.x, constructionEnd.y, 9)
+        .fill({ color: 0x9de6e4 });
+      return;
+    }
+
     constructionPreviewLayer
       .moveTo(constructionStart.x, constructionStart.y)
       .lineTo(constructionEnd.x, constructionEnd.y)
@@ -654,6 +769,45 @@ export async function createWorldRenderer(
     return nearest;
   }
 
+  function snapRailPoint(position: Point): Point {
+    const tolerance = 14 / camera.scale;
+    let nearest = position;
+    let nearestDistance = tolerance;
+
+    for (const anchor of getRailSnapAnchors(
+      currentSnapshot.geography,
+      currentSnapshot.railNetwork,
+    )) {
+      const distance = Math.hypot(position.x - anchor.x, position.y - anchor.y);
+      if (distance <= nearestDistance) {
+        nearest = anchor;
+        nearestDistance = distance;
+      }
+    }
+
+    for (const track of currentSnapshot.railNetwork.tracks) {
+      const delta = { x: track.end.x - track.start.x, y: track.end.y - track.start.y };
+      const lengthSquared = delta.x * delta.x + delta.y * delta.y;
+      const parameter = Math.min(1, Math.max(0,
+        ((position.x - track.start.x) * delta.x +
+          (position.y - track.start.y) * delta.y) / lengthSquared,
+      ));
+      const projected = {
+        x: track.start.x + delta.x * parameter,
+        y: track.start.y + delta.y * parameter,
+      };
+      const distance = Math.hypot(
+        position.x - projected.x,
+        position.y - projected.y,
+      );
+      if (distance < nearestDistance) {
+        nearest = projected;
+        nearestDistance = distance;
+      }
+    }
+    return nearest;
+  }
+
   function handlePointerDown(event: PointerEvent): void {
     if (event.pointerType === "mouse" && event.button !== 0) {
       return;
@@ -665,13 +819,19 @@ export async function createWorldRenderer(
     suppressNextSelection = false;
     canvas.setPointerCapture(event.pointerId);
 
-    if (roadTool === "build") {
-      constructionStart = snapRoadPoint(positionInWorld(event));
+    if (roadTool === "build" || roadTool === "build-rail") {
+      constructionStart = roadTool === "build"
+        ? snapRoadPoint(positionInWorld(event))
+        : snapRailPoint(positionInWorld(event));
       constructionEnd = constructionStart;
       suppressNextSelection = true;
       canvas.classList.add("is-building");
       drawConstructionPreview();
-      options.onBuildRoadPreview?.(constructionStart, constructionEnd);
+      if (roadTool === "build") {
+        options.onBuildRoadPreview?.(constructionStart, constructionEnd);
+      } else {
+        options.onBuildRailTrackPreview?.(constructionStart, constructionEnd);
+      }
     }
   }
 
@@ -688,10 +848,16 @@ export async function createWorldRenderer(
     dragDistance += Math.hypot(delta.x, delta.y);
     lastPointer = pointer;
 
-    if (roadTool === "build") {
-      constructionEnd = snapRoadPoint(positionInWorld(event));
+    if (roadTool === "build" || roadTool === "build-rail") {
+      constructionEnd = roadTool === "build"
+        ? snapRoadPoint(positionInWorld(event))
+        : snapRailPoint(positionInWorld(event));
       drawConstructionPreview();
-      options.onBuildRoadPreview?.(constructionStart, constructionEnd);
+      if (roadTool === "build") {
+        options.onBuildRoadPreview?.(constructionStart, constructionEnd);
+      } else {
+        options.onBuildRailTrackPreview?.(constructionStart, constructionEnd);
+      }
       return;
     }
     if (dragDistance < 4) {
@@ -713,7 +879,7 @@ export async function createWorldRenderer(
     }
 
     if (
-      roadTool === "build" &&
+      (roadTool === "build" || roadTool === "build-rail") &&
       completeConstruction &&
       constructionStart &&
       constructionEnd &&
@@ -722,13 +888,18 @@ export async function createWorldRenderer(
         constructionEnd.y - constructionStart.y,
       ) > 0.001
     ) {
-      options.onBuildRoad?.(constructionStart, constructionEnd);
+      if (roadTool === "build") {
+        options.onBuildRoad?.(constructionStart, constructionEnd);
+      } else {
+        options.onBuildRailTrack?.(constructionStart, constructionEnd);
+      }
     }
 
     constructionStart = undefined;
     constructionEnd = undefined;
     drawConstructionPreview();
     options.onBuildRoadPreview?.(undefined, undefined);
+    options.onBuildRailTrackPreview?.(undefined, undefined);
     if (canvas.hasPointerCapture(event.pointerId)) {
       canvas.releasePointerCapture(event.pointerId);
     }
@@ -782,9 +953,15 @@ export async function createWorldRenderer(
     constructionEnd = undefined;
     drawConstructionPreview();
     options.onBuildRoadPreview?.(undefined, undefined);
+    options.onBuildRailTrackPreview?.(undefined, undefined);
     canvas.classList.toggle("road-tool-build", tool === "build");
     canvas.classList.toggle("road-tool-remove", tool === "remove");
+    canvas.classList.toggle("rail-tool-build", tool === "build-rail");
+    canvas.classList.toggle("rail-tool-remove", tool === "remove-rail");
     for (const child of roadHitLayer.children) {
+      child.cursor = "pointer";
+    }
+    for (const child of railHitLayer.children) {
       child.cursor = "pointer";
     }
   }
@@ -795,6 +972,7 @@ export async function createWorldRenderer(
     drawIndustry(snapshot);
     drawDevelopment(snapshot);
     drawRoads(snapshot);
+    drawRail(snapshot);
     drawBottleneckOverlay(snapshot);
     updateRepresentativeTraffic(snapshot);
     drawRepresentativeVehicles();

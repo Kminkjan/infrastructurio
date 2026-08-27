@@ -1,9 +1,13 @@
 import type {
   CommittedInfrastructureTransaction,
   FinanceSnapshot,
+  FreightRailTerminalSnapshot,
   InfrastructureCostBreakdown,
   InfrastructureTransactionQuote,
   Point,
+  RailNetwork,
+  RailTrackSegment,
+  RailTrackSnapshot,
   RoadClass,
   RoadNetwork,
   RoadSegment,
@@ -17,6 +21,18 @@ export const EMERGENCY_BOND_PROCEEDS = 15_000;
 export const EMERGENCY_BOND_DAILY_PENALTY = 150;
 export const EMERGENCY_BOND_ELIGIBILITY_BALANCE = 15_000;
 export const ROAD_SALVAGE_RATE = 0.2;
+export const RAIL_SALVAGE_RATE = 0.2;
+export const RAIL_TRACK_CAPACITY_TONS_PER_DAY = 320;
+export const RAIL_TRACK_SPEED_MAP_UNITS_PER_HOUR = 100;
+export const RAIL_TRACK_CONSTRUCTION_COST_PER_UNIT = 28;
+export const RAIL_TRACK_LAND_COST_PER_UNIT = 12;
+export const RAIL_TRACK_RIVER_CROSSING_COST = 6_000;
+export const RAIL_TRACK_MAINTENANCE_PER_UNIT_PER_DAY = 0.14;
+export const RAIL_TRACK_RIVER_MAINTENANCE_PER_DAY = 60;
+export const FREIGHT_RAIL_TERMINAL_CAPACITY_TONS_PER_DAY = 240;
+export const FREIGHT_RAIL_TERMINAL_TRANSFER_TIME_HOURS = 0.75;
+export const FREIGHT_RAIL_TERMINAL_CONSTRUCTION_COST = 5_000;
+export const FREIGHT_RAIL_TERMINAL_MAINTENANCE_PER_DAY = 35;
 
 const ROAD_CONSTRUCTION_COST_PER_UNIT: Readonly<Record<RoadClass, number>> =
   Object.freeze({
@@ -242,6 +258,163 @@ function breakdown(
   });
 }
 
+function railBreakdown(
+  transactionKind: InfrastructureCostBreakdown["transactionKind"],
+  infrastructureClass: "track" | "freight-terminal",
+  length: number,
+  baseCost: number,
+  landAcquisitionCost: number,
+  crossingWorkCost: number,
+  salvageCredit: number,
+  affectedLandIds: readonly string[],
+  crossingCount: number,
+): InfrastructureCostBreakdown {
+  const roundedBaseCost = money(baseCost);
+  const roundedLandCost = money(landAcquisitionCost);
+  const roundedCrossingCost = money(crossingWorkCost);
+  const roundedSalvage = money(salvageCredit);
+  const totalCost = money(
+    roundedBaseCost + roundedLandCost + roundedCrossingCost,
+  );
+  return Object.freeze({
+    infrastructureKind: "rail",
+    transactionKind,
+    infrastructureClass,
+    length: Math.round(length * 1_000) / 1_000,
+    baseCost: roundedBaseCost,
+    landAcquisitionCost: roundedLandCost,
+    crossingWorkCost: roundedCrossingCost,
+    totalCost,
+    salvageCredit: roundedSalvage,
+    netCost: money(totalCost - roundedSalvage),
+    affectedLandIds: Object.freeze([...affectedLandIds]),
+    riverCrossingCount: crossingCount,
+  });
+}
+
+export function railTrackConstructionBreakdown(
+  geography: ScenarioGeography,
+  track: Pick<RailTrackSegment, "start" | "end">,
+): InfrastructureCostBreakdown {
+  const length = roadLength(track);
+  const farmlandLength = lengthInsidePolygon(
+    track.start,
+    track.end,
+    geography.fertileLand.boundary,
+  );
+  const crossingCount = riverCrossingCount(
+    track.start,
+    track.end,
+    geography.river.path,
+  );
+  return railBreakdown(
+    "construction",
+    "track",
+    length,
+    length * RAIL_TRACK_CONSTRUCTION_COST_PER_UNIT,
+    farmlandLength * RAIL_TRACK_LAND_COST_PER_UNIT,
+    crossingCount * RAIL_TRACK_RIVER_CROSSING_COST,
+    0,
+    farmlandLength > GEOMETRY_EPSILON ? [geography.fertileLand.id] : [],
+    crossingCount,
+  );
+}
+
+export function quoteRailTrackConstruction(
+  balance: number,
+  geography: ScenarioGeography,
+  track: Pick<RailTrackSegment, "start" | "end">,
+): InfrastructureTransactionQuote {
+  return quote(balance, railTrackConstructionBreakdown(geography, track));
+}
+
+export function quoteRailTrackRemoval(
+  balance: number,
+  track: Pick<RailTrackSegment, "start" | "end">,
+): InfrastructureTransactionQuote {
+  const length = roadLength(track);
+  return quote(
+    balance,
+    railBreakdown(
+      "removal",
+      "track",
+      length,
+      0,
+      0,
+      0,
+      length * RAIL_TRACK_CONSTRUCTION_COST_PER_UNIT * RAIL_SALVAGE_RATE,
+      [],
+      0,
+    ),
+  );
+}
+
+export function quoteFreightRailTerminalConstruction(
+  balance: number,
+): InfrastructureTransactionQuote {
+  return quote(
+    balance,
+    railBreakdown(
+      "construction",
+      "freight-terminal",
+      0,
+      FREIGHT_RAIL_TERMINAL_CONSTRUCTION_COST,
+      0,
+      0,
+      0,
+      [],
+      0,
+    ),
+  );
+}
+
+export function quoteFreightRailTerminalRemoval(
+  balance: number,
+): InfrastructureTransactionQuote {
+  return quote(
+    balance,
+    railBreakdown(
+      "removal",
+      "freight-terminal",
+      0,
+      0,
+      0,
+      0,
+      FREIGHT_RAIL_TERMINAL_CONSTRUCTION_COST * RAIL_SALVAGE_RATE,
+      [],
+      0,
+    ),
+  );
+}
+
+export function railTrackSnapshotEconomics(
+  geography: ScenarioGeography,
+  track: Pick<RailTrackSegment, "start" | "end">,
+): Pick<
+  RailTrackSnapshot,
+  "constructionCost" | "maintenanceCostPerDay"
+> {
+  const breakdown = railTrackConstructionBreakdown(geography, track);
+  return Object.freeze({
+    constructionCost: breakdown.totalCost,
+    maintenanceCostPerDay: money(
+      roadLength(track) * RAIL_TRACK_MAINTENANCE_PER_UNIT_PER_DAY +
+        breakdown.riverCrossingCount *
+          RAIL_TRACK_RIVER_MAINTENANCE_PER_DAY,
+    ),
+  });
+}
+
+export function freightRailTerminalSnapshotEconomics(): Pick<
+  FreightRailTerminalSnapshot,
+  "constructionCost" | "maintenanceCostPerDay"
+> {
+  return Object.freeze({
+    constructionCost: FREIGHT_RAIL_TERMINAL_CONSTRUCTION_COST,
+    maintenanceCostPerDay: FREIGHT_RAIL_TERMINAL_MAINTENANCE_PER_DAY,
+  });
+}
+
 export function quoteRoadConstruction(
   balance: number,
   geography: ScenarioGeography,
@@ -353,6 +526,18 @@ export function calculateDailyRoadMaintenance(
         crossings * ROAD_CROSSING_MAINTENANCE[segment.roadClass]
       );
     }, 0),
+  );
+}
+
+export function calculateDailyRailMaintenance(network: RailNetwork): number {
+  return money(
+    network.tracks.reduce(
+      (total, track) => total + track.maintenanceCostPerDay,
+      network.terminals.reduce(
+        (total, terminal) => total + terminal.maintenanceCostPerDay,
+        0,
+      ),
+    ),
   );
 }
 
@@ -473,6 +658,7 @@ export function advanceFinanceDay(
   finishedStoneDeliveredTons: number,
   geography: ScenarioGeography,
   network: RoadNetwork,
+  railNetwork?: RailNetwork,
 ): FinanceStateSnapshot {
   if (!Number.isSafeInteger(tick) || tick <= state.processedTick) {
     throw new RangeError("daily finance tick must advance deterministically");
@@ -482,7 +668,10 @@ export function advanceFinanceDay(
     Math.max(0, finishedStoneDeliveredTons),
   );
   const revenue = money(delivered * FINISHED_STONE_REVENUE_PER_TON);
-  const maintenance = calculateDailyRoadMaintenance(geography, network);
+  const maintenance = money(
+    calculateDailyRoadMaintenance(geography, network) +
+      (railNetwork ? calculateDailyRailMaintenance(railNetwork) : 0),
+  );
   const penalty =
     state.emergencyBondCount * EMERGENCY_BOND_DAILY_PENALTY;
   return Object.freeze({
@@ -530,12 +719,16 @@ export function createFinanceSnapshot(
   state: FinanceStateSnapshot,
   geography: ScenarioGeography,
   network: RoadNetwork,
+  railNetwork?: RailNetwork,
 ): FinanceSnapshot {
   return Object.freeze({
     balance: state.balance,
     totalCapitalSpending: state.totalCapitalSpending,
     totalOperatingRevenue: state.totalOperatingRevenue,
-    dailyMaintenance: calculateDailyRoadMaintenance(geography, network),
+    dailyMaintenance: money(
+      calculateDailyRoadMaintenance(geography, network) +
+        (railNetwork ? calculateDailyRailMaintenance(railNetwork) : 0),
+    ),
     totalMaintenancePaid: state.totalMaintenancePaid,
     totalSalvageRevenue: state.totalSalvageRevenue,
     lastDailyRevenue: state.lastDailyRevenue,

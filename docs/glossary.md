@@ -15,6 +15,12 @@ Construction, expansion, change of use, decline, or redevelopment performed by t
 **Generalized cost**  
 A common route-choice value combining time, monetary cost, delay, reliability, transfers, and policy penalties.
 
+**Freight terminal**
+
+A mode-specific transfer facility connecting a compatible industry or market
+site to the rail graph. In the vertical slice, terminals are player-placed but
+anchored to the quarry, stoneworks, or external market.
+
 **Infrastructure**  
 Player-shaped networks and facilities that provide access or capacity, including roads, railways, crossings, terminals, and later utilities.
 

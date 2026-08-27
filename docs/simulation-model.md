@@ -265,6 +265,35 @@ A long authored road that crosses the constraint is upgraded in full because the
 graph does not store the geographic crossing as an independently editable
 segment.
 
+### M3 rail corridors and freight terminals
+
+Rail is an authoritative graph independent of the road graph. Player-authored
+straight track segments are rebuilt into nodes and links at endpoints, at-grade
+track intersections, and placed terminal sites. Collinear overlapping track is
+rejected, matching the prototype's deliberately simple geometry boundary.
+
+Freight terminals may be placed only at Granite Ridge Quarry, Millford
+Stoneworks, and the Eastern External Market. Each is anchored to its site rather
+than freely positioned. A deterministic route query accepts two placed terminal
+IDs, requires both sites to lie on the connected track graph, and minimizes
+free-flow track time with stable ID tie-breaking. The returned route includes
+the ordered node and link IDs, track distance and travel time, both terminal
+transfer times, and the minimum track/terminal capacity. Removing required track
+or either terminal makes the query return no route.
+
+Prototype rail profiles are explicit vertical-slice balancing values:
+
+| Infrastructure | Capacity | Free-flow rate | Base construction | Maintenance / day |
+| --- | ---: | ---: | ---: | ---: |
+| Track | 320 t/day | 100 map units/hour | $28/map unit | $0.14/map unit |
+| Freight terminal | 240 t/day | 0.75 hours transfer | $5,000 | $35 |
+
+Track inside Eastbank Fields adds $12 per intersected map unit. Each river
+intersection adds $6,000 construction and $60 daily maintenance. Removing track
+or a terminal credits 20% of base construction; land and river work are not
+salvaged. Modal demand assignment, trains, timetables, signals, passenger rail,
+and detailed junction or grade-separated geometry remain outside this step.
+
 ### M3 infrastructure costs and treasury
 
 The scenario starts with a $60,000 treasury. Every road quote is produced by the
@@ -293,8 +322,8 @@ identifier, traffic, accessibility, development, or finance state changes on
 rejection. Removal credits salvage in the same transaction.
 
 At each daily production boundary, finished-stone deliveries earn $25 per ton,
-bounded to 100 tons and therefore $2,500 per day. Current road maintenance and
-river-crossing maintenance are then charged. Maintenance may take the treasury
+bounded to 100 tons and therefore $2,500 per day. Current road, track, terminal,
+and river-crossing maintenance are then charged. Maintenance may take the treasury
 below zero, preserving a recoverable state, but further unaffordable capital
 commands remain blocked.
 

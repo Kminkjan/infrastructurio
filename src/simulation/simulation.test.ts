@@ -76,6 +76,101 @@ describe("headless simulation", () => {
     ).toBeUndefined();
   });
 
+  it("places freight terminals and builds, routes, and removes authoritative rail", () => {
+    const simulation = createSimulation("rail-edit-test");
+    const geography = simulation.getSnapshot().geography;
+    simulation.dispatch({ type: "place-freight-rail-terminal", site: "quarry" });
+    simulation.dispatch({ type: "place-freight-rail-terminal", site: "stoneworks" });
+    simulation.dispatch({ type: "place-freight-rail-terminal", site: "market" });
+    const quote = simulation.quoteRailTrackConstruction(
+      geography.quarry.position,
+      geography.stoneworks.position,
+    );
+    const connected = simulation.dispatch({
+      type: "build-rail-track",
+      start: geography.quarry.position,
+      end: geography.stoneworks.position,
+    });
+
+    expect(connected.roadNetwork).toEqual({ segments: [], nodes: [], links: [] });
+    expect(connected.railNetwork).toMatchObject({
+      tracks: [{
+        id: "rail-track-1",
+        capacityTonsPerDay: 320,
+        constructionCost: quote.breakdown.totalCost,
+      }],
+      terminals: [
+        { id: "rail-terminal-quarry", capacityTonsPerDay: 240 },
+        { id: "rail-terminal-stoneworks", capacityTonsPerDay: 240 },
+        { id: "rail-terminal-market", capacityTonsPerDay: 240 },
+      ],
+    });
+    expect(connected.finances.lastInfrastructureTransaction).toEqual({
+      ...quote,
+      tick: 0,
+    });
+    expect(
+      simulation.findRailRoute(
+        "rail-terminal-quarry",
+        "rail-terminal-stoneworks",
+      ),
+    ).toMatchObject({ capacityTonsPerDay: 240 });
+
+    const disconnected = simulation.dispatch({
+      type: "remove-rail-track",
+      railTrackId: "rail-track-1",
+    });
+    expect(disconnected.railNetwork.tracks).toHaveLength(0);
+    expect(
+      simulation.findRailRoute(
+        "rail-terminal-quarry",
+        "rail-terminal-stoneworks",
+      ),
+    ).toBeUndefined();
+  });
+
+  it("rejects invalid and unaffordable rail edits without partial mutation", () => {
+    const simulation = createSimulation("rail-invalid-input");
+    const initial = simulation.getState();
+    expect(() => simulation.dispatch({
+      type: "build-rail-track",
+      start: { x: 10, y: 10 },
+      end: { x: 10, y: 10 },
+    })).toThrow("distinct endpoints");
+    expect(simulation.getState()).toEqual(initial);
+    expect(() => simulation.dispatch({
+      type: "place-freight-rail-terminal",
+      site: "passenger-station",
+    } as never)).toThrow("unsupported freight rail terminal site");
+    expect(simulation.getState()).toEqual(initial);
+
+    simulation.dispatch({
+      type: "build-road",
+      start: { x: 0, y: 0 },
+      end: { x: 960, y: 0 },
+      roadClass: "highway",
+    });
+    simulation.dispatch({ type: "place-freight-rail-terminal", site: "market" });
+    const afterTerminal = simulation.getState();
+    expect(() => simulation.dispatch({
+      type: "place-freight-rail-terminal",
+      site: "market",
+    })).toThrow("already exists");
+    expect(simulation.getState()).toEqual(afterTerminal);
+
+    const unaffordable = simulation.quoteRailTrackConstruction(
+      { x: 0, y: 0 },
+      { x: 960, y: 620 },
+    );
+    expect(unaffordable.affordable).toBe(false);
+    expect(() => simulation.dispatch({
+      type: "build-rail-track",
+      start: { x: 0, y: 0 },
+      end: { x: 960, y: 620 },
+    })).toThrow("treasury has");
+    expect(simulation.getState()).toEqual(afterTerminal);
+  });
+
   it("commits the exact simulation-owned quote and rejects unaffordable roads atomically", () => {
     const simulation = createSimulation("finance-transactions");
     const quote = simulation.quoteRoadConstruction(

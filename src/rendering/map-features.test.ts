@@ -5,6 +5,8 @@ import { generateMillfordValley } from "../scenarios";
 import {
   getSelectableMapFeatures,
   getSelectableRoadFeatures,
+  getSelectableRailFeatures,
+  getRailSnapAnchors,
   getRoadSnapAnchors,
   toMapSelection,
 } from "./map-features";
@@ -84,6 +86,66 @@ describe("selectable map features", () => {
       geography.externalMarketConnection.position,
       ...geography.settlementSeeds.map(({ position }) => position),
       fertileCenter,
+    ]);
+  });
+
+  it("maps rail track and terminals separately and exposes rail snap anchors", () => {
+    const geography = generateMillfordValley("rail-selection-test");
+    const railNetwork = {
+      tracks: [{
+        id: "rail-track-1",
+        start: { x: 10, y: 20 },
+        end: { x: 40, y: 60 },
+        length: 50,
+        capacityTonsPerDay: 320,
+        freeFlowTravelTimeHours: 0.5,
+        constructionCost: 1_400,
+        maintenanceCostPerDay: 7,
+      }],
+      terminals: [{
+        id: "rail-terminal-quarry",
+        site: "quarry" as const,
+        siteId: geography.quarry.id,
+        name: "Quarry freight terminal",
+        position: geography.quarry.position,
+        capacityTonsPerDay: 240,
+        freeFlowTransferTimeHours: 0.75,
+        constructionCost: 5_000,
+        maintenanceCostPerDay: 35,
+      }],
+      nodes: [{ id: "rail-node-1", position: { x: 10, y: 20 } }],
+      links: [],
+    };
+
+    expect(getSelectableRailFeatures(railNetwork)).toEqual([
+      {
+        id: "rail-track-1",
+        name: "Rail track",
+        kind: "infrastructure",
+        description: "50 map units · 320 t/day rail corridor",
+        geometry: {
+          type: "line",
+          start: { x: 10, y: 20 },
+          end: { x: 40, y: 60 },
+        },
+      },
+      {
+        id: "rail-terminal-quarry",
+        name: "Quarry freight terminal",
+        kind: "infrastructure",
+        description: "240 t/day freight rail terminal",
+        geometry: {
+          type: "point",
+          position: geography.quarry.position,
+          radius: 25,
+        },
+      },
+    ]);
+    expect(getRailSnapAnchors(geography, railNetwork)).toEqual([
+      geography.quarry.position,
+      geography.stoneworks.position,
+      geography.externalMarketConnection.position,
+      { x: 10, y: 20 },
     ]);
   });
 });

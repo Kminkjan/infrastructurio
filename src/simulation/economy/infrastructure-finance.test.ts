@@ -5,6 +5,10 @@ import { generateMillfordValley } from "../../scenarios";
 import type { RoadSegment } from "../../shared";
 import { createRoadNetwork } from "../transport/road-network";
 import {
+  createFreightRailTerminalState,
+  createRailNetwork,
+} from "../transport/rail-network";
+import {
   EMERGENCY_BOND_DAILY_PENALTY,
   EMERGENCY_BOND_ELIGIBILITY_BALANCE,
   EMERGENCY_BOND_PROCEEDS,
@@ -12,12 +16,16 @@ import {
   ROAD_SALVAGE_RATE,
   STARTING_TREASURY_BALANCE,
   advanceFinanceDay,
+  calculateDailyRailMaintenance,
   calculateDailyRoadMaintenance,
   createFinanceState,
   issueEmergencyBond,
   quoteRoadConstruction,
   quoteRoadRemoval,
   quoteRoadUpgrade,
+  quoteFreightRailTerminalConstruction,
+  quoteRailTrackConstruction,
+  quoteRailTrackRemoval,
 } from "./infrastructure-finance";
 
 const geography = generateMillfordValley("finance-costs");
@@ -131,6 +139,43 @@ describe("infrastructure finance rules", () => {
     expect(after.balance).toBe(
       STARTING_TREASURY_BALANCE + after.lastDailyRevenue - maintenance,
     );
+  });
+
+  it("uses the shared treasury and land-cost contract for rail infrastructure", () => {
+    const track = {
+      id: "rail-track-1",
+      start: { x: 600, y: 180 },
+      end: { x: 700, y: 180 },
+    };
+    const construction = quoteRailTrackConstruction(
+      STARTING_TREASURY_BALANCE,
+      geography,
+      track,
+    );
+    const terminal = quoteFreightRailTerminalConstruction(
+      construction.balanceAfter,
+    );
+    const removal = quoteRailTrackRemoval(terminal.balanceAfter, track);
+    const network = createRailNetwork(
+      [track],
+      [createFreightRailTerminalState(geography, "quarry")],
+      geography,
+    );
+
+    expect(construction.breakdown).toMatchObject({
+      infrastructureKind: "rail",
+      infrastructureClass: "track",
+      baseCost: 2_800,
+      landAcquisitionCost: 1_200,
+      affectedLandIds: [geography.fertileLand.id],
+    });
+    expect(terminal.breakdown).toMatchObject({
+      infrastructureKind: "rail",
+      infrastructureClass: "freight-terminal",
+      baseCost: 5_000,
+    });
+    expect(removal.breakdown.salvageCredit).toBe(560);
+    expect(calculateDailyRailMaintenance(network)).toBe(49);
   });
 
   it("limits emergency bonds to low balances and compounds their daily penalty", () => {

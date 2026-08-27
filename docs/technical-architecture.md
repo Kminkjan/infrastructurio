@@ -161,6 +161,16 @@ Collinear overlapping segments are rejected
 because lanes, parallel links, bridges, tunnels, and junction configuration are
 outside the issue's simple-road scope.
 
+Rail uses a parallel but separate authoritative topology. Typed track and
+terminal commands rebuild a rail-only graph; terminal IDs are compatible only
+with the quarry, stoneworks, and market sites. Deterministic rail route queries
+operate on terminal IDs and never traverse road links. Shared rail snapshots
+carry authored track and terminal identity plus capacity, free-flow time,
+construction cost, and maintenance. PixiJS derives track, terminal, hit-target,
+selection, and construction-preview graphics from that snapshot and owns no rail
+connectivity. Freight assignment to road or rail remains deferred to the
+operator-choice layer.
+
 The M3 stone supply chain is a pure simulation-core reducer over bounded input
 and output inventories. It advances once per simulated day in inbound,
 processing, then outbound order. Its serializable snapshot contains both
@@ -193,21 +203,25 @@ phase crosses into the simulation protocol.
 
 ## Save format
 
-Saves use an explicit versioned JSON document. Format version 5 contains the
+Saves use an explicit versioned JSON document. Format version 6 contains the
 Millford Valley scenario ID and seed plus the authoritative mutable state: the
-simulation tick, authored roads, development history, bounded stoneworks
+simulation tick, authored roads and rail track, placed compatible freight
+terminals, future road/track identifiers, development history, bounded stoneworks
 inventories and daily update cadence, both current aggregate flow rates, and the
 eight-hour route-assignment state for both legs. It also stores the treasury,
 cumulative capital, revenue, maintenance and salvage totals, emergency-bond
 state and penalties, and the last committed infrastructure transaction. Derived
 geography, road nodes, link costs, accessibility, current maintenance,
-explanations, and presentation state are rebuilt.
+explanations, and presentation state are rebuilt. Rail graph nodes, links,
+operational profiles, and infrastructure economics are also derived and rebuilt
+from authored rail state.
 Saved routes are validated against rebuilt topology and reapplied so congestion
 and future supply-chain steps replay identically.
 
-Format versions 1 through 4 remain loadable. Roads without a class migrate to the
-current default arterial profile, and a traffic assignment is derived at the
-saved tick. Version 3 represented the superseded direct quarry-export flow and
+Format versions 1 through 5 remain loadable. Version 5 predates rail and migrates
+to an empty rail network with the first track identifier available. Roads
+without a class migrate to the current default arterial profile, and a traffic
+assignment is derived at the saved tick. Version 3 represented the superseded direct quarry-export flow and
 therefore cannot contain stoneworks history; migration starts the new stoneworks
 dormant at the saved tick rather than inventing past inventory. Because version 1
 contains no command history or development state,
