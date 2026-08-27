@@ -19,6 +19,14 @@ export const REQUIRED_SUCCESSFUL_DAYS = 3;
 
 const REQUIRED_INSPECTION_COUNT = 3;
 
+export interface StrategicInterventionAccessibilityBaseline {
+  readonly tick: number;
+  readonly locations: readonly {
+    readonly locationId: string;
+    readonly accessibility: number;
+  }[];
+}
+
 export interface ScenarioProgressStateSnapshot {
   readonly processedTick: number;
   readonly inspectedEntityIds: readonly string[];
@@ -27,6 +35,7 @@ export interface ScenarioProgressStateSnapshot {
   readonly interventionCompleted: boolean;
   readonly successfulDays: number;
   readonly lastEvaluatedDayTick: number;
+  readonly latestStrategicIntervention: StrategicInterventionAccessibilityBaseline | null;
   readonly ending: ScenarioEndingSummary | null;
 }
 
@@ -241,6 +250,7 @@ export function createScenarioProgressState(
     successfulDays: 0,
     lastEvaluatedDayTick:
       Math.floor(processedTick / TICKS_PER_DAY) * TICKS_PER_DAY,
+    latestStrategicIntervention: null,
     ending: null,
   });
 }
@@ -274,10 +284,59 @@ export function validateScenarioProgressState(
   if (input.ending !== null && input.successfulDays !== REQUIRED_SUCCESSFUL_DAYS) {
     throw new RangeError("scenario ending requires the complete success hold");
   }
+  const intervention = input.latestStrategicIntervention;
+  const settlementIds = new Set(geography.settlementSeeds.map(({ id }) => id));
+  if (
+    intervention !== null &&
+    (!Number.isSafeInteger(intervention.tick) ||
+      intervention.tick < 0 ||
+      intervention.tick > simulationTick ||
+      intervention.locations.length !== settlementIds.size ||
+      new Set(intervention.locations.map(({ locationId }) => locationId)).size !==
+        intervention.locations.length ||
+      intervention.locations.some(
+        ({ locationId, accessibility }) =>
+          !settlementIds.has(locationId) ||
+          !Number.isFinite(accessibility) ||
+          accessibility < 0,
+      ))
+  ) {
+    throw new RangeError("strategic intervention accessibility baseline is invalid");
+  }
   return Object.freeze({
     ...input,
     inspectedEntityIds: Object.freeze([...input.inspectedEntityIds]),
+    latestStrategicIntervention:
+      intervention === null
+        ? null
+        : Object.freeze({
+            tick: intervention.tick,
+            locations: Object.freeze(
+              intervention.locations.map((location) => Object.freeze({ ...location })),
+            ),
+          }),
     ending: input.ending === null ? null : Object.freeze(input.ending),
+  });
+}
+
+export function recordStrategicIntervention(
+  state: ScenarioProgressStateSnapshot,
+  accessibility: AccessibilitySnapshot,
+): ScenarioProgressStateSnapshot {
+  if (!state.bridgeOverloadObserved) return state;
+  return Object.freeze({
+    ...state,
+    latestStrategicIntervention: Object.freeze({
+      tick: state.processedTick,
+      locations: Object.freeze(
+        accessibility.locations.map((location) =>
+          Object.freeze({
+            locationId: location.locationId,
+            accessibility: accessibilityScore(accessibility, location.locationId),
+          }),
+        ),
+      ),
+    }),
   });
 }
 

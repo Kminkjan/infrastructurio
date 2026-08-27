@@ -76,6 +76,18 @@ export type {
 } from "./rail";
 export type { SimulationCommand, SimulationSnapshot } from "./simulation";
 export type {
+  AuthoritativeValueExplanation,
+  ConsequenceForecastEntry,
+  ConsequenceForecastKind,
+  DevelopmentConsequenceExplanation,
+  ExplanationUnit,
+  FinanceEffectsExplanation,
+  FreightLegExplanation,
+  FreightServiceExplanation,
+  ProductionExplanation,
+  SimulationExplanationsSnapshot,
+} from "./explanations";
+export type {
   ScenarioAccessibilityChange,
   ScenarioEndingSummary,
   ScenarioInterventionChoice,

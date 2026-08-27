@@ -14,6 +14,7 @@ import {
   readSaveFile,
   restoreSaveGame,
   serializeSaveGame,
+  validateSaveGame,
 } from ".";
 
 function createConnectedSimulation() {
@@ -240,6 +241,37 @@ describe("save games", () => {
     expect(
       restoreSaveGame(save).dispatch({ type: "reset" }),
     ).toEqual(createSimulation("save-scenario-progress").getSnapshot());
+  });
+
+  it("migrates version 8 objective history without inventing an intervention baseline", () => {
+    const original = createSimulation("version-8-progress");
+    const geography = original.getSnapshot().geography;
+    original.dispatch({
+      type: "build-road",
+      start: geography.quarry.position,
+      end: geography.stoneworks.position,
+    });
+    const current = createSaveGame(original);
+    const { latestStrategicIntervention: _baseline, ...legacyProgress } =
+      current.simulation.scenarioProgress;
+    const legacy = validateSaveGame({
+      ...current,
+      formatVersion: 8,
+      simulation: {
+        ...current.simulation,
+        scenarioProgress: legacyProgress,
+      },
+    });
+    if (legacy.formatVersion !== 8) {
+      throw new Error("expected a version 8 save");
+    }
+    const restored = restoreSaveGame(legacy);
+
+    expect("latestStrategicIntervention" in legacy.simulation.scenarioProgress).toBe(false);
+    expect(restored.getState().scenarioProgress).toMatchObject({
+      processedTick: original.getState().scenarioProgress?.processedTick,
+      latestStrategicIntervention: null,
+    });
   });
 
   it("preserves completed and pending development for deterministic continuation", () => {
@@ -570,13 +602,13 @@ describe("save games", () => {
     expect(() =>
       deserializeSaveGame(
         JSON.stringify({
-          formatVersion: 9,
+          formatVersion: SAVE_FORMAT_VERSION + 1,
           scenarioId: "millford-valley",
           scenarioSeed: "future",
           simulation: {},
         }),
       ),
-    ).toThrow("unsupported save format version: 9");
+    ).toThrow(`unsupported save format version: ${SAVE_FORMAT_VERSION + 1}`);
 
     const save = createSaveGame(createConnectedSimulation());
     const invalid = {

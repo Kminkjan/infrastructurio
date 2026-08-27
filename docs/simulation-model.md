@@ -406,6 +406,32 @@ Previous emergency-bond use remains visible and penalized but does not by itself
 prevent success. Reset restores the deterministic authored network, finances,
 economy, development, and objective history.
 
+### M3 cross-system explanations and bounded consequences
+
+The simulation publishes one derived explanation snapshot assembled from the
+same freight assignment, supply-chain, finance, accessibility, development, and
+objective snapshots used by their reducers. Each freight leg names the private
+operator, commodity, endpoints, mode, ordered route links, limiting factor, and
+the authoritative quantities behind that limit. Road and rail candidates retain
+their generalized-cost components, capacity, availability, comparison margin,
+next scheduled reassignment, and immediate edit triggers.
+
+Finance effects remain separated into the latest base construction, land,
+crossing, and salvage values; current road/crossing and rail maintenance; daily
+and cumulative operating revenue; and emergency proceeds and penalties. Once
+bridge pressure has been observed, the most recent infrastructure transaction is
+the latest strategic intervention. The simulation retains both settlements'
+accessibility immediately before that edit and derives current gains or losses
+from those values. Earlier saves without that history migrate with no invented
+baseline.
+
+The no-intervention forecast is bounded to the next scheduled freight
+assignment, daily economy/finance boundary, and weekly development evaluation.
+It advances an isolated immutable copy of authoritative state through the normal
+reducers, so forecast values match the values produced by actually advancing
+time. It does not predict player edits, random events, or later unscheduled
+outcomes.
+
 ## Private operators
 
 Vehicles belong to simulated operators. Operators respond to demand, infrastructure compatibility, operating cost, capacity, and policy.

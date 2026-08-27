@@ -1,6 +1,9 @@
 import type { Point, SimulationSnapshot } from "../shared";
 
-export type BottleneckOverlayRole = "affected-flow" | "overloaded-link";
+export type BottleneckOverlayRole =
+  | "inbound-freight"
+  | "outbound-freight"
+  | "overloaded-link";
 
 export interface BottleneckOverlayFeature {
   readonly id: string;
@@ -29,19 +32,34 @@ function lineForLink(
     : undefined;
 }
 
+function lineForRailLink(
+  snapshot: SimulationSnapshot,
+  linkId: string,
+): { readonly start: Point; readonly end: Point } | undefined {
+  const link = snapshot.railNetwork.links.find(({ id }) => id === linkId);
+  if (!link) return undefined;
+  const start = snapshot.railNetwork.nodes.find(({ id }) => id === link.startNodeId);
+  const end = snapshot.railNetwork.nodes.find(({ id }) => id === link.endNodeId);
+  return start && end ? { start: start.position, end: end.position } : undefined;
+}
+
 export function getBottleneckOverlayFeatures(
   snapshot: SimulationSnapshot,
 ): readonly BottleneckOverlayFeature[] {
   const features: BottleneckOverlayFeature[] = [];
-  for (const linkId of snapshot.bottlenecks.affectedRouteLinkIds) {
-    const line = lineForLink(snapshot, linkId);
-    if (line) {
-      features.push({
-        id: `affected-flow:${linkId}`,
-        role: "affected-flow",
-        ...line,
-        label: "Stone supply freight affected by the current route choice",
-      });
+  for (const [index, freight] of snapshot.explanations.freightLegs.entries()) {
+    for (const linkId of freight.routeLinkIds) {
+      const line = freight.chosenMode === "road"
+        ? lineForLink(snapshot, linkId)
+        : lineForRailLink(snapshot, linkId);
+      if (line) {
+        features.push({
+          id: `${freight.legId}:${linkId}`,
+          role: index === 0 ? "inbound-freight" : "outbound-freight",
+          ...line,
+          label: `${freight.actorName} moves ${freight.commodityName} from ${freight.origin.name} to ${freight.destination.name} by ${freight.chosenMode}`,
+        });
+      }
     }
   }
   for (const bottleneck of snapshot.bottlenecks.roadBottlenecks) {

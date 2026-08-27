@@ -20,6 +20,8 @@ import type {
   DevelopmentDecisionExplanation,
   DevelopmentDecisionOutcome,
   DevelopmentLocationSnapshot,
+  DevelopmentConsequenceExplanation,
+  FreightLegExplanation,
   InfrastructureTransactionQuote,
   FreightRailTerminalSnapshot,
   Point,
@@ -32,6 +34,8 @@ import type {
   SimulationSnapshot,
   SimulationTimeSnapshot,
   StoneworksSnapshot,
+  ProductionExplanation,
+  SimulationExplanationsSnapshot,
 } from "../shared";
 import "./app.css";
 
@@ -58,6 +62,71 @@ function formatTickDistance(ticks: number): string {
   const hours = ticks % 24;
   if (days === 0) return `${hours}h`;
   return hours === 0 ? `${days}d` : `${days}d ${hours}h`;
+}
+
+function formatExplanationValue(
+  value: { readonly value: number; readonly unit: string },
+): string {
+  if (value.unit === "currency") return formatMoney(value.value);
+  if (value.unit === "currency/day") return `${formatMoney(value.value)}/day`;
+  return `${value.value.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${value.unit}`;
+}
+
+function ConsequenceForecast({
+  explanations,
+}: {
+  readonly explanations: SimulationExplanationsSnapshot;
+}) {
+  return (
+    <section className="consequence-forecast" aria-label="No-intervention consequence forecast">
+      <p className="eyebrow">If you advance time now</p>
+      <ol>
+        {explanations.consequenceForecast.map((entry) => (
+          <li key={entry.kind}>
+            <strong>In {formatTickDistance(entry.inTicks)}</strong>
+            <span>{entry.summary}</span>
+            <small>
+              {entry.values.map((item) => `${item.label}: ${formatExplanationValue(item)}`).join(" · ")}
+            </small>
+          </li>
+        ))}
+      </ol>
+      <p className="forecast-boundary">Bounded to the next scheduled assignment, daily economy/finance, and weekly development updates; infrastructure edits are not predicted.</p>
+    </section>
+  );
+}
+
+function MapAnalysisSummary({ snapshot }: { readonly snapshot: SimulationSnapshot }) {
+  const activeFreight = snapshot.explanations.freightLegs.filter(
+    ({ chosenMode }) => chosenMode !== null,
+  );
+  return (
+    <section className="map-analysis" aria-label="Map analysis key">
+      <p className="eyebrow">Map analysis</p>
+      <ul className="analysis-key" aria-label="Map overlay legend">
+        <li><span className="key-line inbound" aria-hidden="true" />Inbound raw granite route</li>
+        <li><span className="key-line outbound" aria-hidden="true" />Outbound finished-stone route</li>
+        <li><span className="key-line overload" aria-hidden="true" />Overloaded road link</li>
+      </ul>
+      <div className="map-analysis-text">
+        {activeFreight.length > 0 ? activeFreight.map((freight) => (
+          <p key={freight.legId}>
+            {freight.actorName} moves {freight.commodityName} from {freight.origin.name} to {freight.destination.name} by {freight.chosenMode} over {freight.routeLinkIds.length} {freight.routeLinkIds.length === 1 ? "link" : "links"}.
+          </p>
+        )) : <p>No freight route is active.</p>}
+        {snapshot.bottlenecks.roadBottlenecks.map((bottleneck) => (
+          <p key={bottleneck.id}>{bottleneck.name} is at {Math.round(bottleneck.capacity.volumeCapacityRatio * 100)}% of practical capacity.</p>
+        ))}
+        {snapshot.explanations.developmentSinceIntervention.map((change) => (
+          <p key={change.locationId}>
+            {change.name}: {change.baselineTick === null
+              ? "awaiting a post-pressure intervention baseline"
+              : `${change.direction} ${change.change >= 0 ? "+" : ""}${change.change.toFixed(2)} accessibility points`}.
+          </p>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 function ObjectiveTracker({
@@ -282,8 +351,10 @@ function transportDescription(
 
 function FreightInspector({
   freight,
+  explanation,
 }: {
   readonly freight: AggregateFreightSnapshot;
+  readonly explanation: FreightLegExplanation;
 }) {
   const routeDescription = freight.route
     ? `${freight.route.mode === "road" ? "Road" : "Rail"} · ${(freight.routeCost ?? 0).toFixed(1)} generalized hours · ${
@@ -298,6 +369,9 @@ function FreightInspector({
           ? "Inbound raw granite"
           : "Outbound finished stone"}
       </h3>
+      <p className="movement-summary">
+        <strong>{explanation.actorName}</strong> moves {explanation.commodityName} from {explanation.origin.name} to {explanation.destination.name} by {explanation.chosenMode ?? "no viable mode"}.
+      </p>
       <dl className="freight-details">
         <div>
           <dt>Available</dt>
@@ -327,29 +401,43 @@ function FreightInspector({
       <p className="limiting-factor">
         <strong>Limiting factor:</strong> {freight.limitingReason}
       </p>
+      <dl className="authoritative-values" aria-label="Authoritative limiting values">
+        {explanation.limitingValues.map((item) => (
+          <div key={item.label}><dt>{item.label}</dt><dd>{formatExplanationValue(item)}</dd></div>
+        ))}
+      </dl>
       <p className="limiting-factor">
         <strong>Private operator choice:</strong> {freight.serviceChoiceReason}
       </p>
       <dl className="freight-details" aria-label="Freight service comparison">
-        {freight.serviceCandidates.map((candidate) => (
+        {explanation.services.map((candidate) => (
           <div key={candidate.mode}>
             <dt>{candidate.mode === "road" ? "Road service" : "Rail service"}</dt>
             <dd>
-              {candidate.viable
+              {candidate.status !== "unavailable"
                 ? `${candidate.generalizedCostHours!.toFixed(1)} generalized hours; ${candidate.capacityTonsPerDay.toLocaleString()} t/day capacity; ${candidate.congestionDelayHours.toFixed(1)} hours congestion; ${candidate.terminalHandlingTimeHours.toFixed(1)} hours terminal handling; ${candidate.accessEgressTimeHours.toFixed(1)} hours access/egress; ${candidate.priceAdjustmentHours.toFixed(1)} hours price adjustment. ${candidate.reason}`
                 : candidate.reason}
             </dd>
           </div>
         ))}
       </dl>
+      <p className="choice-change"><strong>Why this can change:</strong> {explanation.choiceCanChangeBecause}</p>
+      {explanation.routeLinkIds.length > 0 ? (
+        <details className="route-links">
+          <summary>Authoritative route links</summary>
+          <code>{explanation.routeLinkIds.join(" → ")}</code>
+        </details>
+      ) : null}
     </>
   );
 }
 
 function StoneworksInspector({
   stoneworks,
+  explanation,
 }: {
   readonly stoneworks: StoneworksSnapshot;
+  readonly explanation: ProductionExplanation;
 }) {
   return (
     <>
@@ -384,6 +472,11 @@ function StoneworksInspector({
       <p className="limiting-factor">
         <strong>Industry limit:</strong> {stoneworks.limitingReason}
       </p>
+      <dl className="authoritative-values" aria-label="Authoritative production values">
+        {explanation.limitingValues.map((item) => (
+          <div key={item.label}><dt>{item.label}</dt><dd>{formatExplanationValue(item)}</dd></div>
+        ))}
+      </dl>
     </>
   );
 }
@@ -507,8 +600,10 @@ function BottleneckInspector({
 
 function DevelopmentInspector({
   development,
+  consequence,
 }: {
   readonly development: DevelopmentLocationSnapshot;
+  readonly consequence: DevelopmentConsequenceExplanation;
 }) {
   const pending = development.pendingConstruction;
   const status =
@@ -550,6 +645,12 @@ function DevelopmentInspector({
           {pending.completesTick / 24}.
         </p>
       ) : null}
+      <p className={`accessibility-change ${consequence.direction}`}>
+        <strong>Since latest strategic intervention:</strong>{" "}
+        {consequence.baselineTick === null
+          ? "No post-pressure intervention is recorded yet; current accessibility is the baseline."
+          : `${consequence.direction} ${consequence.change >= 0 ? "+" : ""}${consequence.change.toFixed(2)} access points (${consequence.baselineAccessibility.toFixed(2)} → ${consequence.currentAccessibility.toFixed(2)}).`}
+      </p>
       <section className="decision-explanation" aria-label="Development decision">
         <h3>Latest location decision</h3>
         <p className={`decision-outcome outcome-${decision.outcome}`}>
@@ -713,6 +814,22 @@ function WorldView({
   return (
     <div className="world">
       <div className="world-surface" ref={hostRef} />
+      <div id="map-analysis-description" className="visually-hidden">
+        {snapshot.explanations.freightLegs.map((freight) =>
+          freight.chosenMode === null
+            ? `${freight.commodityName} has no active route.`
+            : `${freight.actorName} moves ${freight.commodityName} from ${freight.origin.name} to ${freight.destination.name} by ${freight.chosenMode} over ${freight.routeLinkIds.length} links.`,
+        ).join(" ")}{" "}
+        {snapshot.bottlenecks.roadBottlenecks.length === 0
+          ? "No road link is overloaded."
+          : snapshot.bottlenecks.roadBottlenecks.map((bottleneck) =>
+              `${bottleneck.name} is at ${Math.round(bottleneck.capacity.volumeCapacityRatio * 100)} percent of practical capacity.`,
+            ).join(" ")}
+        {" "}
+        {snapshot.explanations.developmentSinceIntervention.map((change) =>
+          `${change.name} has ${change.direction} accessibility since the latest strategic intervention: ${change.change}.`,
+        ).join(" ")}
+      </div>
       <nav className="map-controls" aria-label="Map navigation">
         <button
           type="button"
@@ -1026,6 +1143,10 @@ export function App() {
   const selectedDevelopment = snapshot.development.locations.find(
     ({ locationId }) => locationId === selection?.id,
   );
+  const selectedDevelopmentConsequence =
+    snapshot.explanations.developmentSinceIntervention.find(
+      ({ locationId }) => locationId === selection?.id,
+    );
   const selectedBottleneck = snapshot.bottlenecks.roadBottlenecks.find(
     (bottleneck) =>
       bottleneck.roadSegmentId === selection?.id ||
@@ -1116,6 +1237,8 @@ export function App() {
         ) : (
           <ObjectiveTracker progress={snapshot.scenarioProgress} />
         )}
+        <ConsequenceForecast explanations={snapshot.explanations} />
+        <MapAnalysisSummary snapshot={snapshot} />
         <section className="finance-summary" aria-label="Regional finances">
           <p className="eyebrow">Regional finances</p>
           <dl className="freight-details">
@@ -1136,10 +1259,22 @@ export function App() {
               <dd>{formatMoney(snapshot.finances.dailyMaintenance)}</dd>
             </div>
             <div>
+              <dt>Road + crossing maintenance</dt>
+              <dd>{formatMoney(snapshot.explanations.finance.roadAndCrossingMaintenancePerDay)}/day</dd>
+            </div>
+            <div>
+              <dt>Rail maintenance</dt>
+              <dd>{formatMoney(snapshot.explanations.finance.railMaintenancePerDay)}/day</dd>
+            </div>
+            <div>
               <dt>Daily bond penalty</dt>
               <dd>
                 {formatMoney(snapshot.finances.emergencyFinance.dailyPenalty)}
               </dd>
+            </div>
+            <div>
+              <dt>Emergency proceeds received</dt>
+              <dd>{formatMoney(snapshot.explanations.finance.emergencyProceedsReceived)}</dd>
             </div>
             <div>
               <dt>Emergency penalties paid</dt>
@@ -1150,6 +1285,18 @@ export function App() {
               </dd>
             </div>
           </dl>
+          {snapshot.explanations.finance.latestCapitalTransaction ? (
+            <details className="finance-effects">
+              <summary>Latest capital and land effects</summary>
+              <dl className="freight-details">
+                <div><dt>Base construction</dt><dd>{formatMoney(snapshot.explanations.finance.latestCapitalTransaction.baseConstruction)}</dd></div>
+                <div><dt>Land acquisition</dt><dd>{formatMoney(snapshot.explanations.finance.latestCapitalTransaction.landAcquisition)}</dd></div>
+                <div><dt>Crossing work</dt><dd>{formatMoney(snapshot.explanations.finance.latestCapitalTransaction.crossingWork)}</dd></div>
+                <div><dt>Salvage</dt><dd>+{formatMoney(snapshot.explanations.finance.latestCapitalTransaction.salvageCredit)}</dd></div>
+                <div><dt>Net treasury effect</dt><dd>{formatMoney(snapshot.explanations.finance.latestCapitalTransaction.netTreasuryEffect)}</dd></div>
+              </dl>
+            </details>
+          ) : null}
           {snapshot.finances.emergencyFinance.bondAvailable ? (
             <button className="emergency-bond" type="button" onClick={issueBond}>
               Emergency bond · +
@@ -1293,13 +1440,23 @@ export function App() {
               <p className="selection-kind">{selection.kind}</p>
               <p className="selection-description">{selection.description}</p>
               {selectedStoneworks ? (
-                <StoneworksInspector stoneworks={selectedStoneworks} />
+                <StoneworksInspector
+                  stoneworks={selectedStoneworks}
+                  explanation={snapshot.explanations.production}
+                />
               ) : null}
               {selectedFreightLegs.map((freight) => (
-                <FreightInspector key={freight.id} freight={freight} />
+                <FreightInspector
+                  key={freight.id}
+                  freight={freight}
+                  explanation={snapshot.explanations.freightLegs.find(({ legId }) => legId === freight.id)!}
+                />
               ))}
-              {selectedDevelopment ? (
-                <DevelopmentInspector development={selectedDevelopment} />
+              {selectedDevelopment && selectedDevelopmentConsequence ? (
+                <DevelopmentInspector
+                  development={selectedDevelopment}
+                  consequence={selectedDevelopmentConsequence}
+                />
               ) : null}
               {selectedRailTrack || selectedRailTerminal ? (
                 <RailInfrastructureInspector

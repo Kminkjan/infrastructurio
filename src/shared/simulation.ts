@@ -7,6 +7,7 @@ import type { DevelopmentSnapshot } from "./development";
 import type { Point, ScenarioGeography } from "./geography";
 import type { RoadClass, RoadNetwork } from "./roads";
 import type { RailNetwork, RailTerminalSite } from "./rail";
+import type { SimulationExplanationsSnapshot } from "./explanations";
 import type {
   ScenarioProgressSnapshot,
   SimulationTimeSnapshot,
@@ -61,4 +62,5 @@ export interface SimulationSnapshot {
   readonly accessibility: AccessibilitySnapshot;
   readonly development: DevelopmentSnapshot;
   readonly scenarioProgress: ScenarioProgressSnapshot;
+  readonly explanations: SimulationExplanationsSnapshot;
 }

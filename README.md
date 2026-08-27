@@ -111,7 +111,10 @@ adds a visible $150 daily penalty. Further bonds require the treasury to fall
 below the threshold again, and their penalties stack.
 Use the 8-hour, one-day, and one-week time controls to match traffic-assignment,
 daily economy and maintenance, and weekly development pacing. The cadence panel
-shows exactly when each authoritative update will occur. Success requires both
+shows exactly when each authoritative update will occur. A bounded consequence
+forecast runs the same deterministic reducers on an isolated copy of the current
+state and reports the next assignment, daily economy/finance, and weekly
+development outcomes if time advances without another intervention. Success requires both
 freight legs, completed infrastructure-enabled growth, a relieved bridge or
 shifted freight flow, and a treasury that can cover the next maintenance and
 bond-penalty charge for three consecutive daily boundaries. The ending compares
@@ -119,6 +122,11 @@ the intervention, costs, modal freight split, bridge condition, and settlement
 accessibility changes, and offers a deterministic replay. Reset also remains
 available after a poor plan; emergency-bond penalties disappear only because the
 entire authored starting state is restored.
+After bridge pressure has been observed, settlement inspectors compare current
+Millford and Eastbank accessibility with the values immediately before the most
+recent infrastructure edit. Active inbound and outbound routes use distinct map
+overlays, overloads retain a separate outlined marker, and the visible map key
+and canvas text equivalent describe the same movements and pressure.
 Each freight leg remains at zero until its terminals have a viable route and the
 daily economy has goods available to move. Orange private trucks animate along
 road routes, while teal private trains animate along rail routes. Each vehicle
@@ -126,7 +134,9 @@ represents up to 20 tons of assigned daily flow, so busier viable routes show
 more traffic without creating persistent shipment agents. Operators compare road
 and rail generalized cost, capacity, congestion, terminal handling, and
 co-located access/egress every eight simulated hours and immediately after a
-relevant infrastructure edit. The freight inspector exposes the exact comparison.
+relevant infrastructure edit. The freight inspector exposes the exact comparison,
+route links, limiting values, and the scheduled or immediate changes that can
+make an alternative win.
 Realized stoneworks processing also adds a bounded labor opportunity near
 Millford, feeding the same accessibility and delayed-development model as other
 opportunities.

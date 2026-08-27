@@ -209,6 +209,14 @@ daily success hold, and completion occurred. Its snapshot includes objective
 status, explicit subsystem cadence, success conditions, and the immutable ending
 summary. React does not award progress or infer an intervention from UI actions.
 
+Cross-system explanations are a derived simulation-core view rather than React
+decision logic. They reference the authoritative subsystem snapshots and add
+only identity, comparisons, units, and bounded causal structure. Consequence
+forecasts run unchanged reducers against an isolated state copy with forecast
+generation disabled, preventing recursive prediction and keeping live state
+immutable. PixiJS maps explanation route links to distinct inbound/outbound
+overlays; React presents the structured evidence and a persistent text equivalent.
+
 Representative freight vehicles remain renderer-owned. A pure rendering helper
 validates each assigned route against the matching road or rail graph, resolves its
 ordered node geometry, and deterministically samples positions for the current
@@ -219,7 +227,7 @@ phase crosses into the simulation protocol.
 
 ## Save format
 
-Saves use an explicit versioned JSON document. Format version 8 contains the
+Saves use an explicit versioned JSON document. Format version 9 contains the
 Millford Valley scenario ID and seed plus the authoritative mutable state: the
 simulation tick, authored roads and rail track, placed compatible freight
 terminals, future road/track identifiers, development history, bounded stoneworks
@@ -229,14 +237,17 @@ and service-price adjustments for both legs. It also stores the treasury,
 cumulative capital, revenue, maintenance and salvage totals, emergency-bond
 state and penalties, the last committed infrastructure transaction, and scenario
 inspection/progress history, daily success hold, and any completed ending
-summary. Derived geography, road nodes, link costs, accessibility, current maintenance,
+summary, plus the tick and two pre-edit accessibility totals for the latest
+post-pressure strategic infrastructure transaction. Derived geography, road nodes, link costs, accessibility, current maintenance,
 explanations, and presentation state are rebuilt. Rail graph nodes, links,
 operational profiles, and infrastructure economics are also derived and rebuilt
 from authored rail state.
 Saved routes are validated against rebuilt topology and reapplied so congestion
 and future supply-chain steps replay identically.
 
-Format versions 1 through 7 remain loadable. Version 7 predates authoritative
+Format versions 1 through 8 remain loadable. Version 8 predates the retained
+strategic-intervention accessibility baseline and restores that baseline as
+absent rather than inventing a historical comparison. Version 7 predates authoritative
 scenario objectives and starts fresh progress at its saved tick without inventing
 past inspections, overloads, interventions, or successful hold days. Version 6
 predates multimodal operator state; it retains rail topology but rebuilds private

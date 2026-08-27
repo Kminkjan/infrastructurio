@@ -122,6 +122,7 @@ export async function createWorldRenderer(
     "aria-label",
     "Interactive map of Millford Valley. Drag to pan, scroll to zoom, or choose an infrastructure tool.",
   );
+  canvas.setAttribute("aria-describedby", "map-analysis-description");
   host.append(canvas);
 
   const world = new Container();
@@ -528,8 +529,10 @@ export async function createWorldRenderer(
       const graphic = new Graphics()
         .moveTo(feature.start.x, feature.start.y)
         .lineTo(feature.end.x, feature.end.y);
-      if (feature.role === "affected-flow") {
-        graphic.stroke({ color: 0xf0a04b, width: 20, alpha: 0.34 });
+      if (feature.role === "inbound-freight") {
+        graphic.stroke({ color: 0xf0a04b, width: 14, alpha: 0.32 });
+      } else if (feature.role === "outbound-freight") {
+        graphic.stroke({ color: 0x75dedb, width: 8, alpha: 0.42 });
       } else {
         graphic
           .stroke({ color: 0xfff3df, width: 22, alpha: 0.94 })

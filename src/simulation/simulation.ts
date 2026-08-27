@@ -16,6 +16,7 @@ import {
   type ScenarioGeography,
   type SimulationCommand,
   type SimulationSnapshot,
+  type ConsequenceForecastEntry,
 } from "../shared";
 import {
   createMillfordStartingRoads,
@@ -80,12 +81,14 @@ import type { RoadTrafficStateSnapshot } from "./transport/road-traffic";
 import {
   createScenarioProgressSnapshot,
   createScenarioProgressState,
+  recordStrategicIntervention,
   recordScenarioInspection,
   updateScenarioProgress,
   validateScenarioProgressState,
   type ScenarioProgressContext,
   type ScenarioProgressStateSnapshot,
 } from "./scenario/millford-scenario";
+import { createSimulationExplanations } from "./explanations";
 
 const DEFAULT_PLAYER_ROAD_CLASS: RoadClass = "arterial";
 export const INBOUND_TRAFFIC_FLOW_ID = "stone-supply-inbound";
@@ -264,12 +267,30 @@ function snapshot(
   accessibility: ReturnType<typeof createAccessibilityScorer>,
   developmentModel: DevelopmentModel,
   initialAccessibility: ScenarioProgressContext["initialAccessibility"],
+  consequenceForecast: readonly ConsequenceForecastEntry[] = [],
 ): SimulationSnapshot {
   const derived = derivedSnapshots(
     state,
     accessibility,
     developmentModel,
     initialAccessibility,
+  );
+  const scenarioProgress = createScenarioProgressSnapshot(
+    state.scenarioProgress,
+    derived.progressContext,
+  );
+  const explanations = createSimulationExplanations(
+    state.geography,
+    derived.stoneSupplyChain,
+    derived.finances,
+    state.roadNetwork,
+    state.railNetwork,
+    derived.accessibility,
+    derived.development,
+    state.scenarioProgress.latestStrategicIntervention,
+    state.freightOperators.nextAssignmentTick,
+    scenarioProgress,
+    consequenceForecast,
   );
   return Object.freeze({
     seed: state.seed,
@@ -292,11 +313,87 @@ function snapshot(
     bottlenecks: derived.bottlenecks,
     accessibility: derived.accessibility,
     development: derived.development,
-    scenarioProgress: createScenarioProgressSnapshot(
-      state.scenarioProgress,
-      derived.progressContext,
-    ),
+    scenarioProgress,
+    explanations,
   });
+}
+
+function forecastValue(
+  label: string,
+  value: number,
+  unit: ConsequenceForecastEntry["values"][number]["unit"],
+) {
+  return Object.freeze({ label, value, unit });
+}
+
+function createConsequenceForecast(
+  state: SimulationState,
+  authoredInitialState: SimulationState,
+  current: SimulationSnapshot,
+): readonly ConsequenceForecastEntry[] {
+  const boundaries = [
+    { kind: "traffic-assignment" as const, tick: current.time.nextTrafficUpdateTick },
+    { kind: "economy-and-finance" as const, tick: current.time.nextEconomyUpdateTick },
+    { kind: "development" as const, tick: current.time.nextDevelopmentUpdateTick },
+  ].sort((first, second) => first.tick - second.tick || first.kind.localeCompare(second.kind));
+  const projection = runSimulation(state, authoredInitialState, false);
+  let projected = current;
+  const entries: ConsequenceForecastEntry[] = [];
+  for (const boundary of boundaries) {
+    if (boundary.tick > projected.tick) {
+      projected = projection.dispatch({
+        type: "advance",
+        ticks: boundary.tick - projected.tick,
+      });
+    }
+    if (boundary.kind === "traffic-assignment") {
+      const inbound = projected.stoneSupplyChain.inboundFreight;
+      const outbound = projected.stoneSupplyChain.outboundFreight;
+      entries.push(Object.freeze({
+        kind: boundary.kind,
+        tick: boundary.tick,
+        inTicks: boundary.tick - state.tick,
+        summary: `Operators will assign inbound granite to ${inbound.chosenMode ?? "no service"} and outbound stone to ${outbound.chosenMode ?? "no service"}.`,
+        values: Object.freeze([
+          forecastValue("Inbound assigned", inbound.assignedTonsPerDay, "tons/day"),
+          forecastValue("Outbound assigned", outbound.assignedTonsPerDay, "tons/day"),
+          ...(inbound.routeCost === null ? [] : [forecastValue("Inbound route cost", inbound.routeCost, "hours")]),
+          ...(outbound.routeCost === null ? [] : [forecastValue("Outbound route cost", outbound.routeCost, "hours")]),
+        ]),
+      }));
+    } else if (boundary.kind === "economy-and-finance") {
+      entries.push(Object.freeze({
+        kind: boundary.kind,
+        tick: boundary.tick,
+        inTicks: boundary.tick - state.tick,
+        summary: `The daily update will process ${projected.stoneSupplyChain.stoneworks.processedTonsPerDay.toLocaleString()} tons and leave the treasury at $${projected.finances.balance.toFixed(2)}.`,
+        values: Object.freeze([
+          forecastValue("Inbound shipped", projected.stoneSupplyChain.inboundFreight.shippedTonsPerDay, "tons/day"),
+          forecastValue("Stone processed", projected.stoneSupplyChain.stoneworks.processedTonsPerDay, "tons/day"),
+          forecastValue("Outbound shipped", projected.stoneSupplyChain.outboundFreight.shippedTonsPerDay, "tons/day"),
+          forecastValue("Operating revenue", projected.finances.lastDailyRevenue, "currency"),
+          forecastValue("Maintenance charged", projected.finances.lastDailyMaintenance, "currency"),
+          forecastValue("Emergency penalty", projected.finances.emergencyFinance.dailyPenalty, "currency"),
+          forecastValue("Treasury after update", projected.finances.balance, "currency"),
+        ]),
+      }));
+    } else {
+      entries.push(Object.freeze({
+        kind: boundary.kind,
+        tick: boundary.tick,
+        inTicks: boundary.tick - state.tick,
+        summary: `Development will evaluate Millford and Eastbank with ${projected.development.demand.completedGrowthPopulation} completed and ${projected.development.demand.committedGrowthPopulation} committed residents.`,
+        values: Object.freeze([
+          ...projected.development.locations.map((location) =>
+            forecastValue(`${location.name} pressure`, location.pressure, "access points"),
+          ),
+          forecastValue("Completed regional growth", projected.development.demand.completedGrowthPopulation, "residents"),
+          forecastValue("Committed regional growth", projected.development.demand.committedGrowthPopulation, "residents"),
+        ]),
+      }));
+    }
+  }
+  return Object.freeze(entries);
 }
 
 function upgradeRoad(
@@ -661,6 +758,7 @@ function createSimulationState(
 function runSimulation(
   initialState: SimulationState,
   authoredInitialState: SimulationState = initialState,
+  includeForecast = true,
 ): Simulation {
   const stateSnapshot = (state: SimulationState): SimulationStateSnapshot =>
     Object.freeze({
@@ -701,6 +799,24 @@ function runSimulation(
     authoredInitialState.roadNetwork,
   ).getSnapshot();
 
+  function currentSnapshot(): SimulationSnapshot {
+    const current = snapshot(
+      state,
+      accessibility,
+      developmentModel,
+      initialAccessibility,
+    );
+    return includeForecast
+      ? snapshot(
+          state,
+          accessibility,
+          developmentModel,
+          initialAccessibility,
+          createConsequenceForecast(state, authoredInitialState, current),
+        )
+      : current;
+  }
+
   function updateProgress(evaluateDailyBoundary: boolean): void {
     const derived = derivedSnapshots(
       state,
@@ -740,6 +856,19 @@ function runSimulation(
     dispatch(command) {
       const previousRoadNetwork = state.roadNetwork;
       const previousRailNetwork = state.railNetwork;
+      const previousTransaction = state.finances.lastInfrastructureTransaction;
+      const interventionBaseline = state.scenarioProgress.bridgeOverloadObserved &&
+        [
+          "build-road",
+          "upgrade-road",
+          "remove-road",
+          "build-rail-track",
+          "remove-rail-track",
+          "place-freight-rail-terminal",
+          "remove-freight-rail-terminal",
+        ].includes(command.type)
+        ? accessibility.getSnapshot()
+        : undefined;
       switch (command.type) {
         case "advance": {
           const targetTick = advanceTarget(state, command.ticks);
@@ -946,21 +1075,23 @@ function runSimulation(
           ),
         };
       }
+      if (
+        interventionBaseline &&
+        state.finances.lastInfrastructureTransaction !== previousTransaction
+      ) {
+        state = {
+          ...state,
+          scenarioProgress: recordStrategicIntervention(
+            state.scenarioProgress,
+            interventionBaseline,
+          ),
+        };
+      }
       updateProgress(false);
-      return snapshot(
-        state,
-        accessibility,
-        developmentModel,
-        initialAccessibility,
-      );
+      return currentSnapshot();
     },
     getSnapshot() {
-      return snapshot(
-        state,
-        accessibility,
-        developmentModel,
-        initialAccessibility,
-      );
+      return currentSnapshot();
     },
     getState() {
       return stateSnapshot(state);

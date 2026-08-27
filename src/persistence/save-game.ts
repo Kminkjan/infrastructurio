@@ -25,7 +25,7 @@ import type {
   ScenarioEndingSummary,
 } from "../shared";
 
-export const SAVE_FORMAT_VERSION = 8 as const;
+export const SAVE_FORMAT_VERSION = 9 as const;
 export const SAVE_FILE_NAME = "millford-valley-save.json";
 
 interface SavedRoadSegment {
@@ -133,6 +133,18 @@ export interface SaveGameV7 {
 }
 
 export interface SaveGameV8 {
+  readonly formatVersion: 8;
+  readonly scenarioId: "millford-valley";
+  readonly scenarioSeed: string;
+  readonly simulation: SaveGameV7["simulation"] & {
+    readonly scenarioProgress: Omit<
+      ScenarioProgressStateSnapshot,
+      "latestStrategicIntervention"
+    >;
+  };
+}
+
+export interface SaveGameV9 {
   readonly formatVersion: typeof SAVE_FORMAT_VERSION;
   readonly scenarioId: "millford-valley";
   readonly scenarioSeed: string;
@@ -149,7 +161,8 @@ export type SaveGame =
   | SaveGameV5
   | SaveGameV6
   | SaveGameV7
-  | SaveGameV8;
+  | SaveGameV8
+  | SaveGameV9;
 
 export class SaveGameError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -650,9 +663,38 @@ function readScenarioEnding(value: unknown): ScenarioEndingSummary | null {
   });
 }
 
-function readScenarioProgressState(value: unknown): ScenarioProgressStateSnapshot {
+function readScenarioProgressState(
+  value: unknown,
+  includeInterventionBaseline: boolean,
+): ScenarioProgressStateSnapshot {
   if (!isRecord(value)) {
     throw new SaveGameError("scenario progress state must be an object");
+  }
+  let latestStrategicIntervention: ScenarioProgressStateSnapshot["latestStrategicIntervention"] = null;
+  if (includeInterventionBaseline) {
+    const baseline = value.latestStrategicIntervention;
+    if (baseline !== null) {
+      if (!isRecord(baseline) || !Array.isArray(baseline.locations)) {
+        throw new SaveGameError("strategic intervention baseline is invalid");
+      }
+      latestStrategicIntervention = Object.freeze({
+        tick: readSafeInteger(baseline.tick, "strategic intervention tick", 0),
+        locations: Object.freeze(
+          baseline.locations.map((location) => {
+            if (!isRecord(location) || typeof location.locationId !== "string") {
+              throw new SaveGameError("strategic intervention location is invalid");
+            }
+            return Object.freeze({
+              locationId: location.locationId,
+              accessibility: readNumber(
+                location.accessibility,
+                "strategic intervention accessibility",
+              ),
+            });
+          }),
+        ),
+      });
+    }
   }
   return Object.freeze({
     processedTick: readSafeInteger(value.processedTick, "scenario progress processedTick", 0),
@@ -662,6 +704,7 @@ function readScenarioProgressState(value: unknown): ScenarioProgressStateSnapsho
     interventionCompleted: readBoolean(value.interventionCompleted, "scenario interventionCompleted"),
     successfulDays: readSafeInteger(value.successfulDays, "scenario successfulDays", 0),
     lastEvaluatedDayTick: readSafeInteger(value.lastEvaluatedDayTick, "scenario lastEvaluatedDayTick", 0),
+    latestStrategicIntervention,
     ending: readScenarioEnding(value.ending),
   });
 }
@@ -670,7 +713,7 @@ export function validateSaveGame(value: unknown): SaveGame {
   if (!isRecord(value)) {
     throw new SaveGameError("save data must be an object");
   }
-  if (value.formatVersion !== 1 && value.formatVersion !== 2 && value.formatVersion !== 3 && value.formatVersion !== 4 && value.formatVersion !== 5 && value.formatVersion !== 6 && value.formatVersion !== 7 && value.formatVersion !== SAVE_FORMAT_VERSION) {
+  if (value.formatVersion !== 1 && value.formatVersion !== 2 && value.formatVersion !== 3 && value.formatVersion !== 4 && value.formatVersion !== 5 && value.formatVersion !== 6 && value.formatVersion !== 7 && value.formatVersion !== 8 && value.formatVersion !== SAVE_FORMAT_VERSION) {
     throw new SaveGameError(`unsupported save format version: ${String(value.formatVersion)}`);
   }
   if (value.scenarioId !== "millford-valley") {
@@ -781,6 +824,26 @@ export function validateSaveGame(value: unknown): SaveGame {
       freightOperators,
     }),
   });
+  if (value.formatVersion === 8) {
+    const {
+      latestStrategicIntervention: _latestStrategicIntervention,
+      ...legacyScenarioProgress
+    } = readScenarioProgressState(value.simulation.scenarioProgress, false);
+    return Object.freeze({
+    formatVersion: 8,
+    scenarioId: "millford-valley",
+    scenarioSeed: value.scenarioSeed,
+    simulation: Object.freeze({
+      ...simulation,
+      development,
+      supplyChain,
+      finances,
+      ...railState,
+      freightOperators,
+      scenarioProgress: Object.freeze(legacyScenarioProgress),
+    }),
+    });
+  }
   return Object.freeze({
     formatVersion: SAVE_FORMAT_VERSION,
     scenarioId: "millford-valley",
@@ -794,12 +857,13 @@ export function validateSaveGame(value: unknown): SaveGame {
       freightOperators,
       scenarioProgress: readScenarioProgressState(
         value.simulation.scenarioProgress,
+        true,
       ),
     }),
   });
 }
 
-export function createSaveGame(simulation: Simulation): SaveGameV8 {
+export function createSaveGame(simulation: Simulation): SaveGameV9 {
   const state = simulation.getState();
   if (!state.development || !state.freightOperators || !state.supplyChain || !state.finances || !state.railTracks || !state.railTerminals || !state.nextRailTrackNumber || !state.scenarioProgress) {
     throw new SaveGameError("simulation did not provide complete authoritative state");
@@ -821,7 +885,7 @@ export function createSaveGame(simulation: Simulation): SaveGameV8 {
       finances: state.finances,
       scenarioProgress: state.scenarioProgress,
     },
-  }) as SaveGameV8;
+  }) as SaveGameV9;
 }
 
 export function restoreSaveGame(save: SaveGame): Simulation {
@@ -835,20 +899,20 @@ export function restoreSaveGame(save: SaveGame): Simulation {
     })),
     nextRoadSegmentNumber: validated.simulation.nextRoadSegmentNumber,
     railTracks:
-      validated.formatVersion === 6 || validated.formatVersion === 7 || validated.formatVersion === 8
+      validated.formatVersion === 6 || validated.formatVersion === 7 || validated.formatVersion === 8 || validated.formatVersion === 9
         ? validated.simulation.railTracks
         : [],
     railTerminals:
-      validated.formatVersion === 6 || validated.formatVersion === 7 || validated.formatVersion === 8
+      validated.formatVersion === 6 || validated.formatVersion === 7 || validated.formatVersion === 8 || validated.formatVersion === 9
         ? validated.simulation.railTerminals
         : [],
     nextRailTrackNumber:
-      validated.formatVersion === 6 || validated.formatVersion === 7 || validated.formatVersion === 8
+      validated.formatVersion === 6 || validated.formatVersion === 7 || validated.formatVersion === 8 || validated.formatVersion === 9
         ? validated.simulation.nextRailTrackNumber
         : 1,
     development: validated.formatVersion !== 1 ? validated.simulation.development : undefined,
     supplyChain:
-      validated.formatVersion === 4 || validated.formatVersion === 5 || validated.formatVersion === 6 || validated.formatVersion === 7 || validated.formatVersion === 8
+      validated.formatVersion === 4 || validated.formatVersion === 5 || validated.formatVersion === 6 || validated.formatVersion === 7 || validated.formatVersion === 8 || validated.formatVersion === 9
         ? validated.simulation.supplyChain
         : undefined,
     roadTraffic:
@@ -856,17 +920,22 @@ export function restoreSaveGame(save: SaveGame): Simulation {
         ? validated.simulation.roadTraffic
         : undefined,
     freightOperators:
-      validated.formatVersion === 7 || validated.formatVersion === 8
+      validated.formatVersion === 7 || validated.formatVersion === 8 || validated.formatVersion === 9
         ? validated.simulation.freightOperators
         : undefined,
     finances:
-      validated.formatVersion === 5 || validated.formatVersion === 6 || validated.formatVersion === 7 || validated.formatVersion === 8
+      validated.formatVersion === 5 || validated.formatVersion === 6 || validated.formatVersion === 7 || validated.formatVersion === 8 || validated.formatVersion === 9
         ? validated.simulation.finances
         : undefined,
     scenarioProgress:
-      validated.formatVersion === SAVE_FORMAT_VERSION
-        ? validated.simulation.scenarioProgress
-        : undefined,
+      validated.formatVersion === 8
+        ? Object.freeze({
+            ...validated.simulation.scenarioProgress,
+            latestStrategicIntervention: null,
+          })
+        : validated.formatVersion === SAVE_FORMAT_VERSION
+          ? validated.simulation.scenarioProgress
+          : undefined,
   };
   try {
     return restoreSimulation(state);
