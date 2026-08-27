@@ -9,6 +9,7 @@ import {
   type RoadTrafficStateSnapshot,
   type Simulation,
   type SimulationStateSnapshot,
+  type ScenarioProgressStateSnapshot,
   type StoneSupplyChainStateSnapshot,
 } from "../simulation";
 import type {
@@ -21,9 +22,10 @@ import type {
   RoadClass,
   RoadSegment,
   StoneworksLimitingFactor,
+  ScenarioEndingSummary,
 } from "../shared";
 
-export const SAVE_FORMAT_VERSION = 7 as const;
+export const SAVE_FORMAT_VERSION = 8 as const;
 export const SAVE_FILE_NAME = "millford-valley-save.json";
 
 interface SavedRoadSegment {
@@ -115,7 +117,7 @@ export interface SaveGameV6 {
 }
 
 export interface SaveGameV7 {
-  readonly formatVersion: typeof SAVE_FORMAT_VERSION;
+  readonly formatVersion: 7;
   readonly scenarioId: "millford-valley";
   readonly scenarioSeed: string;
   readonly simulation: SaveBaseSimulation & {
@@ -130,6 +132,15 @@ export interface SaveGameV7 {
   };
 }
 
+export interface SaveGameV8 {
+  readonly formatVersion: typeof SAVE_FORMAT_VERSION;
+  readonly scenarioId: "millford-valley";
+  readonly scenarioSeed: string;
+  readonly simulation: SaveGameV7["simulation"] & {
+    readonly scenarioProgress: ScenarioProgressStateSnapshot;
+  };
+}
+
 export type SaveGame =
   | SaveGameV1
   | SaveGameV2
@@ -137,7 +148,8 @@ export type SaveGame =
   | SaveGameV4
   | SaveGameV5
   | SaveGameV6
-  | SaveGameV7;
+  | SaveGameV7
+  | SaveGameV8;
 
 export class SaveGameError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -160,6 +172,13 @@ function readSafeInteger(value: unknown, name: string, minimum: number): number 
 function readNumber(value: unknown, name: string): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
     throw new SaveGameError(`${name} must be non-negative and finite`);
+  }
+  return value;
+}
+
+function readBoolean(value: unknown, name: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new SaveGameError(`${name} must be a boolean`);
   }
   return value;
 }
@@ -578,11 +597,80 @@ function readFinanceState(value: unknown): FinanceStateSnapshot {
   });
 }
 
+function readScenarioEnding(value: unknown): ScenarioEndingSummary | null {
+  if (value === null) return null;
+  if (!isRecord(value) || !Array.isArray(value.accessibilityChanges)) {
+    throw new SaveGameError("scenario ending must contain accessibility changes");
+  }
+  if (
+    value.intervention !== "bridge-upgrade" &&
+    value.intervention !== "road-bypass" &&
+    value.intervention !== "rail-shift" &&
+    value.intervention !== "combined"
+  ) {
+    throw new SaveGameError("scenario ending has an unknown intervention");
+  }
+  if (
+    value.bridgeStatus !== "relieved" &&
+    value.bridgeStatus !== "unused" &&
+    value.bridgeStatus !== "removed"
+  ) {
+    throw new SaveGameError("scenario ending has an unknown bridge status");
+  }
+  const accessibilityChanges = value.accessibilityChanges.map((entry) => {
+    if (
+      !isRecord(entry) ||
+      typeof entry.locationId !== "string" ||
+      typeof entry.name !== "string"
+    ) {
+      throw new SaveGameError("scenario accessibility change is invalid");
+    }
+    return Object.freeze({
+      locationId: entry.locationId,
+      name: entry.name,
+      initialScore: readNumber(entry.initialScore, "initial accessibility score"),
+      finalScore: readNumber(entry.finalScore, "final accessibility score"),
+      change: readFiniteNumber(entry.change, "accessibility score change"),
+    });
+  });
+  return Object.freeze({
+    completedTick: readSafeInteger(value.completedTick, "scenario completedTick", 0),
+    intervention: value.intervention,
+    totalCapitalSpending: readNumber(value.totalCapitalSpending, "ending capital spending"),
+    totalMaintenancePaid: readNumber(value.totalMaintenancePaid, "ending maintenance paid"),
+    dailyMaintenance: readNumber(value.dailyMaintenance, "ending daily maintenance"),
+    roadFreightTonsPerDay: readNumber(value.roadFreightTonsPerDay, "ending road freight"),
+    railFreightTonsPerDay: readNumber(value.railFreightTonsPerDay, "ending rail freight"),
+    roadFreightShare: readNumber(value.roadFreightShare, "ending road freight share"),
+    railFreightShare: readNumber(value.railFreightShare, "ending rail freight share"),
+    bridgeStatus: value.bridgeStatus,
+    bridgeAssignedTonsPerDay: readNumber(value.bridgeAssignedTonsPerDay, "ending bridge assignment"),
+    bridgeCapacityTonsPerDay: readNumber(value.bridgeCapacityTonsPerDay, "ending bridge capacity"),
+    accessibilityChanges: Object.freeze(accessibilityChanges),
+  });
+}
+
+function readScenarioProgressState(value: unknown): ScenarioProgressStateSnapshot {
+  if (!isRecord(value)) {
+    throw new SaveGameError("scenario progress state must be an object");
+  }
+  return Object.freeze({
+    processedTick: readSafeInteger(value.processedTick, "scenario progress processedTick", 0),
+    inspectedEntityIds: readStringArray(value.inspectedEntityIds, "scenario inspectedEntityIds"),
+    supplyChainActivated: readBoolean(value.supplyChainActivated, "scenario supplyChainActivated"),
+    bridgeOverloadObserved: readBoolean(value.bridgeOverloadObserved, "scenario bridgeOverloadObserved"),
+    interventionCompleted: readBoolean(value.interventionCompleted, "scenario interventionCompleted"),
+    successfulDays: readSafeInteger(value.successfulDays, "scenario successfulDays", 0),
+    lastEvaluatedDayTick: readSafeInteger(value.lastEvaluatedDayTick, "scenario lastEvaluatedDayTick", 0),
+    ending: readScenarioEnding(value.ending),
+  });
+}
+
 export function validateSaveGame(value: unknown): SaveGame {
   if (!isRecord(value)) {
     throw new SaveGameError("save data must be an object");
   }
-  if (value.formatVersion !== 1 && value.formatVersion !== 2 && value.formatVersion !== 3 && value.formatVersion !== 4 && value.formatVersion !== 5 && value.formatVersion !== 6 && value.formatVersion !== SAVE_FORMAT_VERSION) {
+  if (value.formatVersion !== 1 && value.formatVersion !== 2 && value.formatVersion !== 3 && value.formatVersion !== 4 && value.formatVersion !== 5 && value.formatVersion !== 6 && value.formatVersion !== 7 && value.formatVersion !== SAVE_FORMAT_VERSION) {
     throw new SaveGameError(`unsupported save format version: ${String(value.formatVersion)}`);
   }
   if (value.scenarioId !== "millford-valley") {
@@ -677,7 +765,10 @@ export function validateSaveGame(value: unknown): SaveGame {
       ...railState,
     }),
   });
-  return Object.freeze({
+  const freightOperators = readFreightOperatorState(
+    value.simulation.freightOperators,
+  );
+  if (value.formatVersion === 7) return Object.freeze({
     formatVersion: 7,
     scenarioId: "millford-valley",
     scenarioSeed: value.scenarioSeed,
@@ -687,14 +778,30 @@ export function validateSaveGame(value: unknown): SaveGame {
       supplyChain,
       finances,
       ...railState,
-      freightOperators: readFreightOperatorState(value.simulation.freightOperators),
+      freightOperators,
+    }),
+  });
+  return Object.freeze({
+    formatVersion: SAVE_FORMAT_VERSION,
+    scenarioId: "millford-valley",
+    scenarioSeed: value.scenarioSeed,
+    simulation: Object.freeze({
+      ...simulation,
+      development,
+      supplyChain,
+      finances,
+      ...railState,
+      freightOperators,
+      scenarioProgress: readScenarioProgressState(
+        value.simulation.scenarioProgress,
+      ),
     }),
   });
 }
 
-export function createSaveGame(simulation: Simulation): SaveGameV7 {
+export function createSaveGame(simulation: Simulation): SaveGameV8 {
   const state = simulation.getState();
-  if (!state.development || !state.freightOperators || !state.supplyChain || !state.finances || !state.railTracks || !state.railTerminals || !state.nextRailTrackNumber) {
+  if (!state.development || !state.freightOperators || !state.supplyChain || !state.finances || !state.railTracks || !state.railTerminals || !state.nextRailTrackNumber || !state.scenarioProgress) {
     throw new SaveGameError("simulation did not provide complete authoritative state");
   }
   return validateSaveGame({
@@ -712,8 +819,9 @@ export function createSaveGame(simulation: Simulation): SaveGameV7 {
       supplyChain: state.supplyChain,
       freightOperators: state.freightOperators,
       finances: state.finances,
+      scenarioProgress: state.scenarioProgress,
     },
-  }) as SaveGameV7;
+  }) as SaveGameV8;
 }
 
 export function restoreSaveGame(save: SaveGame): Simulation {
@@ -727,20 +835,20 @@ export function restoreSaveGame(save: SaveGame): Simulation {
     })),
     nextRoadSegmentNumber: validated.simulation.nextRoadSegmentNumber,
     railTracks:
-      validated.formatVersion === 6 || validated.formatVersion === SAVE_FORMAT_VERSION
+      validated.formatVersion === 6 || validated.formatVersion === 7 || validated.formatVersion === 8
         ? validated.simulation.railTracks
         : [],
     railTerminals:
-      validated.formatVersion === 6 || validated.formatVersion === SAVE_FORMAT_VERSION
+      validated.formatVersion === 6 || validated.formatVersion === 7 || validated.formatVersion === 8
         ? validated.simulation.railTerminals
         : [],
     nextRailTrackNumber:
-      validated.formatVersion === 6 || validated.formatVersion === SAVE_FORMAT_VERSION
+      validated.formatVersion === 6 || validated.formatVersion === 7 || validated.formatVersion === 8
         ? validated.simulation.nextRailTrackNumber
         : 1,
     development: validated.formatVersion !== 1 ? validated.simulation.development : undefined,
     supplyChain:
-      validated.formatVersion === 4 || validated.formatVersion === 5 || validated.formatVersion === 6 || validated.formatVersion === 7
+      validated.formatVersion === 4 || validated.formatVersion === 5 || validated.formatVersion === 6 || validated.formatVersion === 7 || validated.formatVersion === 8
         ? validated.simulation.supplyChain
         : undefined,
     roadTraffic:
@@ -748,12 +856,16 @@ export function restoreSaveGame(save: SaveGame): Simulation {
         ? validated.simulation.roadTraffic
         : undefined,
     freightOperators:
-      validated.formatVersion === 7
+      validated.formatVersion === 7 || validated.formatVersion === 8
         ? validated.simulation.freightOperators
         : undefined,
     finances:
-      validated.formatVersion === 5 || validated.formatVersion === 6 || validated.formatVersion === 7
+      validated.formatVersion === 5 || validated.formatVersion === 6 || validated.formatVersion === 7 || validated.formatVersion === 8
         ? validated.simulation.finances
+        : undefined,
+    scenarioProgress:
+      validated.formatVersion === SAVE_FORMAT_VERSION
+        ? validated.simulation.scenarioProgress
         : undefined,
   };
   try {

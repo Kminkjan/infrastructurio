@@ -202,6 +202,13 @@ the current authored road network, then record bounded revenue, maintenance, and
 the emergency-bond penalty. React displays the resulting snapshot and quote
 breakdowns without calculating costs.
 
+Scenario guidance is another simulation-core reducer. Selection sends typed
+inspection intent, while the reducer alone decides whether that intent is
+relevant and whether supply activation, bridge pressure, intervention, the
+daily success hold, and completion occurred. Its snapshot includes objective
+status, explicit subsystem cadence, success conditions, and the immutable ending
+summary. React does not award progress or infer an intervention from UI actions.
+
 Representative freight vehicles remain renderer-owned. A pure rendering helper
 validates each assigned route against the matching road or rail graph, resolves its
 ordered node geometry, and deterministically samples positions for the current
@@ -212,7 +219,7 @@ phase crosses into the simulation protocol.
 
 ## Save format
 
-Saves use an explicit versioned JSON document. Format version 7 contains the
+Saves use an explicit versioned JSON document. Format version 8 contains the
 Millford Valley scenario ID and seed plus the authoritative mutable state: the
 simulation tick, authored roads and rail track, placed compatible freight
 terminals, future road/track identifiers, development history, bounded stoneworks
@@ -220,17 +227,20 @@ inventories and daily update cadence, both current aggregate flow rates, and the
 eight-hour multimodal assignment state, candidate comparison values, chosen mode,
 and service-price adjustments for both legs. It also stores the treasury,
 cumulative capital, revenue, maintenance and salvage totals, emergency-bond
-state and penalties, and the last committed infrastructure transaction. Derived
-geography, road nodes, link costs, accessibility, current maintenance,
+state and penalties, the last committed infrastructure transaction, and scenario
+inspection/progress history, daily success hold, and any completed ending
+summary. Derived geography, road nodes, link costs, accessibility, current maintenance,
 explanations, and presentation state are rebuilt. Rail graph nodes, links,
 operational profiles, and infrastructure economics are also derived and rebuilt
 from authored rail state.
 Saved routes are validated against rebuilt topology and reapplied so congestion
 and future supply-chain steps replay identically.
 
-Format versions 1 through 6 remain loadable. Version 6 predates multimodal
-operator state; it retains rail topology but rebuilds private assignment at the
-saved tick with zero price adjustments. Version 5 predates rail and migrates
+Format versions 1 through 7 remain loadable. Version 7 predates authoritative
+scenario objectives and starts fresh progress at its saved tick without inventing
+past inspections, overloads, interventions, or successful hold days. Version 6
+predates multimodal operator state; it retains rail topology but rebuilds private
+assignment at the saved tick with zero price adjustments. Version 5 predates rail and migrates
 to an empty rail network with the first track identifier available. Roads
 without a class migrate to the current default arterial profile, and a traffic
 assignment is derived at the saved tick. Version 3 represented the superseded direct quarry-export flow and

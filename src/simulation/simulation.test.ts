@@ -1,7 +1,17 @@
 // @vitest-environment node
 
 import { describe, expect, it } from "vitest";
-import { createSimulation } from ".";
+import { createSimulation, restoreSimulation } from ".";
+
+function createEmptyRoadSimulation(seed: string) {
+  const state = createSimulation(seed).getState();
+  return restoreSimulation({
+    ...state,
+    roadSegments: [],
+    freightOperators: undefined,
+    scenarioProgress: undefined,
+  });
+}
 
 describe("headless simulation", () => {
   it("produces the same snapshots for the same seed and commands", () => {
@@ -46,7 +56,7 @@ describe("headless simulation", () => {
   });
 
   it("builds, routes across, and removes authoritative road segments", () => {
-    const simulation = createSimulation("road-edit-test");
+    const simulation = createEmptyRoadSimulation("road-edit-test");
     simulation.dispatch({
       type: "build-road",
       start: { x: 100, y: 100 },
@@ -77,7 +87,7 @@ describe("headless simulation", () => {
   });
 
   it("places freight terminals and builds, routes, and removes authoritative rail", () => {
-    const simulation = createSimulation("rail-edit-test");
+    const simulation = createEmptyRoadSimulation("rail-edit-test");
     const geography = simulation.getSnapshot().geography;
     simulation.dispatch({ type: "place-freight-rail-terminal", site: "quarry" });
     simulation.dispatch({ type: "place-freight-rail-terminal", site: "stoneworks" });
@@ -212,7 +222,7 @@ describe("headless simulation", () => {
   });
 
   it("commits the exact simulation-owned quote and rejects unaffordable roads atomically", () => {
-    const simulation = createSimulation("finance-transactions");
+    const simulation = createEmptyRoadSimulation("finance-transactions");
     const quote = simulation.quoteRoadConstruction(
       { x: 0, y: 0 },
       { x: 960, y: 0 },
@@ -353,8 +363,8 @@ describe("headless simulation", () => {
   });
 
   it("replays road commands deterministically and resets the network", () => {
-    const first = createSimulation("road-determinism");
-    const second = createSimulation("road-determinism");
+    const first = createEmptyRoadSimulation("road-determinism");
+    const second = createEmptyRoadSimulation("road-determinism");
     const commands = [
       {
         type: "build-road",
@@ -378,11 +388,9 @@ describe("headless simulation", () => {
         { x: 500, y: 200 },
       ),
     ).toBeDefined();
-    expect(first.dispatch({ type: "reset" }).roadNetwork).toEqual({
-      segments: [],
-      nodes: [],
-      links: [],
-    });
+    expect(first.dispatch({ type: "reset" }).roadNetwork).toEqual(
+      createSimulation("road-determinism").getSnapshot().roadNetwork,
+    );
   });
 
   it("advances both stone-supply legs only at deterministic daily boundaries", () => {
@@ -476,7 +484,7 @@ describe("headless simulation", () => {
   });
 
   it("publishes deterministic network accessibility for candidate locations", () => {
-    const simulation = createSimulation("accessibility-snapshot");
+    const simulation = createEmptyRoadSimulation("accessibility-snapshot");
     const initial = simulation.getSnapshot();
     const [millford, eastbank] = initial.geography.settlementSeeds;
     expect(millford).toBeDefined();
@@ -524,7 +532,7 @@ describe("headless simulation", () => {
       expect(location.service.score).toBeGreaterThan(0);
     }
 
-    const replay = createSimulation("accessibility-snapshot");
+    const replay = createEmptyRoadSimulation("accessibility-snapshot");
     for (let index = 0; index < anchors.length - 1; index += 1) {
       replay.dispatch({
         type: "build-road",
@@ -536,7 +544,7 @@ describe("headless simulation", () => {
   });
 
   it("invalidates only candidate locations affected by a local edit", () => {
-    const simulation = createSimulation("accessibility-invalidation");
+    const simulation = createEmptyRoadSimulation("accessibility-invalidation");
     const geography = simulation.getSnapshot().geography;
     const [millford, eastbank] = geography.settlementSeeds;
     expect(millford).toBeDefined();
@@ -580,7 +588,7 @@ describe("headless simulation", () => {
   });
 
   it("adds realized stoneworks employment to Millford accessibility", () => {
-    const simulation = createSimulation("stoneworks-employment");
+    const simulation = createEmptyRoadSimulation("stoneworks-employment");
     const geography = simulation.getSnapshot().geography;
     const millford = geography.settlementSeeds[0]!;
     simulation.dispatch({
@@ -676,7 +684,7 @@ describe("headless simulation", () => {
   });
 
   it("lets both Millford Valley candidates compete when both gain access", () => {
-    const simulation = createSimulation("development-competition");
+    const simulation = createEmptyRoadSimulation("development-competition");
     const geography = simulation.getSnapshot().geography;
     const [millford, eastbank] = geography.settlementSeeds;
     expect(millford).toBeDefined();
@@ -714,7 +722,7 @@ describe("headless simulation", () => {
   });
 
   it("keeps completed development under pressure before gradual decline after access removal", () => {
-    const simulation = createSimulation("settlement-decline");
+    const simulation = createEmptyRoadSimulation("settlement-decline");
     const geography = simulation.getSnapshot().geography;
     const millford = geography.settlementSeeds[0];
     expect(millford).toBeDefined();

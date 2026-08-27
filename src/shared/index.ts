@@ -75,3 +75,13 @@ export type {
   RailTrackSnapshot,
 } from "./rail";
 export type { SimulationCommand, SimulationSnapshot } from "./simulation";
+export type {
+  ScenarioAccessibilityChange,
+  ScenarioEndingSummary,
+  ScenarioInterventionChoice,
+  ScenarioObjectiveId,
+  ScenarioObjectiveSnapshot,
+  ScenarioProgressSnapshot,
+  ScenarioSuccessConditionsSnapshot,
+  SimulationTimeSnapshot,
+} from "./scenario-progress";

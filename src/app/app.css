@@ -183,6 +183,96 @@ button.secondary {
   padding-top: 0.9rem;
 }
 
+.objective-tracker,
+.ending-summary,
+.time-cadence {
+  margin-top: 1rem;
+  border-top: 1px solid rgb(255 255 255 / 13%);
+  padding-top: 0.9rem;
+}
+
+.objective-tracker ol {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.objective-tracker li {
+  display: flex;
+  gap: 0.55rem;
+  color: #8f9d94;
+}
+
+.objective-tracker li > span {
+  width: 1rem;
+  flex: 0 0 1rem;
+  color: #8f9d94;
+  font-weight: 800;
+}
+
+.objective-tracker li.active,
+.objective-tracker li.active > span {
+  color: #f3c969;
+}
+
+.objective-tracker li.complete,
+.objective-tracker li.complete > span {
+  color: #9fd39f;
+}
+
+.objective-tracker strong,
+.objective-tracker small {
+  display: block;
+}
+
+.objective-tracker strong {
+  font-size: 0.82rem;
+}
+
+.objective-tracker small,
+.objective-tracker p,
+.ending-summary > p {
+  margin: 0.18rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.objective-tracker p,
+.ending-summary > p {
+  color: #d6ded7;
+}
+
+.ending-summary {
+  border: 1px solid rgb(159 211 159 / 30%);
+  border-radius: 0.8rem;
+  padding: 0.9rem;
+  background: rgb(87 130 84 / 14%);
+}
+
+.ending-summary h2,
+.ending-summary h3 {
+  color: #fffdf7;
+}
+
+.ending-summary h2 {
+  margin: 0.3rem 0 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.35rem;
+  font-weight: 500;
+}
+
+.ending-summary h3 {
+  margin: 0.9rem 0 0;
+  font-size: 0.84rem;
+}
+
+.ending-summary button {
+  margin-top: 0.9rem;
+  font-size: 0.78rem;
+}
+
 .emergency-bond {
   margin-top: 0.75rem;
   padding: 0.52rem 0.75rem;

@@ -29,4 +29,5 @@ export type {
 export type { DevelopmentStateSnapshot } from "./growth/development";
 export type { StoneSupplyChainStateSnapshot } from "./economy/stone-supply-chain";
 export type { FinanceStateSnapshot } from "./economy/infrastructure-finance";
+export type { ScenarioProgressStateSnapshot } from "./scenario/millford-scenario";
 export { SUPPLY_CHAIN_UPDATE_INTERVAL_TICKS } from "./economy/stone-supply-chain";

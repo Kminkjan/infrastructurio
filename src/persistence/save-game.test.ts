@@ -2,6 +2,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { createSimulation } from "../simulation";
+import { OLD_MILLFORD_BRIDGE_ROAD_ID } from "../scenarios";
 import {
   SAVE_FORMAT_VERSION,
   SAVE_FILE_NAME,
@@ -192,6 +193,55 @@ describe("save games", () => {
     ).toBe(2.5);
   });
 
+  it("preserves objective progress and continues the success hold", () => {
+    const original = createSimulation("save-scenario-progress");
+    const geography = original.getSnapshot().geography;
+    for (const entityId of [
+      geography.quarry.id,
+      geography.stoneworks.id,
+      geography.externalMarketConnection.id,
+    ]) {
+      original.dispatch({ type: "inspect-entity", entityId });
+    }
+    original.dispatch({
+      type: "build-road",
+      start: geography.quarry.position,
+      end: geography.stoneworks.position,
+    });
+    original.dispatch({
+      type: "build-road",
+      start: geography.settlementSeeds.find(
+        ({ id }) => id === "settlement-eastbank",
+      )!.position,
+      end: geography.externalMarketConnection.position,
+    });
+    original.dispatch({ type: "advance", ticks: 24 });
+    original.dispatch({
+      type: "upgrade-road",
+      roadSegmentId: OLD_MILLFORD_BRIDGE_ROAD_ID,
+    });
+    original.dispatch({ type: "advance", ticks: 24 * 13 });
+    expect(original.getSnapshot().scenarioProgress.successfulDays).toBe(1);
+
+    const save = deserializeSaveGame(serializeSaveGame(createSaveGame(original)));
+    const restored = restoreSaveGame(save);
+    expect(restored.getState().scenarioProgress).toEqual(
+      original.getState().scenarioProgress,
+    );
+    expect(restored.getSnapshot().scenarioProgress).toEqual(
+      original.getSnapshot().scenarioProgress,
+    );
+    const restoredCompleted = restored.dispatch({ type: "advance", ticks: 48 });
+    const originalCompleted = original.dispatch({ type: "advance", ticks: 48 });
+    expect(restoredCompleted.scenarioProgress.success).toBe(true);
+    expect(restoredCompleted.scenarioProgress.ending).toEqual(
+      originalCompleted.scenarioProgress.ending,
+    );
+    expect(
+      restoreSaveGame(save).dispatch({ type: "reset" }),
+    ).toEqual(createSimulation("save-scenario-progress").getSnapshot());
+  });
+
   it("preserves completed and pending development for deterministic continuation", () => {
     const original = createSimulation("save-development");
     const geography = original.getSnapshot().geography;
@@ -255,13 +305,15 @@ describe("save games", () => {
     });
     original.dispatch({
       type: "build-road",
-      start: geography.stoneworks.position,
+      start: geography.settlementSeeds.find(
+        ({ id }) => id === "settlement-eastbank",
+      )!.position,
       end: geography.externalMarketConnection.position,
     });
     original.dispatch({ type: "advance", ticks: 24 });
     const upgraded = original.dispatch({
       type: "upgrade-road",
-      roadSegmentId: "road-segment-2",
+      roadSegmentId: OLD_MILLFORD_BRIDGE_ROAD_ID,
     });
     expect(
       upgraded.bottlenecks.roadBottlenecks.some(
@@ -270,7 +322,9 @@ describe("save games", () => {
     ).toBe(false);
 
     const restored = restoreSaveGame(createSaveGame(original)).getSnapshot();
-    expect(restored.roadNetwork.segments[1]?.roadClass).toBe("highway");
+    expect(restored.roadNetwork.segments.find(
+      ({ id }) => id === OLD_MILLFORD_BRIDGE_ROAD_ID,
+    )?.roadClass).toBe("highway");
     expect(restored.bottlenecks).toEqual(upgraded.bottlenecks);
   });
 
@@ -305,7 +359,10 @@ describe("save games", () => {
       restored.getSnapshot().development.nextEvaluationTick,
     ).toBeGreaterThan(current.simulation.tick);
     expect(restored.getSnapshot().roadNetwork.segments).toEqual(
-      current.simulation.roadSegments,
+      current.simulation.roadSegments.map((segment) => ({
+        ...segment,
+        roadClass: "arterial",
+      })),
     );
   });
 
@@ -335,6 +392,29 @@ describe("save games", () => {
       ({ roadClass }) => roadClass === "arterial",
     )).toBe(true);
     expect(restored.getState().freightOperators).toBeDefined();
+  });
+
+  it("loads version 7 saves with fresh objective history at the saved tick", () => {
+    const current = createSaveGame(createConnectedSimulation());
+    const { scenarioProgress: _scenarioProgress, ...legacySimulation } =
+      current.simulation;
+    const restored = restoreSaveGame(
+      deserializeSaveGame(
+        JSON.stringify({
+          formatVersion: 7,
+          scenarioId: current.scenarioId,
+          scenarioSeed: current.scenarioSeed,
+          simulation: legacySimulation,
+        }),
+      ),
+    );
+
+    expect(restored.getSnapshot().tick).toBe(current.simulation.tick);
+    expect(restored.getSnapshot().scenarioProgress).toMatchObject({
+      inspectedEntityIds: [],
+      successfulDays: 0,
+      success: false,
+    });
   });
 
   it("migrates version 3 quarry-export saves to a dormant stoneworks", () => {
@@ -490,13 +570,13 @@ describe("save games", () => {
     expect(() =>
       deserializeSaveGame(
         JSON.stringify({
-          formatVersion: 8,
+          formatVersion: 9,
           scenarioId: "millford-valley",
           scenarioSeed: "future",
           simulation: {},
         }),
       ),
-    ).toThrow("unsupported save format version: 8");
+    ).toThrow("unsupported save format version: 9");
 
     const save = createSaveGame(createConnectedSimulation());
     const invalid = {

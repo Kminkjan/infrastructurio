@@ -20,4 +20,6 @@ export type {
   SaveGameV4,
   SaveGameV5,
   SaveGameV6,
+  SaveGameV7,
+  SaveGameV8,
 } from "./save-game";

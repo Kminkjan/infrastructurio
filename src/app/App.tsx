@@ -27,7 +27,10 @@ import type {
   RailTrackSnapshot,
   RoadBottleneckSnapshot,
   RoadClass,
+  ScenarioEndingSummary,
+  ScenarioProgressSnapshot,
   SimulationSnapshot,
+  SimulationTimeSnapshot,
   StoneworksSnapshot,
 } from "../shared";
 import "./app.css";
@@ -47,6 +50,119 @@ function formatMoney(value: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
+}
+
+function formatTickDistance(ticks: number): string {
+  if (ticks <= 0) return "now";
+  const days = Math.floor(ticks / 24);
+  const hours = ticks % 24;
+  if (days === 0) return `${hours}h`;
+  return hours === 0 ? `${days}d` : `${days}d ${hours}h`;
+}
+
+function ObjectiveTracker({
+  progress,
+}: {
+  readonly progress: ScenarioProgressSnapshot;
+}) {
+  return (
+    <section className="objective-tracker" aria-label="Scenario objectives">
+      <p className="eyebrow">Scenario objectives</p>
+      <ol>
+        {progress.objectives.map((objective) => {
+          const active = objective.id === progress.activeObjectiveId;
+          return (
+            <li
+              className={objective.complete ? "complete" : active ? "active" : ""}
+              key={objective.id}
+            >
+              <span aria-hidden="true">{objective.complete ? "✓" : active ? "→" : "○"}</span>
+              <div>
+                <strong>{objective.title}</strong>
+                <small>{objective.progressLabel}</small>
+                {active ? <p>{objective.guidance}</p> : null}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
+function TimeCadence({
+  tick,
+  time,
+}: {
+  readonly tick: number;
+  readonly time: SimulationTimeSnapshot;
+}) {
+  const updates = [
+    ["Traffic assignment", time.nextTrafficUpdateTick],
+    ["Economy + inventories", time.nextEconomyUpdateTick],
+    ["Maintenance + revenue", time.nextMaintenanceUpdateTick],
+    ["Development", time.nextDevelopmentUpdateTick],
+  ] as const;
+  return (
+    <section className="time-cadence" aria-label="Simulation update cadence">
+      <p className="eyebrow">Next authoritative updates</p>
+      <dl className="freight-details">
+        {updates.map(([label, nextTick]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd>in {formatTickDistance(nextTick - tick)}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+function interventionLabel(value: ScenarioEndingSummary["intervention"]): string {
+  switch (value) {
+    case "bridge-upgrade":
+      return "Old bridge upgraded";
+    case "road-bypass":
+      return "Freight shifted to a road bypass";
+    case "rail-shift":
+      return "Freight shifted to rail";
+    case "combined":
+      return "Combined road and rail intervention";
+  }
+}
+
+function EndingSummary({
+  ending,
+  onReplay,
+}: {
+  readonly ending: ScenarioEndingSummary;
+  readonly onReplay: () => void;
+}) {
+  return (
+    <section className="ending-summary" aria-label="Scenario complete">
+      <p className="eyebrow">Millford Valley stabilized</p>
+      <h2>A regional strategy took hold</h2>
+      <p>{interventionLabel(ending.intervention)}. No response is declared optimal; replay to test another geometry or mode.</p>
+      <dl className="freight-details">
+        <div><dt>Capital spending</dt><dd>{formatMoney(ending.totalCapitalSpending)}</dd></div>
+        <div><dt>Maintenance paid</dt><dd>{formatMoney(ending.totalMaintenancePaid)}</dd></div>
+        <div><dt>Current maintenance</dt><dd>{formatMoney(ending.dailyMaintenance)}/day</dd></div>
+        <div><dt>Road freight</dt><dd>{formatTons(ending.roadFreightTonsPerDay)} · {(ending.roadFreightShare * 100).toFixed(0)}%</dd></div>
+        <div><dt>Rail freight</dt><dd>{formatTons(ending.railFreightTonsPerDay)} · {(ending.railFreightShare * 100).toFixed(0)}%</dd></div>
+        <div><dt>Old bridge</dt><dd>{ending.bridgeStatus} · {ending.bridgeAssignedTonsPerDay.toLocaleString()} / {ending.bridgeCapacityTonsPerDay.toLocaleString()} t/day</dd></div>
+      </dl>
+      <h3>Settlement accessibility change</h3>
+      <dl className="freight-details">
+        {ending.accessibilityChanges.map((change) => (
+          <div key={change.locationId}>
+            <dt>{change.name}</dt>
+            <dd>{change.change >= 0 ? "+" : ""}{change.change.toFixed(2)} · {change.initialScore.toFixed(2)} → {change.finalScore.toFixed(2)}</dd>
+          </div>
+        ))}
+      </dl>
+      <button type="button" onClick={onReplay}>Replay from the beginning</button>
+    </section>
+  );
 }
 
 function CostBreakdown({
@@ -645,14 +761,27 @@ export function App() {
   const [controlsOpen, setControlsOpen] = useState(true);
   const importInputRef = useRef<HTMLInputElement>(null);
 
-  function advanceDay(): void {
-    setSnapshot(simulation.dispatch({ type: "advance", ticks: 24 }));
+  function advance(ticks: number): void {
+    setSnapshot(simulation.dispatch({ type: "advance", ticks }));
   }
 
   function reset(): void {
     setSnapshot(simulation.dispatch({ type: "reset" }));
+    setSelection(undefined);
     setConstructionMessage(undefined);
     setConstructionQuote(undefined);
+  }
+
+  function selectMapFeature(nextSelection: MapSelection | undefined): void {
+    setSelection(nextSelection);
+    if (nextSelection) {
+      setSnapshot(
+        simulation.dispatch({
+          type: "inspect-entity",
+          entityId: nextSelection.id,
+        }),
+      );
+    }
   }
 
   function previewRoad(
@@ -937,7 +1066,7 @@ export function App() {
       <WorldView
         snapshot={snapshot}
         roadTool={roadTool}
-        onSelectionChange={setSelection}
+        onSelectionChange={selectMapFeature}
         onBuildRoad={buildRoad}
         onBuildRoadPreview={previewRoad}
         onRemoveRoad={removeRoad}
@@ -979,6 +1108,14 @@ export function App() {
           {snapshot.stoneSupplyChain.outboundFreight.shippedTonsPerDay} t/day stone exports
           {millfordBridgeBottleneck ? " · Bridge overloaded" : ""}
         </p>
+        {snapshot.scenarioProgress.ending ? (
+          <EndingSummary
+            ending={snapshot.scenarioProgress.ending}
+            onReplay={reset}
+          />
+        ) : (
+          <ObjectiveTracker progress={snapshot.scenarioProgress} />
+        )}
         <section className="finance-summary" aria-label="Regional finances">
           <p className="eyebrow">Regional finances</p>
           <dl className="freight-details">
@@ -1227,13 +1364,20 @@ export function App() {
           )}
         </section>
         <div className="controls">
-          <button type="button" onClick={advanceDay}>
-            Advance one day
+          <button type="button" onClick={() => advance(8)}>
+            Advance 8 hours
+          </button>
+          <button type="button" onClick={() => advance(24)}>
+            Advance 1 day
+          </button>
+          <button type="button" onClick={() => advance(24 * 7)}>
+            Advance 1 week
           </button>
           <button className="secondary" type="button" onClick={reset}>
             Reset
           </button>
         </div>
+        <TimeCadence tick={snapshot.tick} time={snapshot.time} />
         <section className="persistence-tools" aria-label="Save and load">
           <p className="eyebrow">Save and load</p>
           <div className="tool-buttons">
@@ -1287,7 +1431,7 @@ export function App() {
           {roadTool === "build"
             ? `Drag across the map to draw ${buildRoadClass === "arterial" ? "an" : "a"} ${buildRoadClass} road. Endpoints snap to settlements, resources, the market, nearby roads, and junctions.`
             : roadTool === "remove"
-              ? "Select a player-built road segment to remove it. Drag empty map space to pan."
+              ? "Select a road segment to remove it. Drag empty map space to pan."
               : roadTool === "build-rail"
                 ? "Drag to build track. Endpoints snap to compatible freight sites, existing track, and rail junctions."
                 : roadTool === "remove-rail"

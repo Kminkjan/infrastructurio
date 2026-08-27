@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import { createSimulation } from "../simulation";
+import { OLD_MILLFORD_BRIDGE_ROAD_ID } from "../../scenarios";
 import { TRAFFIC_ASSIGNMENT_INTERVAL_TICKS } from "./road-traffic";
 
 function buildInitialBridge() {
@@ -12,9 +13,12 @@ function buildInitialBridge() {
     start: geography.quarry.position,
     end: geography.stoneworks.position,
   });
+  const eastbank = geography.settlementSeeds.find(
+    ({ id }) => id === "settlement-eastbank",
+  )!;
   simulation.dispatch({
     type: "build-road",
-    start: geography.stoneworks.position,
+    start: eastbank.position,
     end: geography.externalMarketConnection.position,
   });
   const snapshot = simulation.dispatch({ type: "advance", ticks: 24 });
@@ -30,18 +34,18 @@ describe("Millford bridge bottleneck diagnosis and interventions", () => {
 
     expect(bottleneck).toMatchObject({
       name: "Overloaded Millford bridge",
-      roadSegmentId: "road-segment-2",
-      roadClass: "arterial",
+      roadSegmentId: OLD_MILLFORD_BRIDGE_ROAD_ID,
+      roadClass: "local",
       demand: {
         assignedUnitsPerDay: 100,
-        excessUnitsPerDay: 20,
+        excessUnitsPerDay: 60,
       },
       capacity: {
-        practicalUnitsPerDay: 80,
-        volumeCapacityRatio: 1.25,
+        practicalUnitsPerDay: 40,
+        volumeCapacityRatio: 2.5,
       },
       routeChoice: {
-        routeLinkCount: 1,
+        routeLinkCount: 4,
         lastAssignmentTick: 24,
         nextAssignmentTick: 24 + TRAFFIC_ASSIGNMENT_INTERVAL_TICKS,
       },
@@ -57,10 +61,13 @@ describe("Millford bridge bottleneck diagnosis and interventions", () => {
       ],
     });
     expect(bottleneck?.congestionDelayHours).toBeGreaterThan(0);
-    expect(snapshot.bottlenecks.affectedRouteLinkIds).toEqual([
-      "road-segment-1:link-1",
-      "road-segment-2:link-1",
-    ]);
+    expect(snapshot.bottlenecks.affectedRouteLinkIds).toEqual(
+      expect.arrayContaining([
+        "road-segment-1:link-1",
+        `${OLD_MILLFORD_BRIDGE_ROAD_ID}:link-1`,
+        "road-segment-2:link-1",
+      ]),
+    );
   });
 
   it("removes the overload by upgrading the existing crossing while preserving its route", () => {
@@ -68,13 +75,15 @@ describe("Millford bridge bottleneck diagnosis and interventions", () => {
     const routeBefore = snapshot.stoneSupplyChain.outboundFreight.route?.linkIds;
     const upgraded = simulation.dispatch({
       type: "upgrade-road",
-      roadSegmentId: "road-segment-2",
+      roadSegmentId: OLD_MILLFORD_BRIDGE_ROAD_ID,
     });
 
-    expect(upgraded.roadNetwork.segments[1]?.roadClass).toBe("highway");
+    expect(upgraded.roadNetwork.segments.find(
+      ({ id }) => id === OLD_MILLFORD_BRIDGE_ROAD_ID,
+    )?.roadClass).toBe("highway");
     expect(upgraded.stoneSupplyChain.outboundFreight.route?.linkIds).toEqual(routeBefore);
     expect(upgraded.bottlenecks.roadBottlenecks.some(({ isMillfordBridge }) => isMillfordBridge)).toBe(false);
-    expect(upgraded.roadNetwork.links.find(({ roadSegmentId }) => roadSegmentId === "road-segment-2")).toMatchObject({
+    expect(upgraded.roadNetwork.links.find(({ roadSegmentId }) => roadSegmentId === OLD_MILLFORD_BRIDGE_ROAD_ID)).toMatchObject({
       capacityUnitsPerDay: 160,
       assignedFlowUnitsPerDay: 100,
       congestionDelayHours: 0,
@@ -113,6 +122,9 @@ describe("Millford bridge bottleneck diagnosis and interventions", () => {
       ),
     ).toBe(true);
     expect(immediatelyAfterBypass.stoneSupplyChain.outboundFreight.route?.linkIds).toEqual([
+      "millford-bridge-approach:link-1",
+      `${OLD_MILLFORD_BRIDGE_ROAD_ID}:link-1`,
+      "eastbank-bridge-approach:link-1",
       "road-segment-2:link-1",
     ]);
 
@@ -140,12 +152,12 @@ describe("Millford bridge bottleneck diagnosis and interventions", () => {
 
     const upgraded = simulation.dispatch({
       type: "upgrade-road",
-      roadSegmentId: "road-segment-2",
+      roadSegmentId: OLD_MILLFORD_BRIDGE_ROAD_ID,
     });
     expect(
       simulation.dispatch({
         type: "upgrade-road",
-        roadSegmentId: "road-segment-2",
+        roadSegmentId: OLD_MILLFORD_BRIDGE_ROAD_ID,
       }),
     ).toEqual(upgraded);
   });

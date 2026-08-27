@@ -1,5 +1,6 @@
 import {
   TICKS_PER_DAY,
+  type AccessibilitySnapshot,
   type InfrastructureTransactionQuote,
   type FreightRoute,
   type Point,
@@ -16,7 +17,10 @@ import {
   type SimulationCommand,
   type SimulationSnapshot,
 } from "../shared";
-import { generateMillfordValley } from "../scenarios";
+import {
+  createMillfordStartingRoads,
+  generateMillfordValley,
+} from "../scenarios";
 import {
   advanceFinanceDay,
   commitInfrastructureTransaction,
@@ -70,8 +74,18 @@ import {
   setFreightServicePrice,
   type FreightOperatorDemand,
   type FreightOperatorStateSnapshot,
+  FREIGHT_ASSIGNMENT_INTERVAL_TICKS,
 } from "./transport/freight-operators";
 import type { RoadTrafficStateSnapshot } from "./transport/road-traffic";
+import {
+  createScenarioProgressSnapshot,
+  createScenarioProgressState,
+  recordScenarioInspection,
+  updateScenarioProgress,
+  validateScenarioProgressState,
+  type ScenarioProgressContext,
+  type ScenarioProgressStateSnapshot,
+} from "./scenario/millford-scenario";
 
 const DEFAULT_PLAYER_ROAD_CLASS: RoadClass = "arterial";
 export const INBOUND_TRAFFIC_FLOW_ID = "stone-supply-inbound";
@@ -89,6 +103,7 @@ interface SimulationState {
   readonly supplyChain: StoneSupplyChainStateSnapshot;
   readonly finances: FinanceStateSnapshot;
   readonly development: DevelopmentStateSnapshot;
+  readonly scenarioProgress: ScenarioProgressStateSnapshot;
 }
 
 export interface SimulationStateSnapshot {
@@ -104,6 +119,7 @@ export interface SimulationStateSnapshot {
   readonly supplyChain?: StoneSupplyChainStateSnapshot;
   readonly finances?: FinanceStateSnapshot;
   readonly development?: DevelopmentStateSnapshot;
+  readonly scenarioProgress?: ScenarioProgressStateSnapshot;
 }
 
 export interface Simulation {
@@ -179,11 +195,12 @@ function supplyRoutes(state: SimulationState): {
   };
 }
 
-function snapshot(
+function derivedSnapshots(
   state: SimulationState,
   accessibility: ReturnType<typeof createAccessibilityScorer>,
   developmentModel: DevelopmentModel,
-): SimulationSnapshot {
+  initialAccessibility: AccessibilitySnapshot,
+) {
   const routes = supplyRoutes(state);
   const accessibilitySnapshot = accessibility.getSnapshot();
   const stoneSupplyChain = createStoneSupplyChainSnapshot(
@@ -204,31 +221,80 @@ function snapshot(
       OUTBOUND_TRAFFIC_FLOW_ID,
     ),
   );
+  const finances = createFinanceSnapshot(
+    state.finances,
+    state.geography,
+    state.roadNetwork,
+    state.railNetwork,
+  );
+  const bottlenecks = createBottleneckAnalysis(
+    state.geography,
+    state.roadNetwork,
+    state.freightOperators,
+    stoneSupplyChain,
+  );
+  const development = createDevelopmentSnapshot(
+    state.development,
+    developmentModel,
+    accessibilitySnapshot,
+  );
+  const progressContext: ScenarioProgressContext = Object.freeze({
+    tick: state.tick,
+    geography: state.geography,
+    roadNetwork: state.roadNetwork,
+    supplyChain: stoneSupplyChain,
+    finances,
+    bottlenecks,
+    accessibility: accessibilitySnapshot,
+    development,
+    initialAccessibility,
+  });
+  return Object.freeze({
+    stoneSupplyChain,
+    finances,
+    bottlenecks,
+    accessibility: accessibilitySnapshot,
+    development,
+    progressContext,
+  });
+}
+
+function snapshot(
+  state: SimulationState,
+  accessibility: ReturnType<typeof createAccessibilityScorer>,
+  developmentModel: DevelopmentModel,
+  initialAccessibility: ScenarioProgressContext["initialAccessibility"],
+): SimulationSnapshot {
+  const derived = derivedSnapshots(
+    state,
+    accessibility,
+    developmentModel,
+    initialAccessibility,
+  );
   return Object.freeze({
     seed: state.seed,
     tick: state.tick,
     elapsedDays: state.tick / TICKS_PER_DAY,
+    time: Object.freeze({
+      trafficUpdateIntervalTicks: FREIGHT_ASSIGNMENT_INTERVAL_TICKS,
+      economyUpdateIntervalTicks: TICKS_PER_DAY,
+      developmentUpdateIntervalTicks: developmentModel.evaluationIntervalTicks,
+      nextTrafficUpdateTick: state.freightOperators.nextAssignmentTick,
+      nextEconomyUpdateTick: state.supplyChain.nextUpdateTick,
+      nextMaintenanceUpdateTick: state.supplyChain.nextUpdateTick,
+      nextDevelopmentUpdateTick: state.development.nextEvaluationTick,
+    }),
     geography: state.geography,
     roadNetwork: state.roadNetwork,
     railNetwork: state.railNetwork,
-    stoneSupplyChain,
-    finances: createFinanceSnapshot(
-      state.finances,
-      state.geography,
-      state.roadNetwork,
-      state.railNetwork,
-    ),
-    bottlenecks: createBottleneckAnalysis(
-      state.geography,
-      state.roadNetwork,
-      state.freightOperators,
-      stoneSupplyChain,
-    ),
-    accessibility: accessibilitySnapshot,
-    development: createDevelopmentSnapshot(
-      state.development,
-      developmentModel,
-      accessibilitySnapshot,
+    stoneSupplyChain: derived.stoneSupplyChain,
+    finances: derived.finances,
+    bottlenecks: derived.bottlenecks,
+    accessibility: derived.accessibility,
+    development: derived.development,
+    scenarioProgress: createScenarioProgressSnapshot(
+      state.scenarioProgress,
+      derived.progressContext,
     ),
   });
 }
@@ -496,6 +562,7 @@ function createSimulationState(
   savedRoadTraffic?: RoadTrafficStateSnapshot,
   savedFinances?: FinanceStateSnapshot,
   savedFreightOperators?: FreightOperatorStateSnapshot,
+  savedScenarioProgress?: ScenarioProgressStateSnapshot,
 ): SimulationState {
   if (!Number.isSafeInteger(tick) || tick < 0) {
     throw new RangeError("simulation tick must be a non-negative safe integer");
@@ -558,6 +625,9 @@ function createSimulationState(
   const finances = savedFinances
     ? validateFinanceState(savedFinances, tick)
     : createFinanceState(tick);
+  const scenarioProgress = savedScenarioProgress
+    ? validateScenarioProgressState(savedScenarioProgress, tick, geography)
+    : createScenarioProgressState(tick);
   // Versions before multimodal assignment carry road-only state. Their final
   // topology and economy are retained, while assignment is rebuilt at load.
   void savedRoadTraffic;
@@ -584,10 +654,14 @@ function createSimulationState(
     supplyChain,
     finances,
     development,
+    scenarioProgress,
   });
 }
 
-function runSimulation(initialState: SimulationState): Simulation {
+function runSimulation(
+  initialState: SimulationState,
+  authoredInitialState: SimulationState = initialState,
+): Simulation {
   const stateSnapshot = (state: SimulationState): SimulationStateSnapshot =>
     Object.freeze({
       seed: state.seed,
@@ -605,6 +679,7 @@ function runSimulation(initialState: SimulationState): Simulation {
       supplyChain: state.supplyChain,
       finances: state.finances,
       development: state.development,
+      scenarioProgress: state.scenarioProgress,
     });
 
   let state = initialState;
@@ -621,6 +696,27 @@ function runSimulation(initialState: SimulationState): Simulation {
     initialState.roadNetwork,
   );
   const developmentModel = createMillfordDevelopmentModel(initialState.geography);
+  const initialAccessibility = createAccessibilityScorer(
+    createMillfordAccessibilityModel(authoredInitialState.geography, 0),
+    authoredInitialState.roadNetwork,
+  ).getSnapshot();
+
+  function updateProgress(evaluateDailyBoundary: boolean): void {
+    const derived = derivedSnapshots(
+      state,
+      accessibility,
+      developmentModel,
+      initialAccessibility,
+    );
+    state = {
+      ...state,
+      scenarioProgress: updateScenarioProgress(
+        state.scenarioProgress,
+        derived.progressContext,
+        evaluateDailyBoundary,
+      ),
+    };
+  }
 
   function updateAccessibility(network: RoadNetwork, forceModel = false): void {
     if (forceModel) {
@@ -652,7 +748,6 @@ function runSimulation(initialState: SimulationState): Simulation {
           let operatorState = state.freightOperators;
           let supplyChain = state.supplyChain;
           let finances = state.finances;
-          let activityChanged = false;
 
           while (supplyChain.nextUpdateTick <= targetTick) {
             const updateTick = supplyChain.nextUpdateTick;
@@ -683,7 +778,7 @@ function runSimulation(initialState: SimulationState): Simulation {
                 OUTBOUND_TRAFFIC_FLOW_ID,
               ),
             );
-            activityChanged ||=
+            const activityChanged =
               previousProcessing !== supplyChain.processedTonsPerDay;
             finances = advanceFinanceDay(
               finances,
@@ -703,6 +798,33 @@ function runSimulation(initialState: SimulationState): Simulation {
             network = atBoundary.roadNetwork;
             railNetwork = atBoundary.railNetwork;
             operatorState = atBoundary.state;
+
+            state = {
+              ...state,
+              tick: updateTick,
+              roadNetwork: network,
+              railNetwork,
+              freightOperators: operatorState,
+              supplyChain,
+              finances,
+            };
+            updateAccessibility(network, activityChanged);
+            state = {
+              ...state,
+              development: advanceDevelopment(
+                state.development,
+                developmentModel,
+                accessibility.getSnapshot(),
+                state.seed,
+                updateTick,
+              ),
+            };
+            updateProgress(true);
+            network = state.roadNetwork;
+            railNetwork = state.railNetwork;
+            operatorState = state.freightOperators;
+            supplyChain = state.supplyChain;
+            finances = state.finances;
           }
 
           const operators = advanceFreightOperators(
@@ -723,7 +845,7 @@ function runSimulation(initialState: SimulationState): Simulation {
             supplyChain,
             finances,
           };
-          updateAccessibility(state.roadNetwork, activityChanged);
+          updateAccessibility(state.roadNetwork);
           state = {
             ...state,
             development: advanceDevelopment(
@@ -737,11 +859,21 @@ function runSimulation(initialState: SimulationState): Simulation {
           break;
         }
         case "reset":
-          state = initialState;
+          state = authoredInitialState;
           accessibility = createAccessibilityScorer(
-            createMillfordAccessibilityModel(initialState.geography, 0),
-            initialState.roadNetwork,
+            createMillfordAccessibilityModel(authoredInitialState.geography, 0),
+            authoredInitialState.roadNetwork,
           );
+          break;
+        case "inspect-entity":
+          state = {
+            ...state,
+            scenarioProgress: recordScenarioInspection(
+              state.scenarioProgress,
+              state.geography,
+              command.entityId,
+            ),
+          };
           break;
         case "build-road":
           state = buildRoad(state, command.start, command.end, command.roadClass);
@@ -814,10 +946,21 @@ function runSimulation(initialState: SimulationState): Simulation {
           ),
         };
       }
-      return snapshot(state, accessibility, developmentModel);
+      updateProgress(false);
+      return snapshot(
+        state,
+        accessibility,
+        developmentModel,
+        initialAccessibility,
+      );
     },
     getSnapshot() {
-      return snapshot(state, accessibility, developmentModel);
+      return snapshot(
+        state,
+        accessibility,
+        developmentModel,
+        initialAccessibility,
+      );
     },
     getState() {
       return stateSnapshot(state);
@@ -908,26 +1051,47 @@ function runSimulation(initialState: SimulationState): Simulation {
 }
 
 export function createSimulation(seed: string): Simulation {
-  return runSimulation(createSimulationState(seed, 0, [], 1, [], [], 1));
+  const geography = generateMillfordValley(seed);
+  return runSimulation(
+    createSimulationState(
+      seed,
+      0,
+      createMillfordStartingRoads(geography),
+      1,
+      [],
+      [],
+      1,
+    ),
+  );
 }
 
 export function restoreSimulation(
   savedState: SimulationStateSnapshot,
 ): Simulation {
-  return runSimulation(
-    createSimulationState(
-      savedState.seed,
-      savedState.tick,
-      savedState.roadSegments,
-      savedState.nextRoadSegmentNumber,
-      savedState.railTracks,
-      savedState.railTerminals,
-      savedState.nextRailTrackNumber,
-      savedState.development,
-      savedState.supplyChain,
-      savedState.roadTraffic,
-      savedState.finances,
-      savedState.freightOperators,
-    ),
+  const restoredState = createSimulationState(
+    savedState.seed,
+    savedState.tick,
+    savedState.roadSegments,
+    savedState.nextRoadSegmentNumber,
+    savedState.railTracks,
+    savedState.railTerminals,
+    savedState.nextRailTrackNumber,
+    savedState.development,
+    savedState.supplyChain,
+    savedState.roadTraffic,
+    savedState.finances,
+    savedState.freightOperators,
+    savedState.scenarioProgress,
   );
+  const geography = generateMillfordValley(savedState.seed);
+  const authoredInitialState = createSimulationState(
+    savedState.seed,
+    0,
+    createMillfordStartingRoads(geography),
+    1,
+    [],
+    [],
+    1,
+  );
+  return runSimulation(restoredState, authoredInitialState);
 }

@@ -1,7 +1,9 @@
-import type { Point, ScenarioGeography } from "../shared";
+import type { Point, RoadSegment, ScenarioGeography } from "../shared";
 
 const MAP_WIDTH = 960;
 const MAP_HEIGHT = 620;
+
+export const OLD_MILLFORD_BRIDGE_ROAD_ID = "millford-old-bridge";
 
 function hashSeed(seed: string): number {
   let hash = 0x811c9dc5;
@@ -120,4 +122,43 @@ export function generateMillfordValley(seed: string): ScenarioGeography {
       mapEdge: "east",
     }),
   });
+}
+
+export function createMillfordStartingRoads(
+  geography: ScenarioGeography,
+): readonly RoadSegment[] {
+  const [millford, eastbank] = geography.settlementSeeds;
+  if (!millford || !eastbank) {
+    throw new RangeError("Millford starting roads require two settlements");
+  }
+  const { center, width, height } = geography.crossingArea;
+  const bridgeStart = point(center.x - width / 2, center.y + height / 2);
+  const bridgeEnd = point(center.x + width / 2, center.y - height / 2);
+
+  return Object.freeze([
+    Object.freeze({
+      id: "millford-west-approach",
+      roadClass: "arterial" as const,
+      start: millford.position,
+      end: geography.stoneworks.position,
+    }),
+    Object.freeze({
+      id: "millford-bridge-approach",
+      roadClass: "highway" as const,
+      start: geography.stoneworks.position,
+      end: bridgeStart,
+    }),
+    Object.freeze({
+      id: OLD_MILLFORD_BRIDGE_ROAD_ID,
+      roadClass: "local" as const,
+      start: bridgeStart,
+      end: bridgeEnd,
+    }),
+    Object.freeze({
+      id: "eastbank-bridge-approach",
+      roadClass: "highway" as const,
+      start: bridgeEnd,
+      end: eastbank.position,
+    }),
+  ]);
 }

@@ -7,12 +7,17 @@ import type { DevelopmentSnapshot } from "./development";
 import type { Point, ScenarioGeography } from "./geography";
 import type { RoadClass, RoadNetwork } from "./roads";
 import type { RailNetwork, RailTerminalSite } from "./rail";
+import type {
+  ScenarioProgressSnapshot,
+  SimulationTimeSnapshot,
+} from "./scenario-progress";
 
 export const TICKS_PER_DAY = 24;
 
 export type SimulationCommand =
   | { readonly type: "advance"; readonly ticks: number }
   | { readonly type: "reset" }
+  | { readonly type: "inspect-entity"; readonly entityId: string }
   | {
       readonly type: "build-road";
       readonly start: Point;
@@ -46,6 +51,7 @@ export interface SimulationSnapshot {
   readonly seed: string;
   readonly tick: number;
   readonly elapsedDays: number;
+  readonly time: SimulationTimeSnapshot;
   readonly geography: ScenarioGeography;
   readonly roadNetwork: RoadNetwork;
   readonly railNetwork: RailNetwork;
@@ -54,4 +60,5 @@ export interface SimulationSnapshot {
   readonly bottlenecks: BottleneckAnalysisSnapshot;
   readonly accessibility: AccessibilitySnapshot;
   readonly development: DevelopmentSnapshot;
+  readonly scenarioProgress: ScenarioProgressSnapshot;
 }

@@ -375,6 +375,37 @@ trip starts at that leg's origin. A changed route or shipped volume replaces the
 sampling plan; a missing or unviable route clears it. These animation phases are
 intentionally absent from simulation snapshots and saves.
 
+### M3 guided scenario progress and ending
+
+Millford Valley begins with four authored road segments: the old local-capacity
+bridge, its higher-capacity short approaches, and the connection between
+Millford and the dormant stoneworks. Quarry access and the Eastbank-to-market
+extension remain incomplete. These existing roads contribute daily maintenance
+but not player capital spending.
+
+The simulation owns scenario progress. It records inspection intent received
+through a typed command, observes the first day on which both supply-chain legs
+are served, records authoritative overload on the old bridge, and recognizes an
+upgrade, road bypass, rail shift, or combined intervention from current topology
+and freight assignment. React only presents the resulting objective snapshot.
+
+After pressure has been observed and an intervention has resolved it, a daily
+success hold increments only when all of these remain true at the daily boundary:
+
+- inbound and outbound freight both ship a positive volume;
+- the old bridge is relieved, unused, or removed because freight shifted;
+- at least one infrastructure-enabled residential project has completed; and
+- the treasury covers the next daily infrastructure maintenance and permanent
+  emergency-bond penalty.
+
+Any failed daily boundary resets the hold to zero. Three consecutive successful
+boundaries freeze an authoritative ending summary with intervention class,
+capital spending, paid and current maintenance, road/rail freight split, bridge
+flow and capacity, and each settlement's change from starting accessibility.
+Previous emergency-bond use remains visible and penalized but does not by itself
+prevent success. Reset restores the deterministic authored network, finances,
+economy, development, and objective history.
+
 ## Private operators
 
 Vehicles belong to simulated operators. Operators respond to demand, infrastructure compatibility, operating cost, capacity, and policy.
@@ -410,3 +441,8 @@ Different systems use different clocks:
 - Development evaluation: weekly
 - Migration and land values: monthly
 - Regional economy: quarterly
+
+The current vertical slice exposes deterministic advances of eight hours, one
+day, and one week. Its snapshot publishes the next eight-hour traffic assignment,
+daily economy and maintenance boundary, and weekly development evaluation so the
+UI never reconstructs cadence from display timers.

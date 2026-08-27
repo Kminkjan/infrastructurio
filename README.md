@@ -65,7 +65,7 @@ returns the complete map to view. Hide the controls when you need the full map
 for construction or inspection. Choose **Build arterial** or **Build highway**
 and drag across the map to construct that road class; endpoints snap to
 settlements, resources, the market, nearby roads, and junctions. Choose
-**Remove road** and select a player-built segment to delete it.
+**Remove road** and select a road segment to delete it.
 
 Choose **Build track** and drag a rail corridor between the quarry,
 stoneworks, market, existing track, or rail junctions. Place the three compatible
@@ -77,7 +77,12 @@ free-flow time, construction cost, daily maintenance, and removal salvage. Rail
 freight terminals are co-located with their compatible sites, so a complete rail
 service has no additional road access or egress in this prototype.
 
-The scenario begins with a $60,000 treasury. Dragging a road shows the
+The scenario begins with the old local-capacity Millford bridge, short approaches,
+an otherwise incomplete quarry–stoneworks–market network, dormant stoneworks,
+two settlements, and a $60,000 treasury. The simulation-owned objective tracker
+first asks you to inspect the three supply-chain sites, then follows activation,
+bridge pressure, a second intervention, and a three-day stabilization period.
+Dragging a road shows the
 simulation-owned construction breakdown before release, including base work,
 Eastbank land acquisition, and constrained river work. Inspect a road to preview
 its highway-upgrade cost and removal salvage. Unaffordable construction is
@@ -104,6 +109,16 @@ revenue at the same daily boundary that charges road and crossing maintenance. A
 recovery bond becomes available below $15,000, adds $15,000, and permanently
 adds a visible $150 daily penalty. Further bonds require the treasury to fall
 below the threshold again, and their penalties stack.
+Use the 8-hour, one-day, and one-week time controls to match traffic-assignment,
+daily economy and maintenance, and weekly development pacing. The cadence panel
+shows exactly when each authoritative update will occur. Success requires both
+freight legs, completed infrastructure-enabled growth, a relieved bridge or
+shifted freight flow, and a treasury that can cover the next maintenance and
+bond-penalty charge for three consecutive daily boundaries. The ending compares
+the intervention, costs, modal freight split, bridge condition, and settlement
+accessibility changes, and offers a deterministic replay. Reset also remains
+available after a poor plan; emergency-bond penalties disappear only because the
+entire authored starting state is restored.
 Each freight leg remains at zero until its terminals have a viable route and the
 daily economy has goods available to move. Orange private trucks animate along
 road routes, while teal private trains animate along rail routes. Each vehicle
