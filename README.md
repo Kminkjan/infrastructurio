@@ -163,6 +163,7 @@ and **Import file** validates and loads one of those files.
 npm test
 npm run typecheck
 npm run build
+npm run measure:m3
 ```
 
 Vitest uses its Node environment for simulation tests, so the simulation can be exercised without a DOM, React, or PixiJS renderer.
@@ -174,6 +175,7 @@ Vitest uses its Node environment for simulation tests, so the simulation can be 
 - [Simulation model](docs/simulation-model.md)
 - [Technical architecture](docs/technical-architecture.md)
 - [Performance strategy](docs/performance-strategy.md)
+- [M3 release validation and playtest](docs/m3-release-validation.md)
 - [Roadmap](ROADMAP.md)
 - [Initial issue backlog](docs/initial-backlog.md)
 - [Glossary](docs/glossary.md)

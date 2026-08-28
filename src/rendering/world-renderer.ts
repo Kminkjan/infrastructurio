@@ -29,6 +29,9 @@ import {
   sampleRepresentativeFreightVehicles,
   type RepresentativeFreightTrafficPlan,
 } from "./representative-freight";
+import { summarizeFramePerformance } from "./frame-performance";
+
+const DEVELOPMENT_FRAME_SAMPLE_COUNT = 180;
 
 export type RoadTool =
   | "inspect"
@@ -189,6 +192,7 @@ export async function createWorldRenderer(
   let representativeTrafficPlans: readonly RepresentativeFreightTrafficPlan[] = [];
   let representativeTrafficElapsedSeconds = 0;
   const representativeVehicleGraphics = new Map<string, Graphics>();
+  let developmentFrameSamples: number[] = [];
 
   function applyCamera(): void {
     world.position.set(camera.x, camera.y);
@@ -989,9 +993,41 @@ export async function createWorldRenderer(
     drawBottleneckOverlay(snapshot);
     updateRepresentativeTraffic(snapshot);
     drawRepresentativeVehicles();
+    if (import.meta.env.DEV) {
+      developmentFrameSamples = [];
+      delete canvas.dataset.framePerformance;
+    }
   }
 
   function animateRepresentativeTraffic(): void {
+    if (
+      import.meta.env.DEV &&
+      developmentFrameSamples.length < DEVELOPMENT_FRAME_SAMPLE_COUNT
+    ) {
+      developmentFrameSamples.push(application.ticker.deltaMS);
+      if (developmentFrameSamples.length === DEVELOPMENT_FRAME_SAMPLE_COUNT) {
+        canvas.dataset.framePerformance = JSON.stringify({
+          ...summarizeFramePerformance(developmentFrameSamples),
+          roadSegments: currentSnapshot.roadNetwork.segments.length,
+          roadLinks: currentSnapshot.roadNetwork.links.length,
+          railTracks: currentSnapshot.railNetwork.tracks.length,
+          railLinks: currentSnapshot.railNetwork.links.length,
+          terminals: currentSnapshot.railNetwork.terminals.length,
+          developmentMarks: currentSnapshot.development.locations.reduce(
+            (total, location) =>
+              total +
+              Math.ceil(location.growthPopulation / 10) +
+              (location.pendingConstruction ? 1 : 0),
+            0,
+          ),
+          overlayFeatures: getBottleneckOverlayFeatures(currentSnapshot).length,
+          representativeVehicles: representativeTrafficPlans.reduce(
+            (total, plan) => total + plan.vehicleCount,
+            0,
+          ),
+        });
+      }
+    }
     if (representativeTrafficPlans.length === 0) {
       return;
     }

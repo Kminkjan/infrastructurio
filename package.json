@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "measure:m3": "vitest run src/testing/m3-performance.test.ts --reporter=verbose",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

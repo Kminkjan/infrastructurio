@@ -123,6 +123,15 @@ The web scaffold establishes four public module entry points:
 
 The browser application currently runs the simulation on the main thread through the typed command/snapshot interface. This keeps the initial scaffold small while preserving the seam that will move behind a Web Worker when simulation processing warrants it. The simulation test suite runs in a Node environment and does not construct browser, React, or PixiJS objects.
 
+Release validation keeps authored test orchestration outside the simulation
+core. `src/testing/m3-release-fixture.ts` drives only the public command,
+snapshot, and persistence interfaces, so it cannot bypass construction costs,
+operator choice, objective state, or save validation. The matching portable
+save exercises the same browser import path as a player file. Development builds
+sample one bounded set of Pixi ticker deltas after each snapshot and expose the
+summary as a canvas data attribute; the sampler is excluded from production by
+the Vite development guard.
+
 Millford Valley geography is generated from an authored scenario template plus
 bounded seeded variation in `src/scenarios`. The simulation owns the generated
 geography and includes it in its serializable snapshot; the renderer only applies

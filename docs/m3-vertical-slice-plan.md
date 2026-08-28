@@ -130,6 +130,10 @@ Measured evidence, the reference machine, and any accepted limits belong in the
 performance strategy document. Optimization should follow profiling rather than
 precede it.
 
+The issue #19 release evidence, three-variant playtest script, persistence check,
+target fixture, and explicit M3 claim evaluation are recorded in
+[M3 release validation](m3-release-validation.md).
+
 ## Delivery order
 
 1. [#13 — Multi-step granite and finished-stone production chain](https://github.com/Kminkjan/infrastructurio/issues/13).
