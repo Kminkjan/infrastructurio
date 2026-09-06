@@ -24,8 +24,8 @@ Choose presentation based on construction readability and cost.
 
 Evidence update (2026-09-06): the [paired browser study](research/m4/rendering/README.md)
 records scripted tasks, screenshots and timings. ADR 0004 retains Pixi plan view as
-the research reference only. Evidence review, human comparison and the production
-choice remain open; this issue and F3 are not complete.
+the research reference only. An [independent evidence review](research/m4/evidence-review.md)
+is recorded; human comparison and the production choice remain open; this issue and F3 are not complete.
 
 Depends on: No new-prototype prerequisite.
 
@@ -41,6 +41,10 @@ Acceptance criteria:
 
 Establish a simulation model in which detailed junction design changes physical traffic outcomes.
 
+Review update (2026-09-06): deterministic comparisons reproduced exactly; weights
+2/4 remain rejected. See [review findings](research/m4/evidence-review.md). #27 stays
+open for acceptance disposition; reproduction alone does not close the gate.
+
 Depends on: No new-prototype prerequisite.
 
 Acceptance criteria:
@@ -55,6 +59,10 @@ Acceptance criteria:
 [GitHub #28](https://github.com/Kminkjan/infrastructurio/issues/28)
 
 Reuse working foundations while replacing assumptions that prevent causal infrastructure design.
+
+Review update (2026-09-06): [legacy constraints](research/m4/legacy-inventory.md)
+now record layer ownership and the shared legacy save-slot overwrite hazard. Final
+acceptance remains dependent on #26 and #27; no loader or production rewrite landed.
 
 Depends on: F1, F2.
 

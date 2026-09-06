@@ -150,7 +150,7 @@ application. The shared fixture/controller and HTML are also new research code.
 | `study.mjs` | 188 | 5,402 |
 | `index.html` | 117 | 3,187 |
 | `run-study.mjs` | 218 | 7,261 |
-| `verify-results.mjs` | 29 | 1,853 |
+| `verify-results.mjs` (original study revision) | 29 | 1,853 |
 
 
 The adapters rebuild geometry on selection/drag, have no persistent authored-road
@@ -166,7 +166,7 @@ Requires Node >=20.19 and installed Google Chrome on macOS (hardware collection 
 
 ```sh
 npm ci
-npm run dev -- --host 127.0.0.1
+npm run dev -- --host 127.0.0.1 --strictPort
 # In another terminal, keep the study's Chrome window visible:
 npm run research:m4:rendering -- /tmp/m4-rendering-rerun
 npm run verify:m4:rendering -- /tmp/m4-rendering-rerun/results.json
@@ -174,9 +174,12 @@ npm run verify:m4:rendering -- /tmp/m4-rendering-rerun/results.json
 
 Open `/experiments/m4/rendering/index.html?mode=2d` or `?mode=3d` on that local server
 for inspection. The production build intentionally does not ship the experiment.
-The verifier checks source hashes, performed scripted outcomes and visible sample
-coverage. It expects the direct occlusion failure and does not call that a passing
-queue selection. Timing values vary; coordinate observations should reproduce.
+The verifier checks the complete source manifest, unique paired task/workload
+coverage, coordinate errors and timing summaries recomputed from raw samples.
+Visibility is captured only at sample end; it cannot prove uninterrupted foreground
+visibility. Edit-rebuild timings have only a summary, so their distribution cannot
+be independently recomputed from the committed report. The verifier expects the
+direct occlusion failure and does not call that a passing queue selection. Timing values vary; coordinate observations should reproduce.
 
 ## Verification performed
 
@@ -202,3 +205,8 @@ cadence, save boundaries and accepted region budgets still require reviewed #26/
 evidence. Epic #21 and milestone 5 remain open. No M5 road/growth or M6 rail
 implementation is included. The original M3 checkout remains on `18dc5ee` with its
 same ten modified files; its diff hash is checked before/after this experiment.
+
+Independent source, screenshot and raw-sample review: [review findings](../evidence-review.md).
+The runner uses port 5173; require the strict-port server to start successfully in
+the intended checkout before running it. A different server on that port would
+invalidate provenance even though the runner hashes local files.

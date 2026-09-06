@@ -8,7 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "test:m4": "node --test experiments/m4/lane-fixture.checks.mjs",
+    "test:m4": "node --test experiments/m4/lane-fixture.checks.mjs experiments/m4/rendering/verify-results.checks.mjs",
     "research:m4:lanes": "node experiments/m4/run-lane-study.mjs",
     "research:m4:rendering": "node experiments/m4/rendering/run-study.mjs",
     "verify:m4:rendering": "node experiments/m4/rendering/verify-results.mjs"
