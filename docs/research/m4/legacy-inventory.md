@@ -1,7 +1,9 @@
 # Preliminary M4 legacy inventory
 
 Read-only inspection on 2026-09-06 for #28. **Not the completed migration audit:**
-#26 has no rendering/interaction evidence yet; #27 now has the bounded lane study.
+#26 now has a [paired rendering experiment](rendering/README.md) and a provisional
+research reference; #27 has the bounded lane study. Both still need review; human
+comparison and the production renderer/camera choice remain open.
 No old issue has been closed, superseded or relabelled on the strength of this inventory.
 
 ## Evidence boundaries
@@ -35,7 +37,7 @@ not to files currently present in this worktree. These are candidates for #28 re
 | --- | --- | --- |
 | Deterministic simulation and commands (M0–M2) | `src/simulation/simulation.ts`, `src/shared/simulation.ts`; typed commands, clock/state snapshots and behavioral tests | Retain separation and deterministic command pattern; adapt time units and movement state for #29/#32/#33/#38. Do not reinterpret old hour ticks as movement ticks. |
 | Road graph (M0–M2) | `src/simulation/transport/road-network.ts`: `segmentIntersection`, pairwise splits in `createRoadNetwork`, 2D `Point`, aggregate `applyRoadLinkFlows` | Replace planar topology/capacity assumptions in #29/#31/#33. Reuse validation/routing test patterns, not elevation-blind crossing connectivity. |
-| Vehicle rendering (M0–M2) | `src/rendering/representative-freight.ts`: 20 tons/icon, elapsed-time route sampling; `world-renderer.ts` owns animation | Replace movement authority with simulation snapshots in #33/#34. #27 rejects naive weighted physical reuse. Renderer/camera choice awaits #26. |
+| Vehicle rendering (M0–M2) | `src/rendering/representative-freight.ts`: 20 tons/icon, elapsed-time route sampling; `world-renderer.ts` owns animation | Replace movement authority with simulation snapshots in #33/#34. #27 rejects naive weighted physical reuse. ADR 0004 retains Pixi plan view for research; production choice awaits #26 review. |
 | Accessibility and development (M1–M2) | `src/simulation/growth/{accessibility,development,millford-accessibility,millford-development}.ts`; dependency caches, delayed construction, explanations | Adapt cache/slow-decision structure for #34/#35; replace generalized aggregate travel costs with measured journeys, distinct land uses and sustained feedback. Existing geography is an optional seed. |
 | Supply chain #13 | M3 `src/simulation/economy/stone-supply-chain.ts`: daily storage/processing, `assignFreight` based on route cost, bounded outputs | Adapt inventory/limiting-factor patterns for #32/#35. Aggregate assigned/shipped tons are not evidence of physical delivery; authored quarry chain is not the new target. |
 | Finance #14 | M3 `src/simulation/economy/infrastructure-finance.ts`: quotes, polygon land cost, transaction state; finished-stone revenue and recurring bond penalties | Retain quote/commit and atomic rejection patterns; replace transport revenue and recalibrate recovery/maintenance for regional funding in #37. |
@@ -68,5 +70,7 @@ slower clocks. #27's 0.5 s cell tick is only the research reference. Exact produ
 movement, demand, smoothing and development intervals remain unselected. Preserve
 all steps during time acceleration. Measured disconnected-kernel cost does not
 justify a worker migration now; connected routing, browser and render/snapshot
-costs must be included before revisiting. The scene/frame budget and renderer/camera
-ADR must await #26. These open dependencies prevent marking #28 complete.
+costs must be included before revisiting. The paired #26 study supplies browser-only scene measurements and provisional
+renderer/camera ADR 0004. Its synthetic icons do not integrate this movement model.
+Final region/frame budgets and production rendering acceptance remain open; these
+dependencies prevent marking #28 complete.

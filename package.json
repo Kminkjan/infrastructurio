@@ -9,7 +9,9 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "test:m4": "node --test experiments/m4/lane-fixture.checks.mjs",
-    "research:m4:lanes": "node experiments/m4/run-lane-study.mjs"
+    "research:m4:lanes": "node experiments/m4/run-lane-study.mjs",
+    "research:m4:rendering": "node experiments/m4/rendering/run-study.mjs",
+    "verify:m4:rendering": "node experiments/m4/rendering/verify-results.mjs"
   },
   "engines": {
     "node": ">=20.19"
@@ -20,10 +22,12 @@
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.0.5",
     "fake-indexeddb": "^6.2.5",
+    "three": "0.185.1",
     "typescript": "^7.0.2",
     "vite": "^8.2.1",
     "vitest": "^4.1.10"
