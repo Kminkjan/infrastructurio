@@ -2,30 +2,19 @@
 
 > **You build the infrastructure. The simulation uses it and builds around it.**
 
-Infrastructurio is an infrastructure simulation game about creating opportunity rather than placing a finished city. The player builds strategic networks—roads, railways, crossings, terminals, and eventually utilities—while households, businesses, private transport operators, and towns decide how to use them.
+Infrastructurio is an infrastructure simulation game about creating opportunity rather than placing a finished city. The player designs roads, lanes, junctions, railways and stations in detail, while households, businesses, private transport operators and towns decide how to use them.
 
 Successful infrastructure attracts development. Development creates traffic, land pressure, and new dependencies. Those consequences produce the next problem for the player to solve.
 
-## Status
+## Direction
 
-The project is in pre-production. A runnable web foundation is in place, and the current goal is a small simulation toy that proves one loop:
+The next prototype centres on detailed road, junction, track and station design. Vehicles and train services operate autonomously; towns grow and add constrained local streets. Real queues and journey reliability change accessibility, and development generates new trips.
 
-1. Connect a resource to a market.
-2. Observe private traffic using the connection.
-3. See a settlement or industry grow where access improves.
-4. Diagnose the bottleneck created by that growth.
-5. Change the network and observe the world respond.
+The agreed sequence is **M4: design and technical evidence → M5: open-ended road/growth prototype → M6: autonomous rail**. See the [vision](docs/vision.md), [roadmap](ROADMAP.md), [prototype contract](docs/next-prototype-plan.md) and [linked backlog](docs/next-prototype-backlog.md).
 
-Anything that does not help prove this loop is deliberately secondary.
+## Current build
 
-## Design pillars
-
-- **Infrastructure shapes development.** The player creates conditions; the simulation chooses outcomes.
-- **Growth has reasons.** Every important location and route choice should be inspectable.
-- **Success creates pressure.** Good infrastructure attracts enough activity to create new constraints.
-- **The player builds the skeleton.** Towns may build local streets, but strategic corridors remain player decisions.
-- **Vehicles belong to the world.** Private operators choose routes and services; the player controls capacity, access, pricing, and rules.
-- **Scale through abstraction.** Decisions and flows are simulated accurately; visible agents may represent aggregated activity.
+The runnable foundation on main uses aggregate road freight and representative animation. Additional M3 work exists on separate branches and must be audited before reuse. It is a reuse base; detailed lane movement and autonomous train dispatch are planned, not implemented by this direction update. The run instructions describe the existing Millford scenario.
 
 ## Prototype direction
 
@@ -127,8 +116,4 @@ Vitest uses its Node environment for simulation tests, so the simulation can be 
 
 ## Current milestone
 
-**M2 — Bottleneck Loop:** make road capacity and congestion legible, then
-support multiple interventions whose transport and development consequences
-unfold over simulated time.
-
-The roadmap describes outcomes rather than dates. Issues describe the concrete work needed to reach each outcome.
+**M4 — Infrastructure Design Foundations:** evaluate construction presentation, prove causal traffic and audit reuse before building the M5 road loop. Earlier M3 work remains tracked separately; GitHub is authoritative for its completion status.

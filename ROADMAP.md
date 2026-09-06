@@ -1,81 +1,43 @@
 # Roadmap
 
-The roadmap is organized around playable proofs. A milestone is complete when its player-visible claim is demonstrated, not merely when a list of systems exists.
+The September 2026 direction makes detailed infrastructure design the main activity, with autonomous transport and development creating emergent challenges. Milestones close on playable evidence, not feature counts. No calendar deadlines are implied.
 
-## M0 — Simulation Toy
+## M4 — Infrastructure Design Foundations
 
-**Claim:** Infrastructure placed by the player can be used by autonomous traffic.
+[GitHub milestone](https://github.com/Kminkjan/infrastructurio/milestone/5)
 
-The player can navigate a small generated map, connect a resource to an external market, and observe representative private freight traffic taking a valid route.
+**Claim:** We have demonstrated a usable construction approach and a causal traffic model suitable for the small-region prototype.
 
-Proof points:
+Evaluate readable 2D versus 3D with identical curved-road, elevated-crossing and lane-selection tasks. Prove lane occupancy, queues and representative-vehicle accounting in a headless experiment. Audit reusable M0–M3 systems and define migration boundaries. Record the rendering decision, simulation units, target fixture size and measured performance budget before full implementation.
 
-- A deterministic valley scenario loads.
-- The camera can pan, zoom, and select map elements.
-- The player can construct and remove a simple road.
-- Roads form a routable graph.
-- A resource producer and external market exchange goods.
-- Representative private vehicles visualize aggregate freight flow.
-- Save and load preserve the scenario state.
+This is an enabling milestone, not the first complete playable game loop.
 
-## M1 — Emergent Settlement
+## M5 — Roads Shape a Growing Region
 
-**Claim:** Better accessibility creates believable development in sensible places.
+[GitHub milestone](https://github.com/Kminkjan/infrastructurio/milestone/6)
 
-The simulation calculates access to jobs, resources, markets, and labor. At least one settlement and one industry can appear or expand because player-built infrastructure changes those values.
+**Claim:** Detailed road design changes real traffic behaviour, which changes development and produces new design problems.
 
-Proof points:
+Deliver freeform editable roads, independent directional lane counts, lane connections, priorities, basic signals, bridges and underpasses. Integrate causal vehicle movement, autonomous trips, residential/commercial/industrial development and constrained town street growth. Provide forgiving finances, useful defaults, inspection and saving. Validate an open-ended small region with at least two viable junction interventions and no forced ending.
 
-- Locations receive inspectable accessibility scores.
-- Regional demand limits total growth.
-- Development chooses among candidate locations.
-- Buildings visually represent population, employment, and industry.
-- A location inspector explains why development occurred.
-- The simulation may add constrained local streets around development.
+M5 is the first integrated playable milestone. Internal construction and traffic slices are steps toward it, not a substitute for growth integration.
 
-## M2 — Bottleneck Loop
+## M6 — Autonomous Rail Shapes the Region
 
-**Claim:** Successful development creates a legible infrastructure problem that supports multiple solutions.
+[GitHub milestone](https://github.com/Kminkjan/infrastructurio/milestone/7)
 
-Traffic responds to capacity and congestion. The player can identify an overloaded connection and improve, bypass, price, or redirect it. Growth and route choice respond over time.
+**Claim:** Player-built tracks and stations attract autonomous train services, and rail design changes service quality and regional growth.
 
-Proof points:
+Add editable tracks, switches, platforms, basic block signals and road access to stations/terminals. Operators choose viable routes, service frequency, train size and dispatch. Train occupancy and conflicts affect reliability, modal choice and development. Prove a small passenger and freight example, including an unused station with an inspectable reason and a service improved through infrastructure alone.
 
-- Link capacity affects travel time and generalized cost.
-- Congestion and queues are visible.
-- A bottleneck inspector identifies causes and affected flows.
-- At least two interventions can solve the initial bottleneck.
-- Interventions have different costs or secondary consequences.
-- Development responds with delay rather than relocating instantly.
+## Sequencing and scope
 
-## M3 — Millford Valley Vertical Slice
+M4 evidence gates implementation choices for M5. M5 must demonstrate the road feedback loop before M6 expands the playable scope. [Prototype plan](docs/next-prototype-plan.md) defines acceptance and technical boundaries. [Issue backlog](docs/next-prototype-backlog.md) provides work breakdown, dependencies and GitHub links.
 
-**Claim:** The complete premise sustains an understandable 20–30 minute scenario.
+## Earlier work
 
-The map contains two settlements, a quarry, fertile land, and an external market. The player enables a supply chain, observes growth, encounters a bridge bottleneck, and reshapes the region through a second strategic intervention.
+[M0–M3 roadmap](docs/roadmap-m0-m3.md) and [M3 plan](docs/m3-vertical-slice-plan.md) remain historical context. Existing implementations are candidates for reuse, not evidence that lane-level traffic or autonomous train dispatch already exists. GitHub is authoritative for issue status. M3 completion and reconciliation are separate from the new prototype’s acceptance.
 
-Proof points:
+## Beyond this prototype
 
-- A guided but replayable scenario has a clear beginning and end state.
-- The economy includes at least one multi-step production chain.
-- Private road and rail operators respond to infrastructure.
-- Construction, maintenance, and land costs constrain decisions.
-- Simulation explanations make important outcomes understandable.
-- Performance remains smooth at the intended prototype scale.
-
-The playable scenario contract and delivery order are defined in
-[M3 Millford Valley Vertical Slice](docs/m3-vertical-slice-plan.md).
-
-## Later — Scalable Prototype
-
-Possible work after the vertical slice:
-
-- Larger maps and hierarchical routing
-- Additional infrastructure modes and utilities
-- Multiple towns with local governance
-- More economic sectors and external trade
-- Policies, tolls, subsidies, and service requirements
-- Map generation and scenario tools
-- Modding and data-driven content
-
-These are intentionally not commitments until the vertical slice validates the game.
+Larger regions, more transport modes, deeper economies and policy tools depend on evidence from M5 and M6. Vehicle fleet management and player dispatch are outside the agreed player role.
