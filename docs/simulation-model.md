@@ -296,12 +296,29 @@ Different systems use different clocks:
 - Migration and land values: monthly
 - Regional economy: quarterly
 
-## M4 research evidence (2026-09-06)
+## M4 reviewed research boundary (2026-09-06)
 
-The isolated [lane study](research/m4/README.md) now records causal priority and
-spillback checks, representation-factor failures, units and named-machine movement
-measurements. [ADR 0003](decisions/0003-m4-physical-traffic-reference.md) retains
-weight 1 as the research reference. These are movement-only findings; production
-traffic, renderer/camera and frame budgets remain undecided. The
-[preliminary legacy inventory](research/m4/legacy-inventory.md) does not close #28
-or supersede its dependency on the #26 presentation comparison.
+[Independent review](research/m4/evidence-review.md) reproduces #27's deterministic
+lane/weight comparisons and audits #26's sources, screenshots and raw frame/CPU
+samples. [ADR 0003](decisions/0003-m4-physical-traffic-reference.md) retains weight 1;
+[ADR 0004](decisions/0004-m4-renderer-camera-reference.md) retains Pixi plan view for
+research only. Human comparison and production renderer/camera acceptance remain
+pending. Existing aggregate-flow and decorative-animation sections above describe
+legacy behavior, not authority for the next prototype.
+
+The [reviewed migration constraints](research/m4/legacy-inventory.md#review-disposition-2026-09-06-after-pr-47)
+separate authored geometry, derived legal movements, dynamic occupancy and render
+snapshots. Simulation owns movement and completion; display sampling cannot supply
+capacity. Preserve fixed steps during acceleration and use explicit slower feedback
+clocks. The 0.5-second research tick does not choose production cadence.
+
+Keep the disconnected movement envelope (p95 1 ms/tick, 2 ms/10 ticks, 1 ms each
+for snapshot construction/serialization) separate from the synthetic browser
+regression envelope (20 ms frame interval, 4 ms CPU update/submit, 8 ms edit rebuild).
+Both apply only to their named reference hardware/workloads, not a connected M5
+region. No worker migration or integrated frame budget is justified yet.
+
+Legacy v3/v9 builds share an IndexedDB slot. New scenario writes must use a separate
+namespace; legacy export/access and non-overwrite tests belong to #38. No compatible
+loader is implemented here. These constraints advance #28 without closing it or
+changing old issue statuses.

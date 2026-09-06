@@ -133,13 +133,14 @@ continuous curves, acceleration and a finer production tick require remeasuremen
 
 ## Coverage and remaining gates
 
-Five behavioral checks cover conservation/collision exclusion at every tick for
+Five lane behavioral checks cover conservation/collision exclusion at every tick for
 weights 1/2/4 and both priorities (including partial final batches), priority-only
 causality, blocked-exit spillback/recovery, batched and copied-state replay, and
 free-travel units/missing samples. Existing application tests and build are run
 separately. A structured clone is not a production save/load proof.
 
-This is bounded #27 evidence ready for review; the issue remains open. It does not
+This bounded #27 evidence has been independently reproduced and reviewed;
+see [review findings](evidence-review.md). The issue remains open for acceptance. It does not
 prove realistic driver behavior, merging/lane changes, signals, connected-region
 routing, development, goods delivery, or M5 acceptance. No human validation occurred.
 
@@ -148,6 +149,7 @@ Pixi/Three.js tasks, actual screenshots, automated interaction observations and
 browser frame timings. [ADR 0004](../../decisions/0004-m4-renderer-camera-reference.md)
 retains Pixi plan view as a bounded research reference; production choice and human
 comparison remain pending. These browser workloads do not integrate this lane model.
-[#28](https://github.com/Kminkjan/infrastructurio/issues/28) remains dependent on
-reviewed #26/#27 evidence; its [inventory](legacy-inventory.md) is preliminary.
+[#28](https://github.com/Kminkjan/infrastructurio/issues/28) now has
+[reviewed migration constraints](legacy-inventory.md); final acceptance still
+depends on #26/#27 disposition and production decisions.
 M4 and epic #21 remain open.

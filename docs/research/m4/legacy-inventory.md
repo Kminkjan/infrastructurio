@@ -1,8 +1,8 @@
-# Preliminary M4 legacy inventory
+# M4 legacy inventory and reviewed migration constraints
 
 Read-only inspection on 2026-09-06 for #28. **Not the completed migration audit:**
 #26 now has a [paired rendering experiment](rendering/README.md) and a provisional
-research reference; #27 has the bounded lane study. Both still need review; human
+research reference; #27 has the bounded lane study. Both have now received [independent evidence review](evidence-review.md); human
 comparison and the production renderer/camera choice remain open.
 No old issue has been closed, superseded or relabelled on the strength of this inventory.
 
@@ -74,3 +74,39 @@ costs must be included before revisiting. The paired #26 study supplies browser-
 renderer/camera ADR 0004. Its synthetic icons do not integrate this movement model.
 Final region/frame budgets and production rendering acceptance remain open; these
 dependencies prevent marking #28 complete.
+
+## Review disposition (2026-09-06, after PR #47)
+
+The inventory's source-to-issue mappings above were checked against current main,
+read-only original-branch code and the bodies/comments of open #13–#20. They remain
+valid reuse boundaries, not certificates that old acceptance criteria passed.
+#13–#19 have implementation evidence on the original branch but no merged-main
+completion proof here; #20 still has no participant results. Keep all open. Do not
+silently mark them superseded by M5/M6 work with different contracts.
+
+The following target constraints can be recorded independently of the production
+renderer choice:
+
+| Boundary | Owner and reviewable contract | Delivery gate |
+| --- | --- | --- |
+| Authored infrastructure | Simulation command model owns stable road/lane IDs, curves and elevation; an edit is validated before commit. | #29/#31; no production schema selected here |
+| Legal movement | Derived topology owns legal lane connections and shared conflicts. A projected crossing or renderer hit never adds a connection. | #30/#31/#33 |
+| Dynamic occupancy | Simulation owns vehicles, admission queues, conflict reservations and request/completion timestamps. Weight 1 is the reviewed research reference. | #32/#33; mixed traffic and edit cancellation remain unproved |
+| Presentation | Snapshots carry simulation tick and stable IDs; interpolation never advances authoritative traffic or completes a trip. Commands return to simulation for validation. | #34/#38; adapter experiments are not this API |
+| Slow feedback | Journey observations feed slower accessibility/development decisions; unserved demand stays explicit. Preserve all crossed movement and slow-clock boundaries during acceleration. | #34/#35/#38; intervals and smoothing remain pending |
+
+Both `src/persistence/indexed-db.ts` versions use database `infrastructurio`, store
+`saved-games`, **key `m0-scenario`**, and `put` replaces that slot. Validation of a
+new payload alone therefore cannot protect an existing legacy save on the same
+origin. #38 must give the new scenario its own database namespace and scenario
+identifier before enabling writes. Keep legacy storage read-only from the new
+loader; reject unsupported versions without writing defaults over that slot.
+Preserve imported file bytes before parsing/conversion; an IndexedDB object is not
+an original file byte stream. Offer an explicit legacy export/access path and test
+v3/v9 coexistence and non-overwrite. A separate local git branch is source retention,
+not a user-accessible legacy launcher. That delivery decision remains pending.
+
+No worker migration follows from the reviewed disconnected-kernel margin. Keep
+fixed-step semantics and renderer-independent snapshots; choose production cadence,
+worker transport and an integrated region budget only after connected measurements.
+#26 human comparison and production choice still block final #28 acceptance.
