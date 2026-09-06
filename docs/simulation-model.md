@@ -295,3 +295,13 @@ Different systems use different clocks:
 - Development evaluation: weekly
 - Migration and land values: monthly
 - Regional economy: quarterly
+
+## M4 research evidence (2026-09-06)
+
+The isolated [lane study](research/m4/README.md) now records causal priority and
+spillback checks, representation-factor failures, units and named-machine movement
+measurements. [ADR 0003](decisions/0003-m4-physical-traffic-reference.md) retains
+weight 1 as the research reference. These are movement-only findings; production
+traffic, renderer/camera and frame budgets remain undecided. The
+[preliminary legacy inventory](research/m4/legacy-inventory.md) does not close #28
+or supersede its dependency on the #26 presentation comparison.

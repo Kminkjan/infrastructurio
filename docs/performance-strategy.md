@@ -97,3 +97,13 @@ assignment boundary deterministically, while representative freight motion
 continues on the render-frame clock. The current network and single freight
 origin-destination pair are intentionally small; incremental or equilibrium
 assignment is deferred until multiple measured flows make it necessary.
+
+## M4 research evidence (2026-09-06)
+
+The isolated [lane study](research/m4/README.md) now records causal priority and
+spillback checks, representation-factor failures, units and named-machine movement
+measurements. [ADR 0003](decisions/0003-m4-physical-traffic-reference.md) retains
+weight 1 as the research reference. These are movement-only findings; production
+traffic, renderer/camera and frame budgets remain undecided. The
+[preliminary legacy inventory](research/m4/legacy-inventory.md) does not close #28
+or supersede its dependency on the #26 presentation comparison.

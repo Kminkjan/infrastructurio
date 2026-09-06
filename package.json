@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:m4": "node --test experiments/m4/lane-fixture.checks.mjs",
+    "research:m4:lanes": "node experiments/m4/run-lane-study.mjs"
   },
   "engines": {
     "node": ">=20.19"
