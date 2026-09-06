@@ -18,6 +18,27 @@ Build a headless junction experiment where changing only lane connections or pri
 
 Choose and record an explicit small-region entity/vehicle target and frame/simulation budgets from measurements. Audit current code and open issues #13–#20: retain, adapt, replace or defer each relevant system. Preserve unrelated working changes. Decide how legacy saves are migrated or clearly separated into a legacy scenario without silently losing data.
 
+## Focused M4 construction proof
+
+Owner-approved refinement on 2026-09-06: [epic #50](https://github.com/Kminkjan/infrastructurio/issues/50)
+prioritizes a grid-assisted construction experiment with automatic curves, editable
+road sections and lane connections. Its first usable sequence is **draw two roads
+→ create one curved connection → widen one approach → assign its lanes → undo the
+changes**. #51–#54 establish the model, controls, section editing and reference site;
+#55 verifies the sequence, invalid cases, restoration and human usability observations.
+
+Treat grid and direction constraints as design decisions to record and evaluate.
+Do not inherit arbitrary-freeform or planar-legacy assumptions by default. Preserve
+authored identities, derive lane geometry/connectivity separately, and include one
+elevated crossing without accidental connection. Reuse legacy components only where
+fit is demonstrated. No growth, finance, rail or full traffic integration is required.
+
+The earlier paired-adapter human exercise is deferred, not accepted. This proof
+informs #26's presentation decision and #28's migration boundary without waiting
+for final #28 acceptance. M5 #29–#31 retain production integration and hardening;
+this experiment does not satisfy their acceptance automatically. Milestone closure
+still requires its broader evidence gates.
+
 ## Road proof acceptance
 
 - Draw, reshape, connect and remove curved roads; choose independent lane counts per direction and legal turn connections. Useful presets supply valid defaults.
