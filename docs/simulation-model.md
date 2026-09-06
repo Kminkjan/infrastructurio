@@ -1,5 +1,7 @@
 # Simulation Model
 
+> Scope note (2026-09-06): This document describes the M0–M3 foundation. The [next prototype plan](next-prototype-plan.md) supersedes its future product direction. Existing aggregate flows and decorative vehicle animation do not satisfy the new causal traffic contract.
+
 This document describes the intended conceptual model. Equations, thresholds, and implementation details are expected to change through prototyping.
 
 ## Simulation layers

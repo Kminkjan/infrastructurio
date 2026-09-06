@@ -1,78 +1,51 @@
 # Vision and Scope
 
-## Premise
+Direction agreed with the project owner on 2026-09-06.
 
-**You build the infrastructure. The simulation uses it and builds around it.**
-
-The player is a regional infrastructure authority rather than a mayor, property developer, or transport company. The player determines strategic connectivity and capacity. The simulated world decides where to live, build, produce, and travel.
+**You design the infrastructure. The world builds around it and decides how to use it.**
 
 ## Player fantasy
 
-The satisfying moment is not placing a building. It is recognizing that a bridge, interchange, railway, or terminal has changed what is possible—and then watching an unplanned town or industry emerge because of it.
+Spend most of play drawing and refining roads, junctions, tracks and stations. Watch autonomous traffic use those designs, development discover new opportunities, and success generate the next transport problem. A useful connection can attract an industry; its trucks can expose a poor merge; a redesigned junction can change where housing becomes attractive.
 
-The second satisfying moment is seeing that success produce a new problem:
+The exact design matters. Two junctions with equal lane counts can have different throughput, queues and reliability because of turning movements, priorities and geometry. Railway switches, platform access and signals should ultimately matter in the same way.
 
-- A bridge becomes a freight bottleneck.
-- An interchange attracts development that overwhelms local streets.
-- A fast railway concentrates growth around one station.
-- A bypass relieves congestion but weakens an old commercial center.
+## Agreed player and simulation responsibilities
 
-The player reads the system, forms a hypothesis, intervenes, and observes consequences.
+| Player designs and controls | Simulation decides and operates |
+| --- | --- |
+| Freeform roads, curves, lane counts, lane connections and priorities | Private vehicle demand, destinations, routes and departures |
+| Bridges, underpasses, major corridors and junctions | Merging, queuing, lane use and experienced journey times |
+| Rail tracks, switches, platforms, stations and signals | Operator service viability, routes, frequency, train size and dispatch |
+| Local street constraints and redesign of existing streets | Town-built local streets within those constraints |
+| Infrastructure investment and land use constraints | Housing, commerce and industry responding to accessibility |
 
-## Product promises
+The player never needs to purchase vehicles, create transport lines, set timetables, assign fleets or dispatch trains. Services are fully autonomous and inspectable. Subsidies and service requests are outside this prototype.
 
-### The world responds rather than waits
+Detailed controls have useful defaults and presets. Simple construction should work immediately; precision tools should reward deliberate refinement.
 
-Households, developers, industries, municipalities, and private transport operators pursue their own goals. They do not require the player to place every building or dispatch every vehicle.
+## Design pillars
 
-### Growth is causal and inspectable
+- Infrastructure design is the main activity. Regional simulation creates reasons to design and revisit it.
+- Traffic has causal behaviour. Vehicles occupy lanes, queue and merge; experienced delay and delivery reliability affect accessibility and growth.
+- The world has its own initiative. Operators establish, change or withdraw services; towns extend streets; development chooses among locations.
+- Growth has a geography. Access to workers, customers and goods supports distinct residential, commercial and industrial places.
+- Decisions are inspectable. Show why a route, development or service was chosen, including why nothing happened.
+- Success creates changing demand. Growth feeds trips back into the network, with slower construction and decline rather than instant relocation.
+- Constraints are forgiving but meaningful. Land, construction and maintenance matter without frequent financial failure.
 
-Development follows access to markets, labor, resources, services, and desirable land. Important decisions expose their strongest positive and negative factors.
+Representative vehicles may stand for multiple trips, provided weighting does not break physical queues, flow accounting or the consequences of design. Persistent identities for every citizen are unnecessary.
 
-### Infrastructure choices remain strategic
+## Next prototype contract
 
-More capacity is not always the best answer. Construction cost, maintenance, land use, noise, pollution, severance, resilience, and induced demand create trade-offs.
+A small region with a few settlements and industries. First prove an open-ended road design → growth → congestion → redesign loop, with no prescribed winning solution. Then add a bounded railway proof within the same roadmap. Road construction includes editable curves, snapping and grade separation. Readable stylized presentation comes first; a short comparative evaluation will decide whether to retain 2D or adopt 3D.
 
-### The map tells its history
+See [the prototype plan](next-prototype-plan.md) for delivery gates and [the roadmap](../ROADMAP.md) for milestones.
 
-Infrastructure and development accumulate over time. Old roads, constrained centers, industrial districts, bypasses, and redundant corridors make each region feel shaped rather than painted.
+## Scope boundaries
 
-## Player responsibilities
+Defer comprehensive production chains, municipal service management, huge maps, every-trip citizen simulation, multiplayer, utilities, mod support and a large transport catalogue. Rail belongs in this prototype roadmap, after the road loop. Do not expand the old guided scenario as the next product target.
 
-Initially, the player controls:
+## Inspiration
 
-- Strategic roads, bridges, and tunnels
-- Rail corridors and freight terminals
-- Capacity upgrades and junction design
-- Access rules, tolls, and restrictions
-- Protected corridors and development boundaries
-
-The simulation controls:
-
-- Individual buildings and land uses
-- Household and business location choices
-- Private vehicles and operator routes
-- Local streets, driveways, and incremental access roads within player constraints
-
-The exact boundary is a design variable. The default should preserve player responsibility for regional structure while removing repetitive local construction.
-
-## Non-goals for the prototype
-
-- Individually persistent citizens
-- Player-owned vehicle fleets and timetables
-- Detailed construction logistics
-- Multiplayer
-- Photorealistic 3D graphics
-- A comprehensive municipal service simulation
-- A large catalogue of transport modes
-- Mod support
-
-## Key design questions
-
-- Can growth be surprising without feeling arbitrary?
-- Can the player understand why a location succeeded or failed?
-- Does autonomous local road building support rather than undermine player plans?
-- Are bottlenecks interesting when the player does not manage vehicles?
-- Can aggregated flows still produce a lively, convincing world?
-- What constrains the optimal strategy from becoming “build maximum capacity everywhere”?
-
+[Highways & Co.](https://store.steampowered.com/app/5096600/Highways__Co/) provides a reference for road and junction design. Our distinct objective is infrastructure-driven autonomous development and transport operation. Its store description is a reference, not evidence of implementation details or a commitment to copy its appearance.

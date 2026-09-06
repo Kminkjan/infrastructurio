@@ -1,5 +1,7 @@
 # Performance Strategy
 
+> Scope note (2026-09-06): This document describes the M0–M3 foundation. The [next prototype plan](next-prototype-plan.md) supersedes its future product direction. Existing aggregate flows and decorative vehicle animation do not satisfy the new causal traffic contract.
+
 Performance work should preserve simulation meaning. The goal is not to simulate every object equally; it is to allocate detail where it affects decisions or player understanding.
 
 ## Principles

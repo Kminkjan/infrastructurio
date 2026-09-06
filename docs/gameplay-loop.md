@@ -2,70 +2,31 @@
 
 ## Primary loop
 
-1. **Read potential.** Identify resources, settlements, terrain constraints, latent trade, and poor accessibility.
-2. **Form a hypothesis.** Predict what a new connection or capacity change will enable.
-3. **Build or regulate.** Construct infrastructure or change access, toll, and priority rules.
-4. **Observe response.** Private flows change; development becomes viable; land and labor markets adjust.
-5. **Diagnose pressure.** Congestion, queues, high costs, fragile dependencies, and externalities appear.
-6. **Intervene again.** Expand, bypass, separate, price, restrict, or deliberately redirect activity.
+1. Inspect a small region: homes, employers, customers, freight destinations and constrained access.
+2. Design infrastructure: draw roads, refine lanes and junctions, or later connect tracks and stations.
+3. Observe autonomous use: traffic departs, selects routes, merges and queues; viable rail services emerge without player dispatch.
+4. Watch slower development: improved access changes the attractiveness of housing, commerce and industry.
+5. Diagnose new pressure: new trips reveal turn conflicts, spillback, poor merges or rail conflicts.
+6. Redesign and compare: change connections, priorities, geometry or access and observe immediate traffic and delayed regional effects.
 
-The loop should produce a meaningful response within minutes while allowing the full regional consequences to unfold over longer simulated periods.
+Detailed construction is the dominant activity. Pause and speed controls support deliberate design and observation. The world continues beyond any tutorial or successful intervention.
 
-## Player verbs
+## Example, not a scripted outcome
 
-Prototype verbs:
+A new junction improves industrial access. New workplaces attract freight and commuters. A turning queue blocks through traffic, weakening access to housing elsewhere. A turn pocket, changed priority or separate freight entrance may help, but each consumes land or imposes other delays. Different designs should produce different development histories.
 
-- Inspect
-- Build
-- Remove
-- Upgrade
-- Restrict
-- Compare routes
-- Change simulation speed
+Later, a rail connection and accessible stations may support an autonomous service. An operator can decline to run it if demand, travel time or infrastructure capacity makes it unviable. A passing track or improved station throat can allow better service, affecting development and road demand.
 
-Later candidates:
+## Feedback
 
-- Reserve land
-- Set tolls
-- Subsidize a connection
-- Assign freight or passenger priority
-- Approve municipal proposals
-- Protect landscapes or neighborhoods
+Selecting infrastructure reveals who uses it, where trips originate and end, legal lane movements, conflict or queue causes, observed travel time and reliability. Selecting a building or candidate site reveals access to workers, customers and goods, the strongest support and constraint, and development delay. Selecting an operator service or unused station explains demand, route feasibility, capacity and the next reevaluation.
 
-## Feedback the player needs
-
-Every intervention should answer:
-
-- Who is using this infrastructure?
-- Where are they coming from and going to?
-- Why did they choose this route?
-- What is limiting additional activity?
-- Which locations gained or lost accessibility?
-- What is likely to happen if nothing changes?
-
-The prototype should prefer direct map overlays and concise inspectors over abstract score dashboards.
+Show reasons from authoritative simulation state. Distinguish measured conditions from forecasts and unknowns.
 
 ## Failure and recovery
 
-Early prototypes do not need a hard loss state. Poor decisions should create recoverable consequences:
+Use forgiving construction and maintenance finances, meaningful land constraints and reversible design tools. Poor access causes unmet trips, delays, weak development or gradual decline. Preview edit consequences and costs; avoid permanent debt spirals as the main challenge. Development and operator decisions need smoothing and decision intervals so one temporary queue does not relocate a town or repeatedly cancel a service.
 
-- Investment debt or high maintenance
-- Unreliable supply chains
-- Lost development opportunity
-- Congested settlements
-- Abandoned or underused infrastructure
+## Playable proof
 
-Recovery should take time. Immediate relocation would make the world feel weightless and encourage trial-and-error construction without commitment.
-
-## First scenario: Millford Valley
-
-The valley contains:
-
-- Millford, a small settlement near a constrained river crossing
-- Eastbank, a smaller settlement with access to fertile land
-- A granite quarry with poor market access
-- An external market at the edge of the map
-- Terrain that makes alternative crossings expensive
-
-The player first enables quarry exports. Processing and residential development cluster around Millford. Freight and commuters overload the old bridge. The player then chooses between expanding the crossing, constructing a bypass, or shifting freight to rail.
-
+A player can make a junction work, see autonomous growth create additional trips, identify a physical queue, and improve its cause through at least two plausible design approaches. No objective requires a particular road, route or ending. The full acceptance contract is in [the next prototype plan](next-prototype-plan.md).
