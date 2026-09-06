@@ -1,5 +1,7 @@
 # Initial Issue Backlog
 
+> Scope note (2026-09-06): This document describes the M0–M3 foundation. The [next prototype plan](next-prototype-plan.md) supersedes its future product direction. Existing aggregate flows and decorative vehicle animation do not satisfy the new causal traffic contract.
+
 This is the bootstrap source for the first GitHub issues. Once the issues have been created remotely, GitHub becomes authoritative for their status and discussion; this document continues to explain why the initial set was chosen.
 
 ## M0 — Simulation Toy
