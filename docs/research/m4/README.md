@@ -143,10 +143,11 @@ This is bounded #27 evidence ready for review; the issue remains open. It does n
 prove realistic driver behavior, merging/lane changes, signals, connected-region
 routing, development, goods delivery, or M5 acceptance. No human validation occurred.
 
-[#26](https://github.com/Kminkjan/infrastructurio/issues/26) is still pending:
-no paired renderer harness, screenshots, task observations, browser frame timings
-or renderer/camera decision are claimed by this work. The existing renderer was
-inspected as legacy evidence only. Its S-curve/elevated-crossing comparison is the
-next independent experiment. Consequently [#28](https://github.com/Kminkjan/infrastructurio/issues/28)
-remains dependent on #26 and reviewed #27 evidence; its [inventory](legacy-inventory.md)
-is preliminary. M4 and epic #21 remain open.
+A subsequent [#26 paired presentation experiment](rendering/README.md) now records
+Pixi/Three.js tasks, actual screenshots, automated interaction observations and
+browser frame timings. [ADR 0004](../../decisions/0004-m4-renderer-camera-reference.md)
+retains Pixi plan view as a bounded research reference; production choice and human
+comparison remain pending. These browser workloads do not integrate this lane model.
+[#28](https://github.com/Kminkjan/infrastructurio/issues/28) remains dependent on
+reviewed #26/#27 evidence; its [inventory](legacy-inventory.md) is preliminary.
+M4 and epic #21 remain open.

@@ -22,6 +22,11 @@ Choose the presentation and simulation approach through bounded evidence before 
 
 Choose presentation based on construction readability and cost.
 
+Evidence update (2026-09-06): the [paired browser study](research/m4/rendering/README.md)
+records scripted tasks, screenshots and timings. ADR 0004 retains Pixi plan view as
+the research reference only. Evidence review, human comparison and the production
+choice remain open; this issue and F3 are not complete.
+
 Depends on: No new-prototype prerequisite.
 
 Acceptance criteria:
