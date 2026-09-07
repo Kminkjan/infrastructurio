@@ -1,6 +1,6 @@
 # M4 construction orchestration ledger
 
-Updated 2026-09-06. GitHub issue bodies remain authoritative. No automatic merge or milestone closure is authorized.
+Updated 2026-09-07. GitHub issue bodies remain authoritative. No automatic merge or milestone closure is authorized.
 
 ## Baseline and documentation handoff
 
@@ -16,8 +16,8 @@ PR #49 (`e36ea6a`, `codex/m4-human-comparison`) remains separate research toolin
 
 | Work | Task | Baseline / branch | State / next action |
 | --- | --- | --- | --- |
-| Documentation and coordination | This task | `f18878b` → `codex/m4-orchestration` | Docs committed; maintain ledger and review dependent commits. |
-| #51 geometry/connection rules | Pending setup ID `client-new-thread:bbd7a2b0-45f2-41b6-8b68-ecdc2b9d6424` | `f6b3de1` → requested `codex/m4-construction-geometry` | Dispatched; review API, geometry, atomic rejection and behavioral evidence before controls. |
+| Documentation and coordination | This task | `f18878b` → `codex/m4-orchestration` | Draft PR #56; docs committed; maintain ledger and review dependent commits. |
+| #51 geometry/connection rules | `01a0780c-39b4-7bd0-93a8-b122fead58fa` (worktree `6d14`) | `f6b3de1` → requested `codex/m4-construction-geometry` | Dispatched; review API, geometry, atomic rejection and behavioral evidence before controls. |
 | #52 controls and #53 sections/lanes | Not dispatched | Reviewed #51 commit required | Prefer coherent implementation task for tightly coupled input/section/lane edits. |
 | #54 reference site/protocol | Not dispatched | Reviewed #51–#53 required | Package ordinary-input sequence and predeclared review criteria. |
 | #55 independent verification | Not dispatched | Reviewed #51–#54 required | Run browser and behavioral verification, resolve defects; leave human gate open until performed. |
@@ -25,6 +25,21 @@ PR #49 (`e36ea6a`, `codex/m4-human-comparison`) remains separate research toolin
 Each implementation task uses its own worktree and a draft PR with explicit base.
 No task may mutate another checkout. Review source and checks before dispatching
 dependent work; retain separate issue criteria if #52/#53 are combined.
+
+## Review checks before dependent dispatch
+
+- #51: trace stable authored road/lane identities through regeneration and removal;
+  inspect curve endpoint/tangent joins and bounded validation, including non-finite
+  input, near-degenerate curves, wide offsets and elevation clearance. Verify
+  rejected commands leave authored state and ID allocation unchanged.
+- #52/#53: use visible controls without injected state; inspect previews versus
+  commit, cancellation, selection after reshape/delete, local transition boundaries,
+  and explicit lane assignments after widening. Compare every undo snapshot to its
+  corresponding prior authored state and regenerated legal movement graph.
+- #54/#55: reproduce from the named source revision, record the actual startup
+  environment, browser interactions and negative cases, then separate automated
+  results from the remaining participant observations. No coordinate-projection
+  oracle may stand in for discovering and operating the visible controls.
 
 ## Acceptance boundaries
 
