@@ -41,6 +41,17 @@ dependent work; retain separate issue criteria if #52/#53 are combined.
   results from the remaining participant observations. No coordinate-projection
   oracle may stand in for discovering and operating the visible controls.
 
+## Controls/lane review in progress
+
+Early review required explicit road-parameter attachment positions for local lane
+merges, maximum rather than summed width across disjoint sections, and a meaningful
+alternative outgoing lane with a bounded smooth path. The implementation task reports
+addressing these and exercising the thin workflow in the in-app browser using visible
+grid clicks, endpoint controls and lane target checkboxes. It reports a changed target,
+assignment-invalidation rejection and reverse undo of targets and widening. These are
+agent implementation observations, pending committed evidence and independent #55
+verification; they are not participant evidence or issue acceptance.
+
 ## Acceptance boundaries
 
 Required sequence: draw two roads → create one curved connection → widen one
