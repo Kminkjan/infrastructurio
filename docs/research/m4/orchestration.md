@@ -17,8 +17,8 @@ PR #49 (`e36ea6a`, `codex/m4-human-comparison`) remains separate research toolin
 | Work | Task | Baseline / branch | State / next action |
 | --- | --- | --- | --- |
 | Documentation and coordination | This task | `f18878b` → `codex/m4-orchestration` | Draft PR #56; docs committed; maintain ledger and review dependent commits. |
-| #51 geometry/connection rules | `01a0780c-39b4-7bd0-93a8-b122fead58fa` (worktree `6d14`) | `f6b3de1` → requested `codex/m4-construction-geometry` | Dispatched; review API, geometry, atomic rejection and behavioral evidence before controls. |
-| #52 controls and #53 sections/lanes | Not dispatched | Reviewed #51 commit required | Prefer coherent implementation task for tightly coupled input/section/lane edits. |
+| #51 geometry/connection rules | `01a0780c-39b4-7bd0-93a8-b122fead58fa` (worktree `6d14`) | `f6b3de1` → requested `codex/m4-construction-geometry` | Reviewed `f4a050f`; draft PR #57 targets orchestration. Independent 13-test/typecheck rerun passes; XYZ clearance review concern fixed. |
+| #52 controls and #53 sections/lanes | Pending setup `client-new-thread:739965c8-9d4d-4c50-86bb-aeb15387c342` | `f4a050f` → `codex/m4-construction-controls-lanes` | Dispatched jointly after #51 source/test review; draft PR to target geometry branch. |
 | #54 reference site/protocol | Not dispatched | Reviewed #51–#53 required | Package ordinary-input sequence and predeclared review criteria. |
 | #55 independent verification | Not dispatched | Reviewed #51–#54 required | Run browser and behavioral verification, resolve defects; leave human gate open until performed. |
 
