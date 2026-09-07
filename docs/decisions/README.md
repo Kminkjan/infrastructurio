@@ -12,6 +12,8 @@ ADR does not by itself complete an issue or milestone.
 | [0002 — Separate simulation from presentation](0002-separate-simulation-from-presentation.md) | Accepted | Simulation authority and presentation-independent commands/snapshots. |
 | [0003 — Retain individual physical vehicles as the M4 reference](0003-m4-physical-traffic-reference.md) | Accepted, bounded research | Weight-1 lane fixture; tested spatial-platoon factors rejected. Production traffic design remains open. |
 | [0004 — Keep Pixi plan view as the bounded editing reference](0004-m4-renderer-camera-reference.md) | Accepted, bounded research | Paired editing experiment only. Production renderer/camera choice remains open. |
+| [0005 — Bound grid-assisted approaches and automatic curves](0005-m4-grid-and-automatic-curves.md) | Proposed | #51 experimental snapping, fitting, geometry and clearance limits. |
+| [0006 — Own construction identities and edits in the model](0006-m4-authored-identities-and-edit-boundaries.md) | Proposed | #51 command/snapshot ownership and #53 section/override extension proposal. |
 
 Read each record's scope and limitations before applying it. Earlier decisions are
 not permanent constraints when new evidence or an explicit product direction warrants
