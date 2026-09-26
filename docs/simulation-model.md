@@ -1,13 +1,13 @@
 # Simulation model
 
 **Status 2026-09-26.** This is the authoritative specification of the M4 — Living Diorama
-simulation core (`src/core`). **Only the lattice is implemented today**:
-[`src/core/lattice.ts`](../src/core/lattice.ts) with 9 test cases in
-[`lattice.test.ts`](../src/core/lattice.test.ts), guarded by the boundary test in
-[`tests/architecture.test.ts`](../tests/architecture.test.ts). The tests were not run for
-this document. Everything else here is planned. Its numbers come from the owner-approved
-M4 plan (2026-09-26) and are proposed in ADRs
-[0010](decisions/0010-triangular-lattice-track-geometry.md),
+simulation core (`src/core`). **Implemented:** the lattice
+([`src/core/lattice.ts`](../src/core/lattice.ts), 9 test cases in
+[`lattice.test.ts`](../src/core/lattice.test.ts)) and, from D1, the integer utilities and
+terrain (§1, §7), all guarded by the boundary test in
+[`tests/architecture.test.ts`](../tests/architecture.test.ts). Everything else here is
+planned. Its numbers come from the owner-approved M4 plan (2026-09-26) and are proposed in
+ADRs [0010](decisions/0010-triangular-lattice-track-geometry.md),
 [0011](decisions/0011-signalling-and-reservation.md),
 [0012](decisions/0012-tick-units-determinism.md) and
 [0014](decisions/0014-autonomous-diorama-operator.md), all still Proposed. A number in this
@@ -28,7 +28,7 @@ or accepted.
 Contents: [1 Status](#1-status-by-area) · [2 Interface](#2-interface) ·
 [3 Units](#3-units-and-arithmetic) · [4 Lattice](#4-lattice-implemented) ·
 [5 Pieces](#5-pieces) · [6 Keys](#6-keys-identity-and-elevation) ·
-[7 Terrain](#7-terrain) · [8 Planner](#8-planner) · [9 Validation](#9-validation) ·
+[7 Terrain](#7-terrain-implemented) · [8 Planner](#8-planner) · [9 Validation](#9-validation) ·
 [10 Network](#10-derived-network) · [11 Signalling](#11-signalling-and-reservation) ·
 [12 Movement](#12-movement) · [13 Operator](#13-m4-operator) ·
 [14 Editing](#14-editing-while-running) ·
@@ -45,8 +45,8 @@ Module paths are relative to `src/core/`. Tracking keys D1–D13 come from
 | Area | Modules | Slice | Key | Status 2026-09-26 |
 |---|---|---|---|---|
 | Lattice | `lattice.ts` | S1 | D1 | **Implemented**, 9 test cases (map bounds live with terrain) |
-| Integer helpers, PRNG, heap, hash | `util/` | S0 | D1 | Planned |
-| Terrain | `terrain.ts` | S3 | D1 | Planned |
+| Integer helpers, PRNG, heap, hash | `util/` | S0 | D1 | **Implemented** in D1, 36 test cases |
+| Terrain | `terrain.ts` | S3 | D1 | **Implemented** in D1, 20 test cases, golden hash (§7) |
 | Pieces and templates | `geometry/templates.ts`, `piece.ts`, `sample.ts` | S2 | D2 | Planned |
 | Authored state, validation, clearance, history | `track/`, `geometry/clearance.ts` | S3 | D2, D4 | Planned |
 | Planner | `track/planner.ts` | S4 | D3 | Planned |
@@ -99,9 +99,11 @@ Result  = {ok: true, networkRev, diff, counts{new, reused}}
   - `isqrt(n)` takes `floor(Math.sqrt(n))` and corrects it by ±1 until r² ≤ n < (r+1)², so
     the result is exact whatever the engine's rounding;
   - `divFloor(a, b)` floors towards −∞ for negative numerators.
-- **Magnitudes.** The largest intermediate is about 1.2e9: 2·b·d with b = 600 mm/s² and the
-  controller's distance clamped at 1,000,000 mm (§12). That is below 2^31 and far inside
-  the 2^53 exact-integer range of doubles.
+- **Magnitudes.** The largest intermediate in the tick step is about 1.2e9: 2·b·d with
+  b = 600 mm/s² and the controller's distance clamped at 1,000,000 mm (§12). That is below
+  2^31 and far inside the 2^53 exact-integer range of doubles. Terrain generation (§7, once
+  per map, not per tick) reaches about 6.25e12 in its squared mm distances at the default
+  size, still far below 2^53, and never uses bitwise ops on them.
 - **No floats in the tick step.** Non-integer maths stays in construction and presentation
   paths:
   - `geometry/templates.ts` builds the template table once from `SQRT3`, `PI` and + − × ÷.
@@ -145,8 +147,8 @@ Result  = {ok: true, networkRev, diff, counts{new, reused}}
 - **Parallel spacing.** Secondary parallel lines are only 2.5 m apart, which is too close
   for two tracks (rule 6 needs 4.0 m). Secondary double track therefore uses every second
   line, 5.0 m apart.
-- **Map.** About 2.0 × 1.5 km, parametrised: ≈ 401 × 347 ≈ 139k nodes. The bounds belong to
-  terrain and the scenario, not to `lattice.ts`.
+- **Map.** About 2.0 × 1.5 km, parametrised: 400 × 346 = 138,400 nodes by default (§7). The
+  bounds belong to terrain and the scenario, not to `lattice.ts`.
 - **What `lattice.ts` provides:** `stepOf`, `stepLengthMm`, `unit` (a √3 table, no trig),
   `opposite`, `rotateHeading`, `headingOfStep`, `add`, `rotate60`, `mirrorX`, `toWorld`,
   `nearestNode` (cube rounding) and `axialKey`, and it never returns −0.
@@ -269,16 +271,39 @@ one row. Shifts build crossovers and passing loops.
 - **Structure.** ground, bridge or tunnel is a piece property. The command may force it or
   pass `auto` (§9, rule 4).
 
-## 7. Terrain
+## 7. Terrain (implemented)
 
+**Status 2026-09-26 (automated, D1 branch `codex/d1-lattice-terrain`):**
+[`terrain.ts`](../src/core/terrain.ts) and its 20 tests are in place, with the golden hash
+`9a922d9c` for seed `"baltic-diorama"` at 400 × 346 nodes (generator version 1). Findings:
+[ADR 0010](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d1-terrain).
+- **Layout.** One Int16 dm height per node in offset rows (row = r, col = q + ⌊r/2⌋), so
+  the map is a rectangle from the south-west origin: even rows at x = 5·col m, odd rows
+  2.5 m further east. `nodeOfOffset`, `offsetOfNode`, `heightDmAt`, `isWaterAt`,
+  `terrainHash` and `terrainBoundsM` read it.
+- **As built.** 200 dm base plus three value-noise octaves (420, 150 and 55 m cells); a
+  river 32 m wide and 1.8 m deep crossing west → east at about 46% of the map height, and a
+  lake of 130 m radius, 2.5 m deep. Both beds rise to a shore shelf just above the water
+  through a 10 m smoothstep ramp centred on the channel edge, so the waterline follows the
+  curve rather than the lattice, then smoothstep banks rise to the natural terrain. Dry land
+  is clamped to ≥ water level + 0.5 m (water level 10 m). River and lake positions scale
+  with the map, so heights depend on `{seed, columns, rows, generatorVersion}`, not on the
+  seed alone; the river and lake invariants hold from about 300 × 260 nodes up, and smaller
+  maps leave the lake out rather than merge it into the river.
+- **Flat plateaus.** The clamp leaves 9.9% of the golden map exactly flat at 10.5 m. Over
+  300 seeds the share has a median of 11.5% and a 90th percentile of 21.1%, and the worst
+  seed reaches 46.9%. M4 uses only the golden seed; whether the flats read as meadow is for
+  the owner's look gate.
 - **Generation.** Terrain is static and seeded. Heights come from integer hash value-noise
   evaluated at lattice nodes, stored as Int16 dm (±3,276.7 m), about 0.28 MB for the
-  default map. A water mask adds a river and a lake. The hash is a pure function of
-  (seed, q, r), with no PRNG state.
+  default map. A water mask adds a river and a lake. Noise corners are a pure hash of
+  (seed, cell, octave), with no PRNG state; only the lake centre draws from the seeded PRNG.
 - **One surface for sim and render.** The same heights form the low-poly render mesh.
   Between nodes, height is linear over the lattice triangle, so the simulation and the
   renderer agree on the surface.
 - **Save.** Only `{seed, generatorVersion}` is saved; heights are regenerated on load.
+  Open (D12): while the size is parametrised, a save must also carry `{columns, rows}`, or
+  each generator version must fix them.
 - **No terrain editing in M4.** Earthworks (embankments, cuttings, ballast skirts) are
   render-only. They never change the simulation's h.
 
@@ -747,7 +772,7 @@ The safety soak in the gates counts 0 double-held sections, 0 signals passed at 
 
 | Slice | Content | Key |
 |---|---|---|
-| S0 | skeleton, boundary test, `util/` | skeleton (done except `util/`), D1 |
+| S0 | skeleton, boundary test, `util/` | skeleton, D1 (`util/` **implemented** in D1, 2026-09-26) |
 | S1 | lattice | D1 (**implemented**) |
 | S2 | templates, piece, sample | D2 |
 | S3 | terrain, authored, validate, clearance, history | D1, D2, D4 |
