@@ -30,4 +30,3 @@ Costs and risks:
 ## Revisit when
 
 The vertical slice is validated and profiling demonstrates that browser constraints—not the simulation design or implementation—prevent the intended product scale.
-

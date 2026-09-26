@@ -38,4 +38,3 @@ An issue is complete when:
 ## Branches and commits
 
 Use short branches prefixed with `codex/` for agent-authored work and descriptive prefixes such as `feature/`, `fix/`, or `research/` otherwise. Commits should describe an observable change or decision.
-

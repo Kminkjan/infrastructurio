@@ -32,4 +32,3 @@ Costs:
 ## Revisit when
 
 This decision should be treated as a core constraint. Individual protocol choices may change, but presentation should not become authoritative simulation state.
-
