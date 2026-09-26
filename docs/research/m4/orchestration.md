@@ -1,6 +1,20 @@
 # M4 construction orchestration ledger
 
-Updated 2026-09-07. GitHub issue bodies remain authoritative. No automatic merge or milestone closure is authorized.
+Updated 2026-09-26. GitHub issue bodies remain authoritative.
+
+## September 26 consolidation
+
+The owner explicitly authorized putting existing work on main and writing a handoff.
+PRs #49, #56 and #57 are now merged (`fc90d75` after these merges). This supersedes
+the earlier no-merge instruction for this consolidation only; it does not authorize
+milestone closure or claim human acceptance. See [the current handoff and continuation
+script](../../M4-HANDOFF.md) for current status and restart instructions.
+
+The #52/#53 task stopped on September 7 due to an account usage limit before publication.
+Its temporary clone no longer existed on September 26. Source was recovered into the
+durable isolated worktree `8192` and freshly checked before consolidation. PR #58 now consolidates the recovered implementation onto main. Historical
+browser observations remain distinct from recovery checks. The table below records
+the original dispatch history; consult the handoff for final PR disposition.
 
 ## Baseline and documentation handoff
 

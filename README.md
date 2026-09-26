@@ -117,3 +117,7 @@ Vitest uses its Node environment for simulation tests, so the simulation can be 
 ## Current milestone
 
 **M4 — Infrastructure Design Foundations:** evaluate construction presentation, prove causal traffic and audit reuse before building the M5 road loop. Earlier M3 work remains tracked separately; GitHub is authoritative for its completion status.
+
+## Current M4 handoff
+
+See [M4 status, run instructions and continuation script](docs/M4-HANDOFF.md) before restarting the construction proof.
