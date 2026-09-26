@@ -46,7 +46,8 @@ Module paths are relative to `src/core/`. Tracking keys D1–D13 come from
 |---|---|---|---|---|
 | Lattice | `lattice.ts` | S1 | D1 | **Implemented**, 9 test cases (map bounds live with terrain) |
 | Integer helpers, PRNG, heap, hash | `util/` | S0 | D1 | **Implemented** in D1, 36 test cases |
-| Terrain | `terrain.ts` | S3 | D1 | **Implemented** in D1, 20 test cases, golden hash (§7) |
+| Terrain | `terrain.ts` | S3 | D1 | **Implemented** in D1, 20 test cases, golden hash (§7); generator version 2 on the D11a branch, 23 test cases |
+| Static diorama scenery | `scenarios/` | — | D11a | **D11a branch**: seeded, integer-only layout for the lookdev spike (no sim behaviour), 21 test cases with a golden hash |
 | Pieces and templates | `geometry/templates.ts`, `piece.ts`, `sample.ts` | S2 | D2 | Planned |
 | Authored state, validation, clearance, history | `track/`, `geometry/clearance.ts` | S3 | D2, D4 | Planned |
 | Planner | `track/planner.ts` | S4 | D3 | Planned |
@@ -273,27 +274,32 @@ one row. Shifts build crossovers and passing loops.
 
 ## 7. Terrain (implemented)
 
-**Status 2026-09-26 (automated, D1 branch `codex/d1-lattice-terrain`):**
-[`terrain.ts`](../src/core/terrain.ts) and its 20 tests are in place, with the golden hash
-`9a922d9c` for seed `"baltic-diorama"` at 400 × 346 nodes (generator version 1). Findings:
-[ADR 0010](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d1-terrain).
+**Status 2026-09-26 (automated, D1 branch `codex/d1-lattice-terrain`; version 2 on the D11a
+branch `codex/d11a-lookdev`):** [`terrain.ts`](../src/core/terrain.ts) and its tests (23 on
+the D11a branch) are in place, with the golden hash `d2ee8189` for seed `"baltic-diorama"`
+at 400 × 346 nodes (generator version 2; version 1 was `9a922d9c`). Findings:
+[ADR 0010](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d1-terrain)
+and its [version 2 note](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d11a-terrain-generator-version-2).
 - **Layout.** One Int16 dm height per node in offset rows (row = r, col = q + ⌊r/2⌋), so
   the map is a rectangle from the south-west origin: even rows at x = 5·col m, odd rows
   2.5 m further east. `nodeOfOffset`, `offsetOfNode`, `heightDmAt`, `isWaterAt`,
   `terrainHash` and `terrainBoundsM` read it.
-- **As built.** 200 dm base plus three value-noise octaves (420, 150 and 55 m cells); a
+- **As built.** 200 dm base plus three value-noise octaves (420, 150 and 55 m cells, each
+  grid rotated by an exact Pythagorean-triple angle and offset by the seed, version 2); a
   river 32 m wide and 1.8 m deep crossing west → east at about 46% of the map height, and a
   lake of 130 m radius, 2.5 m deep. Both beds rise to a shore shelf just above the water
   through a 10 m smoothstep ramp centred on the channel edge, so the waterline follows the
   curve rather than the lattice, then smoothstep banks rise to the natural terrain. Dry land
-  is clamped to ≥ water level + 0.5 m (water level 10 m). River and lake positions scale
+  stays ≥ water level + 0.5 m (water level 10 m): version 2 passes the coarse octaves through
+  a C¹ rational soft floor and adds the finest octave back after it, where version 1
+  clamped. River and lake positions scale
   with the map, so heights depend on `{seed, columns, rows, generatorVersion}`, not on the
   seed alone; the river and lake invariants hold from about 300 × 260 nodes up, and smaller
   maps leave the lake out rather than merge it into the river.
-- **Flat plateaus.** The clamp leaves 9.9% of the golden map exactly flat at 10.5 m. Over
-  300 seeds the share has a median of 11.5% and a 90th percentile of 21.1%, and the worst
-  seed reaches 46.9%. M4 uses only the golden seed; whether the flats read as meadow is for
-  the owner's look gate.
+- **Flat plateaus (version 1) and their fix (version 2).** Version 1's clamp left 9.9% of the
+  golden map exactly flat at 10.5 m (300-seed median 11.5%, worst 46.9%). Version 2 leaves
+  0.21% at 10.5 m, and 0.28% of dry nodes with all six neighbours level (300-seed median
+  0.31%, worst 0.86%). Whether the lowland now reads well is for the owner's look gate.
 - **Generation.** Terrain is static and seeded. Heights come from integer hash value-noise
   evaluated at lattice nodes, stored as Int16 dm (±3,276.7 m), about 0.28 MB for the
   default map. A water mask adds a river and a lake. Noise corners are a pure hash of

@@ -8,9 +8,12 @@ has been judged yet.** The owner scores it at Look Gate A (D11a) and Look Gate B
 walkthrough). Every spec number here comes from the design passes: they are starting values
 for lookdev, not measured results. Derived pixel and count figures are marked as
 calculated. Since D1 (2026-09-26) [`src/app/main.ts`](../src/app/main.ts) shows seeded
-terrain, water, lighting and the lattice overlay under the isometric camera, with a subset
-of the palette. It is a first pass for the owner to judge, not evidence that this page is
-met.
+terrain, water, lighting and the lattice overlay under the isometric camera. Since the D11a
+lookdev spike (2026-09-26, branch `codex/d11a-lookdev`) it also shows the static Baltic
+diorama: the full palette, the scenery kit (trees, the building grammar, props), the terrain
+splat and AO tint map, CSS2D place names, a CSS vignette, the dev tweak panel and the four
+Look Gate A bookmarks ([below](#look-gate-a-bookmarks-d11a)). It is a first pass for the
+owner to judge, not evidence that this page is met.
 
 Related: [vision](vision.md) · [prototype plan](prototype-plan.md) ·
 [backlog](backlog.md) (D11, [#75](https://github.com/Kminkjan/infrastructurio/issues/75)) ·
@@ -86,21 +89,24 @@ the renderer and the HUD.
 - The HUD receives them as CSS custom properties set from `palette.ts` at start-up.
 - A colour change edits `palette.ts` and this table in the same PR. If the two disagree, the
   code wins and this page is corrected.
-- Recommended: add a source-scan rule to
-  [`tests/architecture.test.ts`](../tests/architecture.test.ts) that rejects hex colour
-  literals outside `palette.ts`. It does not exist yet.
+- A source-scan rule in [`tests/architecture.test.ts`](../tests/architecture.test.ts)
+  rejects hex colour literals outside `palette.ts` (added in D11a, with a negative
+  self-check). `index.html`'s first-paint background duplicates the haze and a test holds
+  them equal.
 
-On 2026-09-26 main's `palette.ts` holds 18 tokens: `grass`, `grassLight`, `grassShade`, `spruce`,
-`deciduous`, `soil`, `ballast`, `sleeper`, `railTop`, `stucco`, `roofTile`, `water`, `haze`,
-`steam`, `latticeLine`, `sky`, `groundBounce` and `sun`. The D1 branch adds six from the table
-below for terrain, water and the F3 overlay: `meadow`, `waterDeep`, `foam`, `uiParchment`,
-`uiBorder` and `uiInk` (24 in all). D11a brings it up to the full table.
+**Status (2026-09-26, D11a):** `palette.ts` holds the whole table below as 70 named tokens
+(pairs and ramps get their own names: `spruceLight`, `roofTileDark`/`roofTileLight`,
+`steamEnd`, `block1`–`block6`, …) plus one in-house token the table does not list (71 in all):
+**forest floor `#71704F`**, the splat colour under dense forest, tuned by eye in D11a and open
+at Look Gate A. The colour-blind overlay set still has no values (D7). A source-scan rule in
+[`tests/architecture.test.ts`](../tests/architecture.test.ts) now rejects hex colour
+literals in `src/render`, `src/ui` and `src/app` outside `palette.ts`.
 
 | Group | Colours |
 |---|---|
 | grass | `#8FA66B`, light `#A9BA7E`, shade `#6E8752`, meadow `#C2BE7C` |
 | forest | spruce `#3F5A3C`/`#4F6B45`, pine crown `#5A7048`, deciduous `#7E9A4F`/`#93A85A`, birch trunk `#E8E2D0` |
-| ground | soil `#A88F6A`, dirt road `#B8A07A`, cobbles `#A39C90`/`#8E877B`, rock `#9A9486` |
+| ground | soil `#A88F6A`, dirt road `#B8A07A`, cobbles `#A39C90`/`#8E877B`, rock `#9A9486`, forest floor `#71704F` (D11a, in-house) |
 | fields | rye `#C9B26B`, hay `#BFB27A`, crop `#9DAE6A`, fallow `#A38B62` |
 | track | ballast `#8C8578`/`#7A7368`, sleepers `#5A4636`, rail top `#B7B3AA`, sides `#55524D` |
 | walls | stucco `#E9DFC8`, ochre `#E3CFA6`, blush `#D9C3B0`, sage `#C9D3C5`, lime white `#F1ECE0`, brick `#9C5A44`, timber `#8A6E55`/`#6C5A48` |
@@ -177,6 +183,13 @@ below for terrain, water and the F3 overlay: `meadow`, `waterDeep`, `foam`, `uiP
 - **Shader chunks** live in `src/render/art/shaderChunks`. Each is an isolated
   `onBeforeCompile` module and must set `customProgramCacheKey`, so patched materials share
   programs without cache collisions.
+- **D11a status (2026-09-26):** six materials in
+  [`art/materials.ts`](../src/render/art/materials.ts) and the lattice overlay: terrain,
+  water, foliage, built (the walls, roof, trim, metal and sails slots share one chunk
+  combination, so each chunk of buildings is one draw), glass (no grain) and props. All
+  chunks below exist; `splat` joined them for the terrain (see [Terrain](#terrain-and-water)).
+  `edgeFade` targets the haze run backwards through `NeutralToneMapping`, because lit
+  fragments are tone mapped and the background is not.
 
 | Chunk | Does |
 |---|---|
@@ -198,6 +211,13 @@ below for terrain, water and the F3 overlay: `meadow`, `waterDeep`, `foam`, `uiP
     village pattern;
   - `grain` over everything, and the world AO tint map darkening ground under trees,
     buildings, structures and along the track.
+  - D11a status (2026-09-26): the splat is RGBA8 at 1 m per texel (dirt for roads, lanes and
+    farm yards; cobble for town squares and streets; field; forest floor), with an RG8 field
+    map read by `texelFetch` for each strip's crop (rye, hay, crop, fallow) and furrow
+    heading, drawn as 1.4 m stripes. The AO tint map is R8 at 1,024² over the map (about
+    1.95 × 1.46 m per texel on the default map): canopy, each tree, and a 4 m contact band
+    around buildings, box-blurred. Splat colours keep the vertex colour's relative
+    brightness, so baked hollows still read under roads and fields.
 - **Earthworks:**
   - Near ground-level track, the renderer lowers or raises terrain vertices to form cuttings
     and embankments, and adds ballast skirts.
@@ -272,6 +292,14 @@ choose the type per span, first match wins:
   about 15% oversize, swaying through `windSway`. Colours are spruce `#3F5A3C`/`#4F6B45`,
   pine crown `#5A7048`, deciduous `#7E9A4F`/`#93A85A` and birch trunk `#E8E2D0`. The bench
   scene `bench-m4` carries 15k trees, and D11a sets a per-tree triangle budget against it.
+- **D11a status (2026-09-26):** per-tree budgets are set: 60–120 triangles at LOD0 and 24–30
+  at LOD1 (spruce 68/26, pine 72/24, birch 70/28). Trees are instanced per 256 m chunk and
+  species, LOD1 below 4 ppm sharing LOD0's instance matrix and colours; scale 0.8–1.3 on top
+  of the 1.15 oversize, random yaw, crown colour blended between the species pair plus a
+  small sRGB HSL jitter. Below 2 ppm one whole-map LOD1 mesh per species replaces the
+  chunk meshes (three draws where the whole map is in view) and trees cast no shadows. The
+  golden diorama holds the 20,000 cap: forest stands, garden trees in the towns and birch
+  avenues along the roads.
 - **Props:** telegraph poles every 50 m along the line, lamps, fences and haystacks.
 - **Scenery gives way to infrastructure.** Recommended rule: trees and props inside a piece's
   corridor (ballast plus a margin) hide on that network revision, and return on undo or
@@ -305,6 +333,17 @@ scene's 150 buildings therefore stay near 90k triangles (150 × 600, plus the he
 
 The bindings are recommendations for D11a. Kinds and budgets come from the design passes.
 
+**D11a status (2026-09-26):** [`scenery/buildings/grammar.ts`](../src/render/scenery/buildings/grammar.ts)
+builds all nine kinds with the bindings above (townhouses 2–3 floors with gable, hip or
+mansard roofs; the church's towers carry the tower roof), inset windows (dark pane, stone
+sill and lintel), doors with a step, cornices, chimneys that anchor smoke, dormers and
+lime-white corner boards on timber houses. Measured budgets are in ADR 0013's D11a
+findings; the church uses 528 of its 1,500. Buildings are merged per 256 m chunk, material
+and LOD (silhouettes below 2 ppm). The station, water tower and engine shed stand as
+non-functional lookdev set pieces beside the largest town, on a cinder strip, so the owner
+can judge the models before D6's station and depot tools exist. They are in the core
+scenario's golden layout; whether they stay is an [open item](#open-items).
+
 ## Rolling stock
 
 Vehicles are an `InstancedMesh` per vehicle type. Each vehicle is placed from two anchors,
@@ -324,7 +363,8 @@ true bogies.
   - locomotive body `#2F3B33`, brass `#B08D57` fittings, buffer-beam red `#9C3B30`;
   - coaches in maroon `#6E3434` or green `#3F5B4A`, with cream panels `#E6DCC3`;
   - wagons in grey `#6F6A62`.
-- **Anchors:** smoke (chimney), `bogie_front`/`bogie_rear`, coupler and door.
+- **Anchors:** smoke (chimney), `bogie_front`/`bogie_rear`, couplers (`coupler_f`/`coupler_r`)
+  and door.
 
 ## Steam
 
@@ -381,6 +421,15 @@ true bogies.
 - **Labels** are CSS2D DOM elements (the station label is a `<button>`), so they stay crisp
   and accessible at any zoom. They are ink `#3B3A36` on parchment `#F3EDE0` with border
   `#D8CCB4`. L toggles them. Recommended: declutter by priority at Far.
+- **D11a status (2026-09-26):** EB Garamond Medium (latin and latin-ext woff2 subsets, OFL,
+  source and licence in [`public/fonts/`](../public/fonts/README.md)) is self-hosted through
+  `@font-face` in `index.html`; the UI stays on `system-ui` with tabular figures. Town and
+  landmark names (church, windmill) render through a `CSS2DRenderer` over a separate label
+  scene; a greedy declutter by priority runs only when the camera changes (or a font loads,
+  or a newly shown label needs measuring); town names hide below 0.9 ppm and landmark names
+  below 2 ppm. The label layer is a "Place names" group that screen readers can read;
+  hidden and decluttered names are `display: none`. Town names come from the core's Baltic
+  list (`src/core/scenarios/placeNames.ts`).
 
 ## Readability at the named zoom levels
 
@@ -436,7 +485,7 @@ definition: ADR 0013 and the code own the exact types.
 ```ts
 registry.get(kind, variant, lod) → {
   slots,      // one geometry per material slot (walls, roof, trim, …); palette colours
-  anchors,    // smoke, bogie_front, bogie_rear, coupler, door
+  anchors,    // smoke, bogie_front, bogie_rear, coupler_f, coupler_r, door (+ sail_hub, windmill)
   footprint,  // ground-contact outline in model space
   budget,     // triangle budget (recommended: a test fails any asset over it)
 }
@@ -452,7 +501,8 @@ registry.get(kind, variant, lod) → {
   - The slot's shared Lambert material replaces the file's materials, so colour still comes
     from the palette.
   - Procedural geometry stays as the fallback when a file is missing or fails to load.
-- **The lookdev tweak panel** (dev only, D11a) edits palette and lighting values live and
+- **The lookdev tweak panel** (D11a: only with `?tweak=1`, in any build) edits palette and
+  lighting values live and
   exports them to be pasted into `palette.ts` and the lighting module. It never persists
   colours of its own.
 
@@ -496,6 +546,52 @@ Both gates are **owner judgement only**.
 - Recommended: an originality concern is fixed and the gate re-run, whatever the other scores
   are. The predeclared thresholds govern.
 
+### Look Gate A bookmarks (D11a)
+
+Prepared 2026-09-26 for the owner; **not scored**, and agents never score them. There is no
+track in the diorama yet (D3), so these views can support scoring palette, charm, cohesion
+and originality, while track legibility waits for static track (see the deviations below).
+The gates record's setup is `npm run build && npm run preview`; `npm run dev` shows the same
+views. The tweak panel stays hidden unless `?tweak=1` is added. L hides the labels, and Home
+returns to the map centre. A blank record to copy on the session
+day: [`YYYY-MM-DD-look-gate-a.md`](evidence/m4/YYYY-MM-DD-look-gate-a.md).
+
+| URL | View | Target (world X, Z, m) | ppm | Yaw step |
+|---|---|---|---|---|
+| `?bookmark=1` | Town close-up: Vējkalni's square and its twin-tower church, at Close | 964.18, −467.47 | 12 | 0 |
+| `?bookmark=2` | Forest and river, in the mid band | 1735.00, −455.57 | 4 | 0 |
+| `?bookmark=3` | The lake and the windmill, at Region | 640.00, −1255.11 | 2.5 | 0 |
+| `?bookmark=4` | The whole diorama, at Far | 998.75, −793.47 | 0.9 | 0 |
+
+- **States are for the golden layout** (terrain `d2ee8189`, scenery `b3cc61d0`, seed
+  `baltic-diorama`, 1280 × 720 CSS px checked). The camera looks at the Y = 0 datum, so each
+  target sits north of its subject by the ground height ÷ tan(pitch); `bookmarks.ts`
+  computes them, and a test pins them.
+- **Pitch A/B:** add `&pitch=30` to any bookmark. The subject stays centred (the targets move
+  to 964.18, −472.43 · 1735.00, −460.31 · 640.00, −1257.50 · 998.75, −803.93). Without the
+  parameter the pitch is the true isometric 35.264°.
+- **Viewport:** at 0.9 ppm the whole 2.0 × 1.5 km map spans about 1,798 × 776 CSS px, so
+  bookmark 4 shows all of it on a 1920 × 1080 window, and at 1280 × 720 crops about 260 px
+  off each of the east and west edges and about 45 px off the south edge (calculated; an
+  agent probe put the map corners at screen x −259 to 1,539 and y −11 to 765). With
+  `?tweak=1` the tweak panel covers the map's north-east corner at 1920 × 1080.
+- **Not in a bookmark:** the railway set pieces (station, water tower, engine shed) stand
+  beside Vējkalni; to see them, centre on world 884.74, −402.11 at 12–16 ppm (in a dev
+  build, `__diorama.lookAt(884.74, 378.01, 14)` in the console takes sim metres).
+
+**Deviations from the gates record's Look Gate A** (the
+[gates record](evidence/m4/2026-09-26-acceptance-gates.md#look-gate-a-la-after-d11a-before-d11b)
+governs; recorded so the owner can decide whether to hold LA now as a partial gate or amend
+the gates record first):
+- **Views:** the record's views 1 (Default over a station throat with turnouts and signals)
+  and 2 (Region over the river and a viaduct) need D3/D4/D7 track, bridges and signals.
+  Bookmarks 2 (forest and river, mid band, 4 ppm) and 3 (lake and windmill, Region) stand in
+  for them, and no bookmark is at Default zoom (6 ppm).
+- **Presets:** Medium and High don't exist until D11b. The build renders one fixed
+  configuration, neither preset: DPR up to 2, a 2,048² `PCFShadowMap` with radius 3,
+  default MSAA, no post-processing and the CSS vignette.
+- **No static track:** legibility cannot be scored, and the record must say it was not.
+
 ## Open items
 
 Each item is recorded here so that it is not silently decided in code. Each is owned by the
@@ -507,5 +603,7 @@ slice named.
 | Masonry and structural-steel palette tokens; bridge type over land above 20 m | D4 |
 | A palette token for the chain signal's partial aspect; the dot → arm switch-over ppm; the colour-blind overlay values; the minimum ribbon width | D7 |
 | Scenery clearing along track corridors | D3/D4 |
-| Per-tree triangle budget; moiré check on sleepers at Default | D11a |
-| Source-scan test for hex literals outside `palette.ts` | D11a |
+| Moiré check on sleepers at Default (blocked until D3 track exists; the per-tree budget was set in D11a: 60–120 / 24–30) | D11a |
+| Chimney smoke and shore foam (deferred in D11a: smoke anchors exist, nothing is drawn yet) | D11b (proposed) |
+| The sun's screen direction: D1's sun casts shadows right and slightly up the screen, while this page says lower right | Look Gate A (owner) |
+| Railway set pieces (station, water tower, engine shed) in the diorama scenario's golden layout: remove (bump `DIORAMA_GENERATOR_VERSION` and the golden hash) or keep as non-functional scenery | D6 (owner) |

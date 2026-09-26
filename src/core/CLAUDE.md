@@ -1,7 +1,9 @@
 # src/core — deterministic, DOM-free simulation
 
 The simulation is authoritative (ADR 0002): everything else reads its snapshots and sends it
-commands. Status 2026-09-26: `lattice.ts`, `terrain.ts` and `util/` (+ tests) exist (D1); slices S2–S12 add the rest
+commands. Status 2026-09-26: `lattice.ts`, `terrain.ts` and `util/` (+ tests) exist (D1); the D11a branch adds
+`scenarios/` (the static diorama layout and the Baltic name list) and terrain generator version 2;
+slices S2–S12 add the rest
 ([simulation model](../../docs/simulation-model.md), [architecture](../../docs/architecture.md)).
 ADRs 0010 (lattice geometry), 0011 (signalling), 0012 (tick and determinism) and 0014
 (operator) are **Proposed**: their numbers are defaults to test, not owner decisions. The

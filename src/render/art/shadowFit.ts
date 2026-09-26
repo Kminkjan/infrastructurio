@@ -80,16 +80,19 @@ export interface WorldBox {
   readonly maxZ: number;
 }
 
-/** Unit vector toward the sun at 42° elevation, locked to camera yaw. */
-export function sunDirection(yaw: number, out: Xyz = { x: 0, y: 0, z: 0 }): Xyz {
+/**
+ * Unit vector toward the sun at 42° elevation (or `elevationRad`, which only
+ * the lookdev tweak panel changes), locked to camera yaw.
+ */
+export function sunDirection(yaw: number, out: Xyz = { x: 0, y: 0, z: 0 }, elevationRad: number = SUN_ELEVATION_RAD): Xyz {
   const { right, back } = cameraBasis(yaw, 0, scratchCameraBasis);
   // With pitch 0, `back` is the horizontal direction toward the camera.
   const hx = SUN_RIGHT * right.x + SUN_TOWARD_CAMERA * back.x;
   const hz = SUN_RIGHT * right.z + SUN_TOWARD_CAMERA * back.z;
   // Normalise the horizontal part first so the elevation is exactly 42°.
-  const scale = Math.cos(SUN_ELEVATION_RAD) / Math.hypot(hx, hz);
+  const scale = Math.cos(elevationRad) / Math.hypot(hx, hz);
   out.x = hx * scale;
-  out.y = Math.sin(SUN_ELEVATION_RAD);
+  out.y = Math.sin(elevationRad);
   out.z = hz * scale;
   return out;
 }

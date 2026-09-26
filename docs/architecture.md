@@ -55,7 +55,9 @@ the reset skeleton (PR 1, [#60](https://github.com/Kminkjan/infrastructurio/pull
 **D1 branch** means it exists on `codex/d1-lattice-terrain`
 ([#65](https://github.com/Kminkjan/infrastructurio/issues/65)) and is not merged yet. Either
 records that the file is present, not that its tests pass on a given commit: run
-`npm run check` for that. Everything else is planned and lands slice by slice.
+`npm run check` for that. **D11a branch** means it exists on `codex/d11a-lookdev`
+([#75](https://github.com/Kminkjan/infrastructurio/issues/75)), not merged yet. Everything
+else is planned and lands slice by slice.
 
 | Part | Path | Status | Slice |
 |---|---|---|---|
@@ -63,7 +65,7 @@ records that the file is present, not that its tests pass on a given commit: run
 | Core compiler config | [tsconfig.core.json](../tsconfig.core.json) | **On main** | S0 |
 | Triangular lattice and its tests | [src/core/lattice.ts](../src/core/lattice.ts) | **On main** | S1 (D1) |
 | Sim ↔ world conversion and its tests | [src/render/coords.ts](../src/render/coords.ts) | **On main**; **D1 branch** adds a non-allocating `worldToSim` target and the winding oracle (in `camera/isoMath.test.ts`) | R0 (D1) |
-| Palette | [src/render/art/palette.ts](../src/render/art/palette.ts) | **On main**: an 18-key subset of the art-direction palette. **D1 branch**: 24 keys (adds meadow, deep water, foam and three UI tokens) plus `cssColor` | full set in D11a |
+| Palette | [src/render/art/palette.ts](../src/render/art/palette.ts) | **On main**: an 18-key subset of the art-direction palette. **D1 branch**: 24 keys (adds meadow, deep water, foam and three UI tokens) plus `cssColor`. **D11a branch**: the full table (70 tokens) plus `forestFloor`, tweak-panel overrides in memory, and a scan rule against hex literals elsewhere | full set in D11a |
 | Composition root | [src/app/main.ts](../src/app/main.ts) | **On main**: the skeleton smoke scene. **D1 branch**: replaced by seeded terrain, water and lighting under the iso camera, controller, scheduler, renderer host and perf monitor; G toggles the lattice overlay (debug, until D3). No sim loop yet | R0–R1 (D1) |
 | Core utilities, terrain | [src/core/util/](../src/core/util/), [src/core/terrain.ts](../src/core/terrain.ts) | **D1 branch**: `int`, `hash`, `prng`, `heap`; seeded integer terrain with a golden hash | rest of S0, S3 (D1) |
 | Geometry, track model, planner | `src/core/geometry/`, `src/core/track/` | Planned | S2–S4 (D2, D3) |
@@ -71,11 +73,12 @@ records that the file is present, not that its tests pass on a given commit: run
 | Trains, reservation, deadlock | `src/core/trains/`, `src/core/signals/` | Planned | S7–S9 (D8, D9) |
 | Operator and reasons | `src/core/services/` | Planned | S9–S10 (D9) |
 | Sim façade, remap, views, save | `src/core/sim/` | Planned. `api.ts` grows from S2; remap in S11a/b; views and save in S12 | (D10, D12) |
-| Scenario | `src/core/scenarios/baltic-diorama.ts` | Planned | D1, D11a |
+| Scenario | [src/core/scenarios/](../src/core/scenarios/) | **D11a branch**: `baltic-diorama.ts` builds the static scenery layout (towns with lots, church, windmill, farmsteads, strip fields, forest density and trees, dirt roads, telegraph poles, lamps, fences, haystacks) from the terrain and a seed, integer-only, with a golden hash; `placeNames.ts` is the Baltic name list. D1 terrain moved to generator version 2 in the same branch | D1, D11a |
 | Renderer host, scheduler, camera, perf monitor | [src/render/core/](../src/render/core/), [src/render/camera/](../src/render/camera/) | **D1 branch**: `RendererHost`, `FrameScheduler`, `PerfMonitor` (F3); `isoMath`, `IsoCamera`, `CameraController`. Pure parts unit-tested | R0 (D1) |
 | Terrain, lighting, lattice shader | [src/render/terrain/](../src/render/terrain/), [src/render/art/](../src/render/art/) | **D1 branch**: chunked lattice-triangle terrain (LOD0/LOD1), depth-tinted water, `lighting` with a fitted shadow map (`shadowFit`), lattice overlay (`shaderChunks/lattice`, `terrain/latticeMaterial`). Look not judged | R1 (D1) |
 | Track meshes | `src/render/track/` | Planned | R2 |
-| Scenery kit, labels | `src/render/scenery/`, `src/render/labels/` | Planned | R3 (D11a) → Look Gate A |
+| Scenery kit, labels | [src/render/scenery/](../src/render/scenery/), [src/render/labels/](../src/render/labels/) | **D11a branch**: instanced trees (3 species, 2 LODs), the building grammar (9 kinds) merged per chunk, instanced props, the terrain splat/field/AO textures, and CSS2D place names with a greedy declutter. Look not judged | R3 (D11a) → Look Gate A |
+| Art pipeline | [src/render/art/](../src/render/art/) | **D11a branch**: `AssetRegistry`, `materials` (six Lambert materials), shader chunks `grain`, `windSway`, `foliageTint`, `edgeFade` and `splat` composed with `lattice`, the CSS `vignette` and the dev `TweakPanel`; [camera/bookmarks.ts](../src/render/camera/bookmarks.ts) holds the Look Gate A views and the pitch A/B | R3 (D11a) |
 | Tools | `src/tools/` (not yet created) | Planned | R4–R5 (D3–D7) |
 | Picking | `src/render/picking/` | Terrain node: **D1 branch**, as [heightfieldRay.ts](../src/render/terrain/heightfieldRay.ts). Handles and proxies planned | D1 (terrain node), R4–R5 (handles, proxies) |
 | Overlays | `src/render/overlays/` | Planned | R5 (D7) |
@@ -140,7 +143,7 @@ The allowed import directions are:
 | `Math.sin/cos/tan/asin/acos/atan/atan2/sinh/cosh/tanh/pow/exp/expm1/log*/hypot/cbrt` appear only in `core/geometry/{sample,clearance,templates}.ts` | boundary test | on main |
 | Tools never import three, render, ui or react, and never touch `window`/`document` | boundary test | on main |
 | Render never imports ui | boundary test | on main |
-| Render, tools and ui import core only through `sim/api.ts` (snapshot types and the façade; it re-exports the lattice helpers the edges need) and the pure `geometry/sample.ts`, so curve maths has one source | not yet enforced | from the approved plan. Add it to the test when `sim/api.ts` lands. `src/app`, the composition root, may import core directly; `main.ts` does. **D1 exception (2026-09-26):** `sim/api.ts` does not exist yet, so `render/terrain/{heightfieldRay,terrainGeometry,terrainShading,TerrainView}.ts` import `core/lattice` and `core/terrain` directly; when `sim/api.ts` lands (S2) they move to it before the rule enters the test |
+| Render, tools and ui import core only through `sim/api.ts` (snapshot types and the façade; it re-exports the lattice helpers the edges need) and the pure `geometry/sample.ts`, so curve maths has one source | not yet enforced | from the approved plan. Add it to the test when `sim/api.ts` lands. `src/app`, the composition root, may import core directly; `main.ts` does. **D1 exception (2026-09-26):** `sim/api.ts` does not exist yet, so `render/terrain/{heightfieldRay,terrainGeometry,terrainShading,TerrainView}.ts` import `core/lattice` and `core/terrain` directly; when `sim/api.ts` lands (S2) they move to it before the rule enters the test. **D11a extends the exception:** `render/scenery/`, `render/labels/placeLabels.ts` and `render/camera/bookmarks.ts` import the scenario types from `core/scenarios/baltic-diorama` (and `core/terrain`, `core/lattice`); they move to `sim/api.ts` with the rest |
 | Ui imports neither three nor render | convention | recommendation |
 
 **[tsconfig.core.json](../tsconfig.core.json)**

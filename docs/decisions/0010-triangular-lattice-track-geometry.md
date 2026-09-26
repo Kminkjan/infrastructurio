@@ -218,6 +218,34 @@ on macOS; the status of this ADR stays Proposed.
   heights (the render lane's tests), or how grade, bridge and tunnel rules fare on this
   relief (D4).
 
+## Findings (2026-09-26, D11a terrain generator version 2)
+
+Recorded on branch `codex/d11a-lookdev` ([#75](https://github.com/Kminkjan/infrastructurio/issues/75)).
+Automated evidence only (Vitest, Node 26.7.0 on macOS); the status of this ADR stays Proposed.
+D1 left two look issues for the owner: value-noise banding along x and y at Far zoom, and the
+flat plateaus above. Version 1 had not shipped in a save, so D11a bumped
+`TERRAIN_GENERATOR_VERSION` to 2 rather than patching version 1.
+- **Rotated, offset octaves.** Each octave's grid is rotated by a Pythagorean-triple rotation
+  (cos, sin) = (a/c, b/c) — 16.3° (7-24-25), 43.6° (20-21-29) and 75.8° (16-63-65) — and
+  shifted by a seeded offset. Integer mm stay exact up to one floor per axis, so there is still
+  no trigonometry. A square grid repeats every 90° and the lattice every 30°, so each angle
+  sits 13.6–15.8° from both, and the three are 27–32° apart modulo 90°: no two octaves share
+  cell edges and none lines up with the lattice or the screen at a rest yaw. Corner values hash
+  absolute cell indices. A test holds the triples and the angle spread.
+- **A soft floor instead of the clamp.** The two coarse octaves pass through a C¹ rational
+  soft floor, n for n ≥ 17.2 m and F + k²/(k + (K − n)) below it (F = 12.7 m, k = 4.5 m), then
+  the finest octave (±2.2 m, 55 m cells) is added back at full strength. Land still never dips
+  below 10.5 m, so no random ponds, but lowland keeps rolling relief instead of lying flat.
+- **Measured:** golden hash `d2ee8189` (version 1 was `9a922d9c`); 4.23% water; heights
+  75–396 dm; steepest triangle 33.4° (was 32.9°); 0.21% of dry nodes sit exactly at 10.5 m
+  (was 9.9%) and 0.28% have all six neighbours at the same height. Over the 300-seed probe
+  (`s0`–`s299`) that six-neighbour flat share has a median of 0.31%, a 90th percentile of
+  0.52% and a worst seed of 0.86%, and every seed still has exactly one west–east river and
+  one lake (2,527–2,541 nodes; 4.20–4.55% water). Generation took about 103 ms in one dev run
+  (was a median of 59 ms): the rotation adds divisions. A dev measurement, not a gate result.
+- **Not established:** that the banding is gone at Far or that the lowland reads well; both
+  are for the owner's Look Gate A.
+
 ## Revisit when
 
 - The D3 feel check finds construction unsatisfying for reasons that planner tuning, chained
@@ -237,3 +265,5 @@ on macOS; the status of this ADR stays Proposed.
 - 2026-09-26: D1 terrain findings amended after review (shore ramp and re-recorded hash,
   lake left out rather than merged on small maps, 300-seed flat-plateau distribution);
   status unchanged, still Proposed.
+- 2026-09-26: D11a terrain generator version 2 findings added (rotated octaves, soft floor,
+  re-recorded golden hash); status unchanged, still Proposed.
