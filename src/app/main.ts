@@ -38,8 +38,12 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 const scene = new Scene();
 scene.background = new Color(palette.haze);
 scene.add(new HemisphereLight(palette.sky, palette.groundBounce, 1.1));
+const SUN_ELEVATION = (42 * Math.PI) / 180;
 const sun = new DirectionalLight(palette.sun, 2.4);
-sun.position.set(-0.55, Math.tan((42 * Math.PI) / 180), 0.45).normalize();
+// Upper-left of the screen at k = 0: normalise the horizontal part first so the
+// elevation is exactly 42° (normalising the full vector after would change it).
+const sunHorizontal = new Vector3(-0.55, 0, 0.45).normalize().multiplyScalar(Math.cos(SUN_ELEVATION));
+sun.position.set(sunHorizontal.x, Math.sin(SUN_ELEVATION), sunHorizontal.z);
 scene.add(sun);
 
 const ground = new Mesh(
