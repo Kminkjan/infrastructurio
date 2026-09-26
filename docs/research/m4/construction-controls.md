@@ -1,5 +1,33 @@
 # M4 construction controls and local lane editing — #52/#53
 
+## Recovery and fresh verification — 2026-09-26
+
+The temporary clone described below disappeared before commit `51944d1` was pushed.
+Reviewed source-writing commands from the retained implementation session were
+replayed in the durable isolated worktree
+`/Users/krisminkjan/.codex/worktrees/8192/infrastructurio`, from `f4a050f`, including
+the original cached Prettier 3.9.6 formatting steps. No historic Git mutations,
+tests or servers were replayed. Recovery commit `2234736` matches the recorded
+13-file, 1963-insertion, 18-deletion statistics. The original Git object is gone,
+so full original tree identity cannot independently be proved. No known source
+edit was missing from the retained sequence.
+
+Main `fc90d75` was integrated in `6ea5c02`. The only conflict was package scripts;
+both `dev:construction` and main's `research:m4:human` were retained. The recovery
+PR targets main. No protected gameplay working-tree content was imported or modified.
+
+Fresh checks on recovered integrated source, Darwin arm64 and Node v26.7.0:
+`npm test` **95/95**, `npm run test:m4` **25/25**, `npm run typecheck`,
+`npm run build`, and `git diff --check` pass. The construction bundle filename
+`construction-CuuPxbN8.js` matches the recorded final September 7 build; this supports
+recovery but does not replace fresh checks. A fresh `npm run dev:construction` and
+ordinary in-app browser load displayed the controls, guidance and empty site
+(0 roads / 0 legal connections). The complete September 7 browser sequence below
+was not rerun on September 26. Historic observations remain historic, and no new
+human walkthrough, #54/#55 completion or production acceptance is claimed.
+
+## Original implementation record — 2026-09-07
+
 This combined experiment starts at exact geometry baseline
 `f4a050fd5bcbb21d0d6a195ca44bdeabb6f8a36e`, on branch
 `codex/m4-construction-controls-lanes`, with draft PR base
