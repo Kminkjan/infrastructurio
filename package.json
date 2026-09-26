@@ -5,31 +5,26 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "npm run typecheck && vite build",
+    "preview": "vite preview",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
-    "test:m4": "node --test experiments/m4/lane-fixture.checks.mjs experiments/m4/rendering/verify-results.checks.mjs",
-    "research:m4:lanes": "node experiments/m4/run-lane-study.mjs",
-    "research:m4:rendering": "node experiments/m4/rendering/run-study.mjs",
-    "verify:m4:rendering": "node experiments/m4/rendering/verify-results.mjs",
-    "dev:construction": "vite --host 127.0.0.1 --port 5178 --strictPort",
-    "research:m4:human": "node experiments/m4/rendering/serve-study.mjs"
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.core.json",
+    "check": "npm test && npm run build"
   },
   "engines": {
-    "node": ">=20.19"
+    "node": "^20.19 || >=22.12"
   },
   "dependencies": {
-    "pixi.js": "^8.19.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "three": "0.185.1"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
+    "@types/three": "~0.185.4",
     "@vitejs/plugin-react": "^6.0.5",
-    "fake-indexeddb": "^6.2.5",
-    "three": "0.185.1",
     "typescript": "^7.0.2",
     "vite": "^8.2.1",
     "vitest": "^4.1.10"

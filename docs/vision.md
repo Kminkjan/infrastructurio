@@ -1,51 +1,148 @@
-# Vision and Scope
+# Vision
 
-Direction agreed with the project owner on 2026-09-06.
+> **You build the railway. The world runs on it.**
 
-**You design the infrastructure. The world builds around it and decides how to use it.**
+**Status 2026-09-26.** The owner chose the rail-first direction in conversation on
+2026-09-26 ([ADR 0008](decisions/0008-archive-road-era-and-restart.md)). M4 — Living
+Diorama is the current milestone and is not accepted. Main holds the skeleton only: the
+lattice core, the coordinate conventions and an isometric smoke scene. This page states
+intent. It is not evidence that anything described here works.
 
-## Player fantasy
+## Pitch
 
-Spend most of play drawing and refining roads, junctions, tracks and stations. Watch autonomous traffic use those designs, development discover new opportunities, and success generate the next transport problem. A useful connection can attract an industry; its trucks can expose a poor merge; a redesigned junction can change where housing becomes attractive.
+Infrastructurio is a calm infrastructure-design game set in a stylized Baltic countryside
+around 1900, in the age of steam. The player lays track across a triangular lattice with
+smooth curves and grades, carries it over rivers on bridges and through hills in tunnels,
+and places turnouts, signals, stations and depots. Everything that moves belongs to the
+simulation. Autonomous steam trains run on what the player built: they reserve paths
+through signal blocks, stop at platforms, queue and sometimes jam, and every train can say
+why it is waiting. The player reads the diorama, reshapes the track and watches it settle.
 
-The exact design matters. Two junctions with equal lane counts can have different throughput, queues and reliability because of turning movements, priorities and geometry. Railway switches, platform access and signals should ultimately matter in the same way.
+The satisfaction is the craft of a layout that works and looks right: a passing loop placed
+where two trains actually meet, a chain signal that keeps a junction clear, a branch that
+climbs over the main line on a viaduct.
 
-## Agreed player and simulation responsibilities
+## Who does what
 
-| Player designs and controls | Simulation decides and operates |
-| --- | --- |
-| Freeform roads, curves, lane counts, lane connections and priorities | Private vehicle demand, destinations, routes and departures |
-| Bridges, underpasses, major corridors and junctions | Merging, queuing, lane use and experienced journey times |
-| Rail tracks, switches, platforms, stations and signals | Operator service viability, routes, frequency, train size and dispatch |
-| Local street constraints and redesign of existing streets | Town-built local streets within those constraints |
-| Infrastructure investment and land use constraints | Housing, commerce and industry responding to accessibility |
+The player designs infrastructure. The simulation runs everything on it and explains itself.
 
-The player never needs to purchase vehicles, create transport lines, set timetables, assign fleets or dispatch trains. Services are fully autonomous and inspectable. Subsidies and service requests are outside this prototype.
+| Area | The player designs | The simulation decides | From |
+|---|---|---|---|
+| Track | Straights, curves and shifts on the lattice; grades and heights | Curve speed limits, train performance on grades, the derived network of sections and blocks | M4 |
+| Turnouts and diamonds | Where tracks diverge or cross (turnouts are derived from the track laid) | Which leg a train takes; turnout fans and diamonds as exclusive conflict groups | M4 |
+| Signals | Stop and chain signals: position and facing | Aspects, reservations, who goes first, where running is one-way | M4 |
+| Stations and platforms | Platform position, length and side | Station grouping, which platform a train uses, dwell and reversal | M4 |
+| Depots | Depot position at a track end | Which depot serves a line; spawning and withdrawing trains | M4 |
+| Bridges and tunnels | Where the line crosses water, valleys or hills (inferred from terrain, or forced by tool) | Structure and clearance rules | M4 |
+| Trains | Nothing: no purchase, no fleet management | How many trains run, their consist, when they spawn and withdraw | M4 |
+| Services | Nothing: no lines, timetables or dispatch | Lines from the station graph with a placeholder headway (M4); demand-driven operators that start, adjust and withdraw services (M5) | M4, M5 |
+| Routing | Nothing | Paths, platform choice, reversal points and waiting | M4 |
+| Demand, towns and growth | Nothing | Settlements and industries, their demand, where towns grow | M5 |
+| Roads | Lattice roads, lane presets, priorities, level crossings, grade separation | Road traffic and mode choice | M6 |
 
-Detailed controls have useful defaults and presets. Simple construction should work immediately; precision tools should reward deliberate refinement.
+**The player never** buys, retires or assigns trains, draws lines or routes, writes
+timetables, dispatches or holds a train, or sets subsidies, in any milestone. There is no
+purchase or dispatch UI, and none is planned. Service follows only from infrastructure:
+reachability, platforms, passing places and signalling decide how many trains the operator
+can run and where they wait.
 
 ## Design pillars
 
-- Infrastructure design is the main activity. Regional simulation creates reasons to design and revisit it.
-- Traffic has causal behaviour. Vehicles occupy lanes, queue and merge; experienced delay and delivery reliability affect accessibility and growth.
-- The world has its own initiative. Operators establish, change or withdraw services; towns extend streets; development chooses among locations.
-- Growth has a geography. Access to workers, customers and goods supports distinct residential, commercial and industrial places.
-- Decisions are inspectable. Show why a route, development or service was chosen, including why nothing happened.
-- Success creates changing demand. Growth feeds trips back into the network, with slower construction and decline rather than instant relocation.
-- Constraints are forgiving but meaningful. Land, construction and maintenance matter without frequent financial failure.
+1. **Calm diorama.** A miniature world to build and watch, not a race. M4 has no money,
+   score, timer, fail state or scripted ending. Time belongs to the player: pause, 1×, 2×,
+   4× or 10×. The look is muted and soft: steam puffs, easing semaphore arms, a fixed
+   isometric camera that rotates in six 60° steps matched to the lattice. The scene renders
+   only when something changes, so an idle diorama costs nothing.
+2. **Infrastructure is the craft.** Laying track must feel good before any train runs on it,
+   which is why D3 carries an early owner feel check. Track snaps to the lattice with smooth
+   circular curves; radius classes carry visible speed limits (60 m → 25 km/h up to
+   360 m → 60 km/h); precision mode picks radius and end heading while staying on the
+   lattice; grades go up to 35‰ and bridges and tunnels follow the terrain. The ghost shows
+   new versus reused pieces, and the tooltip shows length, grade, minimum radius and end
+   height. Layout choices have operational consequences a player can see: a tight curve or
+   a steep grade slows every train that uses it.
+3. **Autonomous and inspectable.** An operator reads the network and decides lines, depots
+   and train counts. Every station, line, train and section has a status and a reason code,
+   and the inspector turns it into a sentence ("Waiting at signal S-12: block B-7 occupied
+   by Train 3") with a **Show** button that pans to the cause. A placeholder is labelled as
+   one, such as M4's 6-minute headway. A state the game cannot explain is a defect.
+4. **Forgiving.** A mistake costs a click, not a save. Rejections name one reason and a fix
+   before anything changes; undo and redo cover construction; edits under traffic are
+   either safe or refused with `track-in-use`; deadlocks are detected, explained and
+   eventually cleared by the operator. Nothing is lost
+   ([failure model](gameplay-loop.md#forgiving-failure-model)).
+5. **Honest simulation: capacity from occupied track.** One simulated train is one physical
+   consist with a real length. It holds the sections it occupies and the path it has
+   reserved, all-or-nothing, and no other train may enter them; turnout fans and diamonds
+   are exclusive too. Throughput limits therefore come from the layout (single track,
+   missing passing loops, conflicting junctions), never from hidden rates. The same layout
+   and commands give the same run, checked by replay hashes. The HUD shows only real counts
+   (trains, moving, waiting, average wait) and no invented passenger or cargo numbers. This
+   carries forward ADR 0003's principles as knowledge ([archive](archive/README.md)).
 
-Representative vehicles may stand for multiple trips, provided weighting does not break physical queues, flow accounting or the consequences of design. Persistent identities for every citizen are unnecessary.
+## Non-goals
 
-## Next prototype contract
+**Never, in any milestone** (the player's role):
+- player train purchase, fleet management, lines, routes, timetables, dispatch or
+  subsidies;
+- scripted endings, scripted bottlenecks or scripted growth: problems emerge from the
+  layout and, from M5, from demand;
+- anything copied from the mood reference: assets, names, UI or screenshots.
 
-A small region with a few settlements and industries. First prove an open-ended road design → growth → congestion → redesign loop, with no prescribed winning solution. Then add a bounded railway proof within the same roadmap. Road construction includes editable curves, snapping and grade separation. Readable stylized presentation comes first; a short comparative evaluation will decide whether to retain 2D or adopt 3D.
+**Not a realism exercise.** Rules are simplified wherever legibility wins. For example, the
+1.524 m broad gauge is purely visual, and M4 runs one kind of train (a tank locomotive with
+2–4 coaches).
 
-See [the prototype plan](next-prototype-plan.md) for delivery gates and [the roadmap](../ROADMAP.md) for milestones.
+**Not in M4** (later milestones may take some up; see the [roadmap](../ROADMAP.md)):
+- towns, demand, passengers and cargo;
+- economy and money;
+- roads (M6);
+- IndexedDB saves (M4 has replay fixtures only);
+- mixed rolling stock and competing operators;
+- sound, day/night and weather;
+- terrain editing;
+- off-lattice geometry and transition curves;
+- touch input and a screen-reader map (known accessibility gaps).
 
-## Scope boundaries
+## Mood reference
 
-Defer comprehensive production chains, municipal service management, huge maps, every-trip citizen simulation, multiplayer, utilities, mod support and a large transport catalogue. Rail belongs in this prototype roadmap, after the road loop. Do not expand the old guided scenario as the next product target.
+*Mighty Tiny Railways* (Mighty Tiny Games, Lithuania) sets the mood the owner wants: the
+steam era in the Baltics, an isometric 2.5D view and a muted, calm palette. Lattice
+snapping, precision placement and block/chain signalling are genre conventions, specified
+independently in ADRs [0010](decisions/0010-triangular-lattice-track-geometry.md) and
+[0011](decisions/0011-signalling-and-reservation.md). It is a **mood reference only**. None of its assets, names, UI or screenshots
+enter the repo or the game, and originality is scored in the owner's look rubric (Look
+Gate A). Infrastructurio's own palette and forms come from public-domain sources around
+1900: Library of Congress Photochrom prints of Riga, Vilnius and Baltic villages
+(1890–1905), landscapes by Isaac Levitan and M. K. Čiurlionis, and period railway
+photographs. The mood board, palette and sources live in [art direction](art-direction.md).
 
-## Inspiration
+## Milestones
 
-[Highways & Co.](https://store.steampowered.com/app/5096600/Highways__Co/) provides a reference for road and junction design. Our distinct objective is infrastructure-driven autonomous development and transport operation. Its store description is a reference, not evidence of implementation details or a commitment to copy its appearance.
+M4 → M5 → M6. Each closes only on playable evidence and explicit owner acceptance. On
+GitHub they are [milestone 8](https://github.com/Kminkjan/infrastructurio/milestone/8),
+[milestone 9](https://github.com/Kminkjan/infrastructurio/milestone/9) and
+[milestone 10](https://github.com/Kminkjan/infrastructurio/milestone/10).
+
+| Milestone | One-line claim | The player gains | The simulation gains |
+|---|---|---|---|
+| **M4 — Living Diorama** (current, not accepted) | A player builds a railway layout on terrain, and autonomous trains run on it safely and deterministically, stop at platforms and explain their waits; the owner judges that it looks and feels right | Track, turnouts, signals, stations, depots, bridges and tunnels | One autonomous operator with a placeholder headway; signalling, movement and inspection |
+| **M5 — Autonomous Rail Serves a Growing Region** | Settlements and industries create demand, autonomous operators start, adjust and withdraw services with explanations, rail access shapes growth, and growth creates the next capacity problem: the first integrated playable loop | The same infrastructure tools, now under real demand | Demand, demand-driven operators, towns and growth, save/replay |
+| **M6 — Roads Feed and Compete with Rail** | Lattice roads connect towns to stations, and causal road traffic and mode choice feed and compete with rail | Roads with lane presets and priorities, level crossings, grade separation | Road traffic, mode choice, constrained town streets |
+
+- Full claims, exclusions and what lies beyond: [roadmap](../ROADMAP.md).
+- The M4 contract, slices and exclusions: [prototype plan](prototype-plan.md); work items
+  D1–D13: [backlog](backlog.md).
+- The predeclared M4 gates, including the owner walkthrough:
+  [acceptance gates](evidence/m4/2026-09-26-acceptance-gates.md).
+- M5 needs a first-time-player session; an owner session does not count as one.
+- Road-era research at tag `legacy-m0-m4` is source material for M6, not evidence
+  ([archive](archive/README.md)).
+
+## Related documents
+
+- [Gameplay loop](gameplay-loop.md): the M4 and M5 loops, feedback and the failure model.
+- [Glossary](glossary.md): block, stop and chain signal, reservation, consist, turnout,
+  lattice, precision mode.
+- [Architecture](architecture.md) and [simulation model](simulation-model.md).
+- [Decision records](decisions/README.md).

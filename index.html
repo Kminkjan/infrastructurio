@@ -3,14 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta
-      name="description"
-      content="Infrastructurio web simulation prototype"
-    />
+    <meta name="description" content="Infrastructurio — a living railway diorama" />
     <title>Infrastructurio</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html, body { margin: 0; height: 100%; background: #dcdccb; overflow: hidden; }
+      #viewport { position: fixed; inset: 0; }
+      #world { display: block; width: 100%; height: 100%; outline: none; touch-action: none; user-select: none; }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <div id="viewport">
+      <canvas id="world" tabindex="0" aria-label="Railway diorama"></canvas>
+    </div>
+    <div id="hud"></div>
+    <script type="module" src="/src/app/main.ts"></script>
   </body>
 </html>
