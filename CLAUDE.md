@@ -36,11 +36,11 @@ around 1900 in web + TypeScript + Three.js 2.5D. Owner direction of 2026-09-26 (
 
 | Path | Contract | Guide |
 |---|---|---|
-| `src/core/` | Deterministic, DOM-free simulation; public surface `sim/api.ts` (planned). Exists: `lattice.ts` | [src/core/CLAUDE.md](src/core/CLAUDE.md) |
-| `src/render/` | Imperative Three.js; reads snapshots only. Exists: `coords.ts`, `art/palette.ts` | [src/render/CLAUDE.md](src/render/CLAUDE.md) |
+| `src/core/` | Deterministic, DOM-free simulation; public surface `sim/api.ts` (planned). Exists: `lattice.ts`, `terrain.ts`, `util/` (D1) | [src/core/CLAUDE.md](src/core/CLAUDE.md) |
+| `src/render/` | Imperative Three.js; reads snapshots only. Exists: `coords.ts`, `camera/`, `core/`, `terrain/`, `art/` (D1) | [src/render/CLAUDE.md](src/render/CLAUDE.md) |
 | `src/tools/` | Pure tool reducers `(state, event, ctx) → [state, effects]` (planned) | below |
 | `src/ui/` | React 19 HUD only, fed via `useSyncExternalStore`, never in the frame loop; palette UI colours, aria-live status, reduced motion honoured (planned) | — |
-| `index.html` → `src/app/main.ts` | Wiring, fixed-step host loop, input → commands. Today: skeleton smoke scene, replaced in D1 | below |
+| `index.html` → `src/app/main.ts` | Wiring, fixed-step host loop, input → commands. Today: seeded terrain under the iso camera (D1); no sim loop yet | below |
 | `tests/` | `architecture.test.ts` (source-scan boundaries, negative self-check); `replay/`, `fixtures/` planned | core guide |
 | `docs/` | Plans, ADRs, dated evidence, archive pointers | [docs/CLAUDE.md](docs/CLAUDE.md) |
 
@@ -77,8 +77,8 @@ Node `^20.19 || >=22.12`. There is no CI, linter, formatter config or Stop hook.
 | `npm run check` | `npm test` + `npm run build` |
 | `npm run dev` | Plain `vite`, so the port can move: open the exact URL it prints and confirm it is yours |
 
-Recorded 2026-09-26 (automated, commit 2147261 on the reset skeleton): 16 tests in 3 files
-(architecture 4, lattice 9, coords 3). Counts change with every slice; report fresh ones.
+Recorded 2026-09-26 (automated, D1 branch `codex/d1-lattice-terrain`): 159 tests in 20
+files. Counts change with every slice; report fresh ones.
 
 ## Definition of done by change type
 
