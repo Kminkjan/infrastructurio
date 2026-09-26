@@ -6,8 +6,10 @@
   `src/core` (most directly `util/`, `geometry/`, `trains/`, `signals/`, `services/` and
   `sim/`), the host loop in `src/app`, `tests/replay/` and
   [`tests/architecture.test.ts`](../../tests/architecture.test.ts)
-- Tracking: M4 epic "M4 — Epic: Living Diorama" (issue TBD); D8 train movement and
-  reservation, and D12 replay and bench harness (issues TBD); see
+- Tracking: M4 epic "M4 — Epic: Living Diorama"
+  ([#62](https://github.com/Kminkjan/infrastructurio/issues/62)); D8 train movement and
+  reservation ([#72](https://github.com/Kminkjan/infrastructurio/issues/72)), and D12 replay
+  and bench harness ([#76](https://github.com/Kminkjan/infrastructurio/issues/76)); see
   [the backlog](../backlog.md)
 - Evidence: design only, consolidated from the owner-approved rail-first plan
   (2026-09-26) into [the architecture](../architecture.md) and

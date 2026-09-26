@@ -1,12 +1,11 @@
 # M4 backlog — Living Diorama
 
 - **Status (2026-09-26):** planned. No work item has started beyond the skeleton on main.
-  GitHub issues for the epics and for D1–D13 are not created yet, so every issue and
-  milestone number below is TBD.
-- **Authority:** once an issue is created, **its GitHub body is authoritative** for that
-  item. This file stays the planning source and is updated to link the issue. Dispositions
-  live on GitHub, and the owner decides them. Nothing here claims that an item is done or an
-  issue closed.
+  The GitHub milestones (8–10), epics (#62–#64) and D1–D13 issues (#65–#77) were created on
+  2026-09-26 and are linked under [Epics](#epics) and [Tracking keys](#tracking-keys).
+- **Authority:** each item's **GitHub issue body is authoritative** for that item. This file
+  stays the planning source and links each issue. Dispositions live on GitHub, and the owner
+  decides them. Nothing here claims that an item is done or an issue closed.
 - **Contract:** the [prototype plan](prototype-plan.md) holds the claim, exclusions, slice
   ladder and gate overview. The
   [acceptance gates record](evidence/m4/2026-09-26-acceptance-gates.md) holds the exact
@@ -17,7 +16,7 @@
 ## Issue shape
 
 Every issue body carries:
-- **Parent epic:** "M4 — Epic: Living Diorama" (TBD);
+- **Parent epic:** "M4 — Epic: Living Diorama" ([#62](https://github.com/Kminkjan/infrastructurio/issues/62));
 - **Dependencies;**
 - **Acceptance criteria** as a `- [ ]` checklist;
 - **Planning source:** `docs/prototype-plan.md`, `docs/backlog.md`;
@@ -43,7 +42,8 @@ browser checks are agent evidence. Automation is never human evidence.
 
 ### M4 — Epic: Living Diorama
 
-- **GitHub issue:** TBD. **Milestone:** M4 (TBD).
+- **GitHub issue:** [#62](https://github.com/Kminkjan/infrastructurio/issues/62).
+  **Milestone:** M4 ([milestone 8](https://github.com/Kminkjan/infrastructurio/milestone/8)).
 - **Claim:** a player can build a railway layout on terrain (curves, grades, bridges,
   tunnels, turnouts, stations, depots, block and chain signals), and autonomous trains run
   on it safely and deterministically, stop at platforms and explain their waits. The owner
@@ -55,7 +55,8 @@ browser checks are agent evidence. Automation is never human evidence.
 
 ### M5 — Epic: Autonomous Rail Serves a Growing Region (placeholder)
 
-- **GitHub issue:** TBD. **Milestone:** M5 (TBD).
+- **GitHub issue:** [#63](https://github.com/Kminkjan/infrastructurio/issues/63).
+  **Milestone:** M5 ([milestone 9](https://github.com/Kminkjan/infrastructurio/milestone/9)).
 - **Claim:** settlements and industries create demand. Autonomous operators start, adjust
   and withdraw services with explanations. Rail access shapes growth, and growth creates the
   next capacity problem. Save/replay and a first-time-player session are the evidence for
@@ -64,7 +65,8 @@ browser checks are agent evidence. Automation is never human evidence.
 
 ### M6 — Epic: Roads Feed and Compete with Rail (placeholder)
 
-- **GitHub issue:** TBD. **Milestone:** M6 (TBD).
+- **GitHub issue:** [#64](https://github.com/Kminkjan/infrastructurio/issues/64).
+  **Milestone:** M6 ([milestone 10](https://github.com/Kminkjan/infrastructurio/milestone/10)).
 - **Claim:** lattice roads with lane presets and priorities, level crossings and grade
   separation, road access to stations, causal road traffic, mode choice and constrained town
   streets. Road-era research at tag `legacy-m0-m4` is source material.
@@ -74,19 +76,19 @@ browser checks are agent evidence. Automation is never human evidence.
 
 | Key | Title | GitHub issue | Depends on |
 |---|---|---|---|
-| D1 | Lattice, terrain and isometric camera | TBD | Skeleton (PR 1, [#60](https://github.com/Kminkjan/infrastructurio/pull/60)) |
-| D2 | Track geometry and authoring model (core) | TBD | D1 |
-| D3 | Track construction tool | TBD | D2 |
-| D4 | Grades, bridges and tunnels | TBD | D2 |
-| D5 | Turnouts and diamond crossings | TBD | D2 |
-| D6 | Stations, platforms and depots | TBD | D5 |
-| D7 | Blocks and signals | TBD | D5, D6 |
-| D8 | Train movement and reservation | TBD | D7, D12 |
-| D9 | Autonomous diorama services | TBD | D8 |
-| D10 | Inspection, time controls and edits under traffic | TBD | D8 |
-| D11 | Art direction (a: lookdev spike, b: final pass) | TBD | a: D1; b: D3, D8 |
-| D12 | Replay and bench harness | TBD | D2 |
-| D13 | M4 acceptance gate | TBD | All (D1–D12) |
+| D1 | Lattice, terrain and isometric camera | [#65](https://github.com/Kminkjan/infrastructurio/issues/65) | Skeleton (PR 1, [#60](https://github.com/Kminkjan/infrastructurio/pull/60)) |
+| D2 | Track geometry and authoring model (core) | [#66](https://github.com/Kminkjan/infrastructurio/issues/66) | D1 |
+| D3 | Track construction tool | [#67](https://github.com/Kminkjan/infrastructurio/issues/67) | D2 |
+| D4 | Grades, bridges and tunnels | [#68](https://github.com/Kminkjan/infrastructurio/issues/68) | D2 |
+| D5 | Turnouts and diamond crossings | [#69](https://github.com/Kminkjan/infrastructurio/issues/69) | D2 |
+| D6 | Stations, platforms and depots | [#70](https://github.com/Kminkjan/infrastructurio/issues/70) | D5 |
+| D7 | Blocks and signals | [#71](https://github.com/Kminkjan/infrastructurio/issues/71) | D5, D6 |
+| D8 | Train movement and reservation | [#72](https://github.com/Kminkjan/infrastructurio/issues/72) | D7, D12 |
+| D9 | Autonomous diorama services | [#73](https://github.com/Kminkjan/infrastructurio/issues/73) | D8 |
+| D10 | Inspection, time controls and edits under traffic | [#74](https://github.com/Kminkjan/infrastructurio/issues/74) | D8 |
+| D11 | Art direction (a: lookdev spike, b: final pass) | [#75](https://github.com/Kminkjan/infrastructurio/issues/75) (a and b) | a: D1; b: D3, D8 |
+| D12 | Replay and bench harness | [#76](https://github.com/Kminkjan/infrastructurio/issues/76) | D2 |
+| D13 | M4 acceptance gate | [#77](https://github.com/Kminkjan/infrastructurio/issues/77) | All (D1–D12) |
 
 **Recommended order:** D1 → D11a → D2 → D3 → D4 → D5 → D6 → D7 → D12 → D8 → D9 → D10 →
 D11b → D13. D11a runs beside D2, and D12 beside D5–D7. Only one agent at a time touches

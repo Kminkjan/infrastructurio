@@ -26,7 +26,8 @@ exists. It is a design document, not evidence that any slice works.
 - [Glossary](glossary.md): the terms.
 
 **Keys.** Slice keys S0–S12 (core) and R0–R7 (render), and tracking keys D1–D13, follow the
-[backlog](backlog.md). The D1–D13 GitHub issue numbers are TBD.
+[backlog](backlog.md). D1–D13 are GitHub issues
+[#65](https://github.com/Kminkjan/infrastructurio/issues/65)–[#77](https://github.com/Kminkjan/infrastructurio/issues/77).
 
 ## Principles
 

@@ -5,8 +5,12 @@
 - Scope: Prototype. Sections, conflict groups, directed sections and blocks in
   `src/core/network/derive.ts`; reservation and deadlock detection in `src/core/signals/`;
   wait reasons in `src/core/services/reasons.ts`; aspects and overlays in `src/render`
-- Tracking: M4 epic "M4 — Epic: Living Diorama" (TBD); D5 (TBD), D7 (TBD), D8 (TBD),
-  D9 (TBD)
+- Tracking: M4 epic "M4 — Epic: Living Diorama"
+  ([#62](https://github.com/Kminkjan/infrastructurio/issues/62)); D5
+  ([#69](https://github.com/Kminkjan/infrastructurio/issues/69)), D7
+  ([#71](https://github.com/Kminkjan/infrastructurio/issues/71)), D8
+  ([#72](https://github.com/Kminkjan/infrastructurio/issues/72)), D9
+  ([#73](https://github.com/Kminkjan/infrastructurio/issues/73))
 - Evidence: design pass, 2026-09-26; nothing implemented. Road-era lane-fixture
   observations ([#27](https://github.com/Kminkjan/infrastructurio/issues/27)) are cited under
   Context as history only

@@ -9,7 +9,7 @@ stand alone; repo-wide rules are in the root [CLAUDE.md](../CLAUDE.md).
    issue comments lag main, so verify there too.
 2. **Target docs:** [ROADMAP.md](../ROADMAP.md) (milestone claims) → [vision](vision.md)
    (product and player role) → [prototype plan](prototype-plan.md) (M4 contract and
-   exclusions) → [backlog](backlog.md) (D1–D13, dependencies; issue numbers TBD) →
+   exclusions) → [backlog](backlog.md) (D1–D13 = #65–#77, dependencies) →
    [ADR index](decisions/README.md).
 3. **Accepted ADRs** (0001's web direction, 0002, 0008, 0009) record owner decisions. Where a
    design doc contradicts one, the ADR wins and the doc gets a dated fix.
@@ -90,10 +90,10 @@ The root CLAUDE.md wins over any doc on agent rules.
   item's dated update line, affected architecture or simulation-model sections, and the ADR
   index if an ADR changed. Then comment on the issue. Touch ROADMAP and the README status
   only when milestone scope or sequencing changes.
-- When the restructure batch assigns issue and milestone numbers, replace every `TBD` in one
-  docs PR (`grep -rnw TBD --include='*.md' . | grep -v docs/archive`), root CLAUDE.md
-  included. Exception: once the gates file is owner-approved, leave its TBDs alone (its rule
-  4); fill them before approval, or name the numbers in the D13 disposition.
+- GitHub numbers were filled in on 2026-09-26 (milestones 8–10, epics #62–#64, D1–D13 =
+  #65–#77). A new issue or milestone gets its number in the docs when it is created; a `TBD`
+  left today marks an item that does not exist yet. Once the gates file is owner-approved,
+  leave it alone (its rule 4) and name new numbers in the D13 disposition.
 - **Never write that a milestone, issue or gate is accepted or closed.** GitHub records
   dispositions and the owner decides; propose a disposition instead.
 - Never rewrite a superseded doc silently: add a dated `> Scope note` or an appended section.

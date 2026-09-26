@@ -3,10 +3,14 @@
 - **Status:** Proposed 2026-09-26 — awaiting explicit owner approval in the PR that adds this
   file ([#61](https://github.com/Kminkjan/infrastructurio/pull/61)); no measurement may be taken against these bounds before
   approval, and bounds are never retuned after results.
-- **Milestone:** M4 — Living Diorama (milestone TBD); epic "M4 — Epic: Living Diorama"
-  (TBD).
-- **Run by:** D13 "M4 acceptance gate" (TBD), using the harness from D12 "Replay and bench
-  harness" (TBD). Look Gate A is held in D11a (TBD).
+- **Milestone:** M4 — Living Diorama
+  ([milestone 8](https://github.com/Kminkjan/infrastructurio/milestone/8)); epic "M4 — Epic:
+  Living Diorama" ([#62](https://github.com/Kminkjan/infrastructurio/issues/62)).
+- **Run by:** D13 "M4 acceptance gate"
+  ([#77](https://github.com/Kminkjan/infrastructurio/issues/77)), using the harness from D12
+  "Replay and bench harness" ([#76](https://github.com/Kminkjan/infrastructurio/issues/76)).
+  Look Gate A is held in D11a (part of
+  [#75](https://github.com/Kminkjan/infrastructurio/issues/75)).
 - **Contract:** [prototype plan](../../prototype-plan.md) (claim, scope, slices),
   [backlog](../../backlog.md) (D1–D13), [roadmap](../../../ROADMAP.md). Terms follow the
   [glossary](../../glossary.md); semantics follow the
@@ -546,8 +550,10 @@ logs (C).
    - **do not accept yet**, naming what must change.
 4. It never states or implies that M4 is accepted, and it closes nothing.
 5. **Only the owner accepts M4.** Their decision is given explicitly on GitHub, on the M4
-   epic and D13 (numbers TBD). It is then cited in a dated History note in the disposition,
-   with every waiver recorded as "fail (waived by the owner, <date>)".
+   epic ([#62](https://github.com/Kminkjan/infrastructurio/issues/62)) and D13
+   ([#77](https://github.com/Kminkjan/infrastructurio/issues/77)). It is then cited in a
+   dated History note in the disposition, with every waiver recorded as "fail (waived by the
+   owner, <date>)".
 
 ## Non-claims
 

@@ -6,8 +6,13 @@
   (`src/core/lattice.ts`, `src/core/geometry/`, `src/core/track/`, derived junctions in
   `src/core/network/derive.ts`), plus the construction ghost and precision mode in the
   tools and renderer
-- Tracking: M4 epic "M4 — Epic: Living Diorama" (TBD); D1 (TBD), D2 (TBD), D3 (TBD),
-  D4 (TBD), D5 (TBD)
+- Tracking: M4 epic "M4 — Epic: Living Diorama"
+  ([#62](https://github.com/Kminkjan/infrastructurio/issues/62)); D1
+  ([#65](https://github.com/Kminkjan/infrastructurio/issues/65)), D2
+  ([#66](https://github.com/Kminkjan/infrastructurio/issues/66)), D3
+  ([#67](https://github.com/Kminkjan/infrastructurio/issues/67)), D4
+  ([#68](https://github.com/Kminkjan/infrastructurio/issues/68)), D5
+  ([#69](https://github.com/Kminkjan/infrastructurio/issues/69))
 - Evidence: [`src/core/lattice.ts`](../../src/core/lattice.ts) and its tests (automated);
   design-pass geometry, 2026-09-26 (not yet proved by tests)
 - Decision authority: Pending (proposed 2026-09-26)

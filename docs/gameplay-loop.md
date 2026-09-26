@@ -84,9 +84,11 @@ demand → services → growth → capacity problem → redesign → demand agai
 5. **Redesign.** The player answers with infrastructure only, using M4's tools and M4's
    inner loop. No lines, timetables or dispatch appear.
 
-M5 adds save/replay and a first-time-player session; its detailed design and GitHub
-epic are TBD as of 2026-09-26 ([roadmap](../ROADMAP.md)). M6 then adds roads that feed
-stations and compete with rail through causal road traffic and mode choice.
+M5 adds save/replay and a first-time-player session. As of 2026-09-26 its detailed design
+is still to come, under the placeholder epic
+[#63](https://github.com/Kminkjan/infrastructurio/issues/63) ([roadmap](../ROADMAP.md)). M6
+then adds roads that feed stations and compete with rail through causal road traffic and
+mode choice.
 
 ## Feedback and inspection expectations
 

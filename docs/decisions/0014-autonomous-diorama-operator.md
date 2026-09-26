@@ -5,9 +5,11 @@
 - Scope: Prototype, M4 only; a placeholder. Affects `src/core/services/` (`operator.ts`,
   `reasons.ts`), deadlock withdrawal in `signals/deadlock.ts`, depot spawn and despawn,
   the inspector and notifications. Replaced by the M5 demand-driven operators
-- Tracking: M4 epic "M4 — Epic: Living Diorama" (issue TBD); D9 autonomous diorama services
-  (issue TBD); see [the backlog](../backlog.md). The M5 epic "Autonomous Rail Serves a
-  Growing Region" (issue TBD) owns the replacement
+- Tracking: M4 epic "M4 — Epic: Living Diorama"
+  ([#62](https://github.com/Kminkjan/infrastructurio/issues/62)); D9 autonomous diorama
+  services ([#73](https://github.com/Kminkjan/infrastructurio/issues/73)); see
+  [the backlog](../backlog.md). The M5 epic "Autonomous Rail Serves a Growing Region"
+  ([#63](https://github.com/Kminkjan/infrastructurio/issues/63)) owns the replacement
 - Evidence: design only, consolidated from the owner-approved rail-first plan
   (2026-09-26) into [the simulation model](../simulation-model.md). The product rule is in
   [the vision](../vision.md). Nothing is implemented or measured

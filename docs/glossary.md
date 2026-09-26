@@ -441,7 +441,8 @@ See [line](#line-operator-derived-never-player-authored).
 ### Slice
 
 A PR-sized unit of M4 work: core slices S0–S12 (with S11a/b) and render slices R0–R7,
-grouped under backlog keys D1–D13 ([backlog](backlog.md)). Issue numbers are TBD.
+grouped under backlog keys D1–D13 ([backlog](backlog.md)), which are GitHub issues
+[#65](https://github.com/Kminkjan/infrastructurio/issues/65)–[#77](https://github.com/Kminkjan/infrastructurio/issues/77).
 
 ### Snapshot (NetworkView, FrameView)
 

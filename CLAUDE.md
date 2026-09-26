@@ -26,9 +26,11 @@ around 1900 in web + TypeScript + Three.js 2.5D. Owner direction of 2026-09-26 (
 3. **M4 gates** ([acceptance gates](docs/evidence/m4/2026-09-26-acceptance-gates.md)) are
    authoritative for every gate threshold and performance budget. Other docs may quote them
    only as provisional with a link, and the gates file wins on any difference.
-4. **GitHub numbers (as of 2026-09-26):** the M4 epic, D1–D13 and new M4/M5/M6 milestones
-   come from the restructure batch, numbers TBD; the road-era `/milestone/5` = M4 mapping is
-   void. Check: `gh api 'repos/Kminkjan/infrastructurio/milestones?state=all'`.
+4. **GitHub numbers (created 2026-09-26):** milestones M4 = `/milestone/8`, M5 =
+   `/milestone/9`, M6 = `/milestone/10`; epics M4 #62, M5 #63, M6 #64; D1–D13 = #65–#77
+   (D11a and D11b are both #75; map in [backlog](docs/backlog.md#tracking-keys)). The
+   road-era `/milestone/5` = M4 mapping is void. Check:
+   `gh api 'repos/Kminkjan/infrastructurio/milestones?state=all'`.
 
 ## Repository map
 

@@ -6,9 +6,13 @@
   `scenery/`, `trains/`, `overlays/`), the HUD's colours in `src/ui`, the asset contract
   and bundle loading. Builds on [ADR 0009](0009-render-isometric-threejs.md) (renderer,
   camera, coordinates, render on demand), which this ADR does not reopen
-- Tracking: M4 epic "M4 — Epic: Living Diorama" (issue TBD); D11 art direction (a: lookdev
-  spike → Look Gate A; b: final pass), with track meshes in D3 and structures in D4 (issues
-  TBD); see [the backlog](../backlog.md)
+- Tracking: M4 epic "M4 — Epic: Living Diorama"
+  ([#62](https://github.com/Kminkjan/infrastructurio/issues/62)); D11 art direction (a:
+  lookdev spike → Look Gate A; b: final pass;
+  [#75](https://github.com/Kminkjan/infrastructurio/issues/75)), with track meshes in D3
+  ([#67](https://github.com/Kminkjan/infrastructurio/issues/67)) and structures in D4
+  ([#68](https://github.com/Kminkjan/infrastructurio/issues/68)); see
+  [the backlog](../backlog.md)
 - Evidence: design only, consolidated from the owner-approved rail-first plan
   (2026-09-26) into [art direction](../art-direction.md) and
   [the architecture](../architecture.md). The reset skeleton has a starter

@@ -27,8 +27,11 @@ stop at platforms and explain why they wait. The owner judges that it looks and 
 - **Plan:** the contract, exclusions and slice order are in the
   [prototype plan](docs/prototype-plan.md); the work items D1–D13 are in the
   [backlog](docs/backlog.md).
-- **Tracking:** GitHub milestone M4 (number TBD) and the epic "M4 — Epic: Living Diorama"
-  (TBD), with one issue per backlog key.
+- **Tracking:** GitHub milestone M4
+  ([milestone 8](https://github.com/Kminkjan/infrastructurio/milestone/8)) and the epic
+  "M4 — Epic: Living Diorama" ([#62](https://github.com/Kminkjan/infrastructurio/issues/62)),
+  with one issue per backlog key: D1–D13 are
+  [#65](https://github.com/Kminkjan/infrastructurio/issues/65)–[#77](https://github.com/Kminkjan/infrastructurio/issues/77).
 
 ## M5 — Autonomous Rail Serves a Growing Region
 
@@ -37,8 +40,10 @@ withdraw train services with explanations. Rail access and service quality shape
 grow, and growth creates the next capacity problem. Save/replay and a first-time-player
 session are the evidence for the first integrated playable loop.
 
-- **Tracking:** GitHub milestone M5 (number TBD) and a placeholder epic (TBD). Detailed
-  planning starts from M4 evidence.
+- **Tracking:** GitHub milestone M5
+  ([milestone 9](https://github.com/Kminkjan/infrastructurio/milestone/9)) and a placeholder
+  epic ([#63](https://github.com/Kminkjan/infrastructurio/issues/63)). Detailed planning starts
+  from M4 evidence.
 
 ## M6 — Roads Feed and Compete with Rail
 
@@ -46,7 +51,9 @@ session are the evidence for the first integrated playable loop.
 connect towns to stations. Causal road traffic and mode choice compete with and feed rail, and
 towns add constrained local streets. Road-era research at tag `legacy-m0-m4` is source material.
 
-- **Tracking:** GitHub milestone M6 (number TBD) and a placeholder epic (TBD).
+- **Tracking:** GitHub milestone M6
+  ([milestone 10](https://github.com/Kminkjan/infrastructurio/milestone/10)) and a placeholder
+  epic ([#64](https://github.com/Kminkjan/infrastructurio/issues/64)).
 
 ## Beyond
 

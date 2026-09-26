@@ -119,8 +119,10 @@ photographs. The mood board, palette and sources live in [art direction](art-dir
 
 ## Milestones
 
-M4 → M5 → M6. Each closes only on playable evidence and explicit owner acceptance. GitHub
-milestone numbers are TBD.
+M4 → M5 → M6. Each closes only on playable evidence and explicit owner acceptance. On
+GitHub they are [milestone 8](https://github.com/Kminkjan/infrastructurio/milestone/8),
+[milestone 9](https://github.com/Kminkjan/infrastructurio/milestone/9) and
+[milestone 10](https://github.com/Kminkjan/infrastructurio/milestone/10).
 
 | Milestone | One-line claim | The player gains | The simulation gains |
 |---|---|---|---|

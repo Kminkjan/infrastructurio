@@ -6,8 +6,11 @@
   ([archive](archive/README.md), [ADR 0008](decisions/0008-archive-road-era-and-restart.md)).
   Preparation is not acceptance: nothing in this document claims that M4 or any slice is
   done.
-- **Tracking:** epic "M4 — Epic: Living Diorama" (GitHub issue TBD) in milestone M4 (TBD).
-  Work items are tracking keys D1–D13 in [the backlog](backlog.md).
+- **Tracking:** epic "M4 — Epic: Living Diorama"
+  ([#62](https://github.com/Kminkjan/infrastructurio/issues/62)) in milestone M4
+  ([milestone 8](https://github.com/Kminkjan/infrastructurio/milestone/8)). Work items are
+  tracking keys D1–D13 in [the backlog](backlog.md), GitHub issues
+  [#65](https://github.com/Kminkjan/infrastructurio/issues/65)–[#77](https://github.com/Kminkjan/infrastructurio/issues/77).
 - **What governs what:** this file is the M4 contract (claim, scope, slices, gate overview).
   The [roadmap](../ROADMAP.md) holds the one-paragraph milestone claims. The
   [acceptance gates record](evidence/m4/2026-09-26-acceptance-gates.md) holds the exact
@@ -264,7 +267,9 @@ template table is data.
 
 ## 8. M5 contract (outline)
 
-**M5 — Autonomous Rail Serves a Growing Region** (milestone and placeholder epic TBD).
+**M5 — Autonomous Rail Serves a Growing Region**
+([milestone 9](https://github.com/Kminkjan/infrastructurio/milestone/9); placeholder epic
+[#63](https://github.com/Kminkjan/infrastructurio/issues/63)).
 
 > Settlements and industries create demand; autonomous operators start, adjust and withdraw
 > services with explanations; rail access shapes growth; growth creates the next capacity
@@ -283,7 +288,9 @@ template table is data.
 
 ## 9. M6 contract (outline)
 
-**M6 — Roads Feed and Compete with Rail** (milestone and placeholder epic TBD).
+**M6 — Roads Feed and Compete with Rail**
+([milestone 10](https://github.com/Kminkjan/infrastructurio/milestone/10); placeholder epic
+[#64](https://github.com/Kminkjan/infrastructurio/issues/64)).
 
 > Lattice roads with lane presets and priorities, level crossings and grade separation,
 > road access to stations, causal road traffic, mode choice, constrained town streets.

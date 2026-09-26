@@ -12,7 +12,8 @@ calculated. Main holds a subset of the palette and an isometric smoke scene
 evidence.
 
 Related: [vision](vision.md) · [prototype plan](prototype-plan.md) ·
-[backlog](backlog.md) (D11, issue TBD) · [architecture](architecture.md) ·
+[backlog](backlog.md) (D11, [#75](https://github.com/Kminkjan/infrastructurio/issues/75)) ·
+[architecture](architecture.md) ·
 [`src/render/CLAUDE.md`](../src/render/CLAUDE.md) ·
 [M4 acceptance gates](evidence/m4/2026-09-26-acceptance-gates.md)
 

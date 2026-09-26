@@ -38,8 +38,9 @@ Contents: [1 Status](#1-status-by-area) · [2 Interface](#2-interface) ·
 
 ## 1. Status by area
 
-Module paths are relative to `src/core/`. Issue numbers for D1–D13 are TBD (tracking keys
-from [the backlog](backlog.md)).
+Module paths are relative to `src/core/`. Tracking keys D1–D13 come from
+[the backlog](backlog.md#tracking-keys) and are GitHub issues
+[#65](https://github.com/Kminkjan/infrastructurio/issues/65)–[#77](https://github.com/Kminkjan/infrastructurio/issues/77).
 
 | Area | Modules | Slice | Key | Status 2026-09-26 |
 |---|---|---|---|---|

@@ -4,8 +4,10 @@
 - Date: 2026-09-26
 - Scope: Prototype. The renderer, camera, sim → world coordinate convention, frame loop and
   HUD boundary (`src/render`, the host loop in `src/app`, `src/ui`)
-- Tracking: M4 epic "M4 — Epic: Living Diorama" (TBD); D1 Lattice, terrain and isometric
-  camera (TBD); D11 Art direction (TBD)
+- Tracking: M4 epic "M4 — Epic: Living Diorama"
+  ([#62](https://github.com/Kminkjan/infrastructurio/issues/62)); D1 Lattice, terrain and
+  isometric camera ([#65](https://github.com/Kminkjan/infrastructurio/issues/65)); D11 Art
+  direction ([#75](https://github.com/Kminkjan/infrastructurio/issues/75))
 - Evidence: owner direction in conversation, 2026-09-26;
   [`src/render/coords.ts`](../../src/render/coords.ts) and its test (automated); the skeleton
   smoke scene [`src/app/main.ts`](../../src/app/main.ts)
