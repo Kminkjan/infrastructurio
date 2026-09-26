@@ -74,6 +74,32 @@ Acceptance criteria:
 - Record save migration or explicit legacy-scenario support, cadence strategy and any worker decision; preserve unrelated uncommitted work.
 - Update architecture/simulation/performance documentation with accepted F1/F2 decisions and reconcile old issue statuses only when evidence supports it.
 
+### Focused construction epic — grid-assisted proof
+
+[GitHub #50](https://github.com/Kminkjan/infrastructurio/issues/50), M4. Owner-approved
+2026-09-06. Build an isolated proof; legacy code is reused only when suitable.
+
+| Issue | Scope and evidence |
+| --- | --- |
+| [#51](https://github.com/Kminkjan/infrastructurio/issues/51) | Geometry and connection rules: snapped endpoints, automatic curves, directional lanes, deterministic derivation and one elevation-separated crossing. Record ADRs and explicit constraints. |
+| [#52](https://github.com/Kminkjan/infrastructurio/issues/52) | Drawing/editing controls: previews, snapping, ordinary UI input, cancellation, reshape, delete and undo. Depends on #51. |
+| [#53](https://github.com/Kminkjan/infrastructurio/issues/53) | Select road stretches, widen with valid transitions, edit lane connections and undo without damaging unrelated state. Depends on #51/#52. |
+| [#54](https://github.com/Kminkjan/infrastructurio/issues/54) | Prepare a resettable reference site, launcher, target layout and review protocol. Preparation is not acceptance. Depends on #51–#53. |
+| [#55](https://github.com/Kminkjan/infrastructurio/issues/55) | Execute and accept/reject the thin workflow, negative cases, state restoration and actual human walkthrough. Depends on #51–#54. |
+
+Required sequence: **draw two roads → create one curved connection → widen one
+approach → assign its lanes → undo the changes**. Blocking geometry, connectivity
+or undo failures prevent acceptance. Human observations must come from an actual
+session; deferral leaves #55 open. No production traffic, finances, growth, rail
+or legacy-save integration belongs in this proof.
+
+#50 informs #26/#28 and does not depend on final #28 acceptance. #29–#31 retain
+M5 production integration/hardening criteria and should consume accepted findings,
+not duplicate the experiment. The old paired-adapter human exercise is deferred,
+not passed. All broader M4 gates remain in force. Use the [ADR workflow](decisions/README.md)
+for consequential choices; grid spacing, curve algorithm and camera are not fixed
+by the reference trailer.
+
 ## M5 — Roads Shape a Growing Region
 
 [GitHub milestone](https://github.com/Kminkjan/infrastructurio/milestone/6)

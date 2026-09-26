@@ -16,7 +16,7 @@ Infrastructurio is early in development. Contributions should help validate the 
 - Add behavioral tests for economic and routing rules.
 - Expose reasons for simulation decisions instead of hiding them in implementation details.
 - Profile before introducing low-level optimizations.
-- Record consequential technical or design decisions in `docs/decisions`.
+- Record consequential technical or design decisions using the [ADR workflow and template](docs/decisions/README.md). State the acceptance scope and evidence; supersede material decisions explicitly rather than silently rewriting them.
 
 ## Issue types
 

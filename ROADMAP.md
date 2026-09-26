@@ -10,6 +10,13 @@ The September 2026 direction makes detailed infrastructure design the main activ
 
 Evaluate readable 2D versus 3D with identical curved-road, elevated-crossing and lane-selection tasks. Prove lane occupancy, queues and representative-vehicle accounting in a headless experiment. Audit reusable M0–M3 systems and define migration boundaries. Record the rendering decision, simulation units, target fixture size and measured performance budget before full implementation.
 
+The [focused construction epic #50](https://github.com/Kminkjan/infrastructurio/issues/50)
+adds an isolated grid-assisted proof: draw two roads → create one curved connection
+→ widen one approach → assign its lanes → undo the changes. Issues #51–#54 prepare
+geometry, controls, section/lane editing and the reference site; #55 verifies and
+accepts the actual workflow before scope expands. The old paired-adapter human
+exercise is deferred, not passed. Renderer/camera acceptance remains open.
+
 This is an enabling milestone, not the first complete playable game loop.
 
 ## M5 — Roads Shape a Growing Region

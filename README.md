@@ -28,7 +28,7 @@ The intended prototype stack is:
 - IndexedDB and exportable files for saves
 - Vitest for behavioral simulation tests
 
-This is a direction, not a permanent technology commitment. Architecture decisions are recorded in [`docs/decisions`](docs/decisions).
+This is a direction, not a permanent technology commitment. Architecture decisions are recorded in [the ADR index](docs/decisions/README.md).
 
 ## Run locally
 
