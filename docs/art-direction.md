@@ -339,10 +339,9 @@ mansard roofs; the church's towers carry the tower roof), inset windows (dark pa
 sill and lintel), doors with a step, cornices, chimneys that anchor smoke, dormers and
 lime-white corner boards on timber houses. Measured budgets are in ADR 0013's D11a
 findings; the church uses 528 of its 1,500. Buildings are merged per 256 m chunk, material
-and LOD (silhouettes below 2 ppm). The station, water tower and engine shed stand as
-non-functional lookdev set pieces beside the largest town, on a cinder strip, so the owner
-can judge the models before D6's station and depot tools exist. They are in the core
-scenario's golden layout; whether they stay is an [open item](#open-items).
+and LOD (silhouettes below 2 ppm). The station, water tower and engine-shed models stay in
+the kit for D6, but the scenario no longer places them: the owner had them removed on
+2026-09-26 (diorama generator version 2), because stations and depots are player-built.
 
 ## Rolling stock
 
@@ -563,7 +562,7 @@ day: [`YYYY-MM-DD-look-gate-a.md`](evidence/m4/YYYY-MM-DD-look-gate-a.md).
 | `?bookmark=3` | The lake and the windmill, at Region | 640.00, −1255.11 | 2.5 | 0 |
 | `?bookmark=4` | The whole diorama, at Far | 998.75, −793.47 | 0.9 | 0 |
 
-- **States are for the golden layout** (terrain `d2ee8189`, scenery `b3cc61d0`, seed
+- **States are for the golden layout** (terrain `d2ee8189`, scenery `d4aeaa71`, seed
   `baltic-diorama`, 1280 × 720 CSS px checked). The camera looks at the Y = 0 datum, so each
   target sits north of its subject by the ground height ÷ tan(pitch); `bookmarks.ts`
   computes them, and a test pins them.
@@ -575,9 +574,9 @@ day: [`YYYY-MM-DD-look-gate-a.md`](evidence/m4/YYYY-MM-DD-look-gate-a.md).
   off each of the east and west edges and about 45 px off the south edge (calculated; an
   agent probe put the map corners at screen x −259 to 1,539 and y −11 to 765). With
   `?tweak=1` the tweak panel covers the map's north-east corner at 1920 × 1080.
-- **Not in a bookmark:** the railway set pieces (station, water tower, engine shed) stand
-  beside Vējkalni; to see them, centre on world 884.74, −402.11 at 12–16 ppm (in a dev
-  build, `__diorama.lookAt(884.74, 378.01, 14)` in the console takes sim metres).
+- **Owner session, 2026-09-26:** partial Look Gate A held on `cd1e628`
+  ([record](evidence/m4/2026-09-26-look-gate-a.md)). Legibility waits for static track, and
+  the pitch choice waits for Look Gate B.
 
 **Deviations from the gates record's Look Gate A** (the
 [gates record](evidence/m4/2026-09-26-acceptance-gates.md#look-gate-a-la-after-d11a-before-d11b)
@@ -606,4 +605,4 @@ slice named.
 | Moiré check on sleepers at Default (blocked until D3 track exists; the per-tree budget was set in D11a: 60–120 / 24–30) | D11a |
 | Chimney smoke and shore foam (deferred in D11a: smoke anchors exist, nothing is drawn yet) | D11b (proposed) |
 | The sun's screen direction: D1's sun casts shadows right and slightly up the screen, while this page says lower right | Look Gate A (owner) |
-| Railway set pieces (station, water tower, engine shed) in the diorama scenario's golden layout: remove (bump `DIORAMA_GENERATOR_VERSION` and the golden hash) or keep as non-functional scenery | D6 (owner) |
+| Camera pitch: true isometric 35.264° or 30° (the owner deferred the choice at Look Gate A, 2026-09-26) | Look Gate B (owner) |

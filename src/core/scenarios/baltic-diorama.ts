@@ -18,7 +18,7 @@ import {
 import { BALTIC_PLACE_NAMES } from "./placeNames";
 import { type PathStation, pathLengthMm, routeRoad, simplifyPath, smoothPath, stationsAlong } from "./roads";
 import { type PointMm, distanceMm, normalizeHeading12, obbRadiusMm, offsetAlong } from "./shapes";
-import { type StreetEnd, type Town, layoutRailwayQuarter, layoutTown, siteTowns } from "./towns";
+import { type StreetEnd, type Town, layoutTown, siteTowns } from "./towns";
 
 /**
  * The static Baltic diorama for the D11a lookdev spike: a deterministic
@@ -34,7 +34,7 @@ import { type StreetEnd, type Town, layoutRailwayQuarter, layoutTown, siteTowns 
 
 export const DIORAMA_SEED = "baltic-diorama";
 /** Bump when a change moves any placement, alongside the golden hash. */
-export const DIORAMA_GENERATOR_VERSION = 1;
+export const DIORAMA_GENERATOR_VERSION = 2;
 
 export type { BuildingLot, FenceRun, LotKind, SplatPath, Surface } from "./layout";
 export type { Crop, Field, Haystack } from "./farms";
@@ -59,7 +59,7 @@ export interface DioramaScenery {
   /** The terrain this layout was made for. */
   readonly terrainHash: string;
   readonly towns: readonly Town[];
-  /** Every building: town lots, the railway set pieces, farmsteads and the windmill. */
+  /** Every building: town lots, farmsteads and the windmill (stations and depots are player-built, D6). */
   readonly lots: readonly BuildingLot[];
   readonly landmarks: readonly Landmark[];
   /** Town squares and streets. */
@@ -108,11 +108,6 @@ export function generateDiorama(terrain: Terrain, seed: string = DIORAMA_SEED): 
     ends.push(...layout.ends);
   });
   const firstTown = towns[0];
-  if (firstTown) {
-    const quarter = layoutRailwayQuarter(g, prng, firstTown, 0, occupancy);
-    lots.push(...quarter.lots);
-    if (quarter.yard) streets.push(quarter.yard);
-  }
 
   // Dirt roads: a minimum spanning tree over the town pairs a dry route joins,
   // then one road from each town off the nearest map edge.

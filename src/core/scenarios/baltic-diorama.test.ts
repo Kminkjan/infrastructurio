@@ -14,11 +14,13 @@ import { BALTIC_PLACE_NAMES } from "./placeNames";
 import { type PointMm, distanceMm, obbCorners, obbOverlap, obbRadiusMm, polylineDistanceMm } from "./shapes";
 
 /**
- * Recorded 2026-09-26 from diorama generator version 1 on terrain version 2
- * (`d2ee8189`). A change here moves the Look Gate A bookmarks' subject: bump
+ * Recorded 2026-09-26 from diorama generator version 2 on terrain version 2
+ * (`d2ee8189`). Version 2 removed the railway set pieces at the owner's
+ * request (stations and depots are player-built, D6); the bookmark states did
+ * not move. A change here can move the Look Gate A bookmarks' subject: bump
  * DIORAMA_GENERATOR_VERSION and re-record deliberately.
  */
-const GOLDEN_SCENERY_HASH = "b3cc61d0";
+const GOLDEN_SCENERY_HASH = "d4aeaa71";
 
 const terrain = generateTerrain({ seed: DIORAMA_SEED, ...DEFAULT_TERRAIN_SIZE });
 const golden = generateDiorama(terrain);

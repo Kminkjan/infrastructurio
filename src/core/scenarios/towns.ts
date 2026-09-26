@@ -235,67 +235,6 @@ export function layoutTown(
   return { town, lots, streets, lamps, fences, ends, church };
 }
 
-/**
- * Railway set pieces for the lookdev spike only: a station, a water tower and
- * an engine shed beyond one end of the largest town's cross street, lined up
- * along the main axis, on a cinder yard, so Look Gate A can judge the station,
- * water tower and engine-shed models. They are non-functional scenery: the
- * player places stations and depots (D6's tools), so no slice may attach track
- * or sim behaviour to them. Whether they stay once D6's tools exist, or are
- * removed (bumping `DIORAMA_GENERATOR_VERSION` and the golden hash), is the
- * owner's call, listed in art direction's open items.
- */
-export function layoutRailwayQuarter(
-  g: Ground,
-  prng: Prng,
-  town: Town,
-  townIndex: number,
-  occupancy: Occupancy,
-): { lots: BuildingLot[]; yard: SplatPath | undefined } {
-  const shape = SHAPES[town.size];
-  const cross = town.axis + 3;
-  for (const side of [-1, 1]) {
-    const toTown = normalizeHeading12(side === -1 ? cross : cross + 6);
-    const lineOffset = side * (shape.crossHalfMm + 34_000);
-    const station: BuildingLot = {
-      kind: "station",
-      ...offsetAlong(town.centre, town.axis, 0, lineOffset - side * 9_000),
-      heading: toTown,
-      lengthMm: 16_000,
-      widthMm: 28_000,
-      seed: prng.nextUint32(),
-      town: townIndex,
-    };
-    const tower: BuildingLot = {
-      kind: "water-tower",
-      ...offsetAlong(town.centre, town.axis, 36_000, lineOffset - side * 8_000),
-      heading: toTown,
-      lengthMm: 8_000,
-      widthMm: 8_000,
-      seed: prng.nextUint32(),
-      town: townIndex,
-    };
-    const shed: BuildingLot = {
-      kind: "engine-shed",
-      ...offsetAlong(town.centre, town.axis, -52_000, lineOffset - side * 10_000),
-      heading: normalizeHeading12(town.axis + 6),
-      lengthMm: 36_000,
-      widthMm: 13_000,
-      seed: prng.nextUint32(),
-      town: townIndex,
-    };
-    const pieces = [station, tower, shed];
-    const boxes = pieces.map(lotBox);
-    if (!boxes.every((box) => groundFits(g, box) && occupancy.isFree(box))) continue;
-    const yardBox: Obb = { ...offsetAlong(town.centre, town.axis, -8_000, lineOffset), heading: town.axis, halfLengthMm: 78_000, halfWidthMm: 5_000 };
-    if (!groundFits(g, yardBox, 60) || !occupancy.isFree(yardBox)) continue;
-    for (const box of boxes) occupancy.claim(box);
-    occupancy.claim(yardBox);
-    return { lots: pieces, yard: pathOf(yardBox, "dirt") };
-  }
-  return { lots: [], yard: undefined };
-}
-
 function lotKindAt(prng: Prng, s: number, shape: TownShape, armMm: number, warehouses: number): LotKind {
   if (s < shape.coreMm) return "townhouse";
   if (s < shape.outskirtsMm) return prng.nextInt(10) < 6 ? "townhouse" : "wooden-house";
