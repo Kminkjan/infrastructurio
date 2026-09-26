@@ -4,7 +4,7 @@ Infrastructurio is early in development. Contributions should help validate the 
 
 ## Before starting work
 
-1. Read the [vision](docs/vision.md) and [current roadmap milestone](ROADMAP.md).
+1. Read the [README](README.md) and [current roadmap milestone](ROADMAP.md).
 2. Look for an existing issue.
 3. For uncertain work, create a research issue with a falsifiable question.
 4. Keep changes small enough to explain and verify.
@@ -38,4 +38,3 @@ An issue is complete when:
 ## Branches and commits
 
 Use short branches prefixed with `codex/` for agent-authored work and descriptive prefixes such as `feature/`, `fix/`, or `research/` otherwise. Commits should describe an observable change or decision.
-
