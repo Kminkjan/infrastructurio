@@ -1,0 +1,641 @@
+# Architecture — rail-first prototype
+
+Status 2026-09-26. This is the target architecture for **M4 — Living Diorama**
+([roadmap](../ROADMAP.md), [prototype plan](prototype-plan.md)) and a record of what already
+exists. It is a design document, not evidence that any slice works.
+
+**Basis.**
+- **Accepted:**
+  - [ADR 0002](decisions/0002-separate-simulation-from-presentation.md): the simulation is
+    authoritative; commands in, snapshots out.
+  - [ADR 0009](decisions/0009-render-isometric-threejs.md), by the owner on 2026-09-26: the
+    renderer, camera spec, coordinate convention, render-on-demand, and React outside the
+    frame loop.
+- **Proposed:** ADRs [0010](decisions/0010-triangular-lattice-track-geometry.md) (lattice),
+  [0011](decisions/0011-signalling-and-reservation.md) (signalling),
+  [0012](decisions/0012-tick-units-determinism.md) (tick and units),
+  [0013](decisions/0013-rendering-and-art-pipeline.md) (art pipeline) and
+  [0014](decisions/0014-autonomous-diorama-operator.md) (operator). The sections that rest on
+  them describe the plan, not accepted decisions.
+
+**Related docs.**
+- [simulation-model.md](simulation-model.md): simulation semantics (validation order,
+  signalling, movement, the operator).
+- [art-direction.md](art-direction.md): the look.
+- [Acceptance gates](evidence/m4/2026-09-26-acceptance-gates.md): budgets and gates.
+- [Glossary](glossary.md): the terms.
+
+**Keys.** Slice keys S0–S12 (core) and R0–R7 (render), and tracking keys D1–D13, follow the
+[backlog](backlog.md). D1–D13 are GitHub issues
+[#65](https://github.com/Kminkjan/infrastructurio/issues/65)–[#77](https://github.com/Kminkjan/infrastructurio/issues/77).
+
+## Principles
+
+1. **The simulation is authoritative.** `src/core` owns all game state. Render and HUD hold
+   only derived presentation state, which they can rebuild at any moment from `network()`
+   and `frame()`, for example after WebGL context loss.
+2. **The core is deterministic.**
+   - Units are integers: mm, mm/s, mm/s² and dm heights.
+   - The tick is a fixed 100 ms.
+   - The core uses no wall clock, randomness or host APIs, so a command log replays to
+     identical checkpoint hashes.
+3. **Commands are the player's entire write surface, and they cover infrastructure only.**
+   - The `Command` union has no way to buy trains or to set lines, timetables or dispatch.
+   - The operator runs inside the core. Players inspect it; they never drive it.
+   - A command, API or UI that bypasses this is out of scope in every milestone, not merely
+     deferred.
+4. **Render on demand.** An idle, paused diorama draws zero frames.
+5. **Main thread until measured.** No Web Worker until a predeclared trigger fires (see
+   [Workers](#workers)).
+
+## What exists and what is planned
+
+This is an agent reading of the branch on 2026-09-26. **On main** means the file shipped with
+the reset skeleton (PR 1, [#60](https://github.com/Kminkjan/infrastructurio/pull/60)). It
+records that the file is present, not that its tests pass on a given commit: run
+`npm run check` for that. Everything else is planned and lands slice by slice.
+
+| Part | Path | Status | Slice |
+|---|---|---|---|
+| Boundary test with a negative self-check | [tests/architecture.test.ts](../tests/architecture.test.ts) | **On main** | S0 |
+| Core compiler config | [tsconfig.core.json](../tsconfig.core.json) | **On main** | S0 |
+| Triangular lattice and its tests | [src/core/lattice.ts](../src/core/lattice.ts) | **On main** | S1 (D1) |
+| Sim ↔ world conversion and its tests | [src/render/coords.ts](../src/render/coords.ts) | **On main**; the winding oracle is planned | R0 (D1) |
+| Palette | [src/render/art/palette.ts](../src/render/art/palette.ts) | **On main**: an 18-key subset of the art-direction palette | full set in D11a |
+| Smoke scene | [src/app/main.ts](../src/app/main.ts) | **On main**: fixed isometric view (yaw 0, 6 ppm) of lattice nodes on a grass plane, hemisphere and sun light, redrawn only on resize. It has no scheduler, controls or sim | replaced in R0 (D1) |
+| Core utilities, terrain | `src/core/util/`, `terrain.ts` | Planned | rest of S0, S3 |
+| Geometry, track model, planner | `src/core/geometry/`, `src/core/track/` | Planned | S2–S4 (D2, D3) |
+| Network, pathfinding | `src/core/network/` | Planned | S5–S6 |
+| Trains, reservation, deadlock | `src/core/trains/`, `src/core/signals/` | Planned | S7–S9 (D8, D9) |
+| Operator and reasons | `src/core/services/` | Planned | S9–S10 (D9) |
+| Sim façade, remap, views, save | `src/core/sim/` | Planned. `api.ts` grows from S2; remap in S11a/b; views and save in S12 | (D10, D12) |
+| Scenario | `src/core/scenarios/baltic-diorama.ts` | Planned | D1, D11a |
+| Renderer host, scheduler, camera, perf monitor | `src/render/core/`, `src/render/camera/` | Planned | R0 (D1) |
+| Terrain, lighting, lattice shader | `src/render/terrain/`, `src/render/art/` | Planned | R1 (D1) |
+| Track meshes | `src/render/track/` | Planned | R2 |
+| Scenery kit, labels | `src/render/scenery/`, `src/render/labels/` | Planned | R3 (D11a) → Look Gate A |
+| Tools | `src/tools/` (not yet created) | Planned | R4–R5 (D3–D7) |
+| Picking | `src/render/picking/` | Planned | D1 (terrain node), R4–R5 (handles, proxies) |
+| Overlays | `src/render/overlays/` | Planned | R5 (D7) |
+| Trains, steam, inspector | `src/render/trains/`, `src/ui/` | Planned | R6 (D8–D10) |
+| HUD | `src/ui/` (not yet created) | Planned | R4–R6, D10 |
+| Quality presets, hardening, bench | `src/render/core/`, `bench/` | Planned | R7 (D11b, D12) → Look Gate B |
+| Replay harness | `tests/replay/`, `tests/fixtures/` | Planned | D12 |
+
+## Module layout
+
+```
+index.html → src/app/main.ts   wiring, fixed-step host loop, input → commands
+src/core/        deterministic, DOM-free simulation
+  util/          int.ts (isqrt, divFloor), prng.ts (sfc32, scenarios only),
+                 heap.ts, hash.ts (FNV-1a over canonical JSON)
+  lattice.ts     ← on main
+  terrain.ts
+  geometry/      templates.ts (the only place π/atan are used), piece.ts,
+                 sample.ts (render-side sampling, trig allowed), clearance.ts
+  track/         authored.ts, planner.ts, validate.ts, history.ts
+  network/       derive.ts, graph.ts, pathfind.ts
+  signals/       reservation.ts, deadlock.ts
+  trains/        consist.ts, kinematics.ts, movement.ts
+  services/      operator.ts, reasons.ts
+  sim/           world.ts, remap.ts, views.ts, invariants.ts, save.ts, api.ts
+  scenarios/     baltic-diorama.ts
+src/tools/       pure tool reducers (state, event, ctx) → [state, effects]
+src/render/      imperative Three.js
+  core/          RendererHost, FrameScheduler, QualityPreset, PerfMonitor
+  coords.ts      ← on main
+  camera/        isoMath, IsoCamera, CameraController
+  terrain/ track/ scenery/ trains/ overlays/ picking/ labels/
+  art/           palette.ts ← on main, lighting, materials, grain, shaderChunks,
+                 AssetRegistry
+src/ui/          React 19 HUD, fed through useSyncExternalStore
+tests/           architecture.test.ts ← on main, replay/, fixtures/
+```
+
+| Layer | Owns | Never |
+|---|---|---|
+| `src/core` | All authoritative state: lattice, terrain, authored track, the derived network, signalling, trains, the operator, history and save. Exposes the `Sim` façade in `sim/api.ts` | Imports from outside `src/core`; uses wall time, randomness, the DOM, console or timers; knows about pixels or frames |
+| `src/tools` | One interaction state machine per tool, as pure reducers that turn picks into commands, ghosts and tooltips | Imports three, render, ui or react; touches the DOM; executes commands itself |
+| `src/render` | Scene, camera, frame scheduler, picking, overlays, labels, art and assets | Imports ui; owns game state; mutates views |
+| `src/ui` | The React HUD: toolbar, time controls, counters, inspector, entity list, notifications, tooltip, and the HUD store | Runs inside the frame loop; calls the sim or three directly |
+| `src/app` | The composition root: creates the sim, renderer and store; runs the host loop; owns `InputRouter` and the single command gateway; interprets tool effects | Holds game rules |
+| `tests` | Cross-cutting checks: the boundary scan, replay and fixtures. Unit tests sit next to their source as `*.test.ts`; benches as `*.bench.ts` | — |
+
+## Dependency rules and enforcement
+
+The allowed import directions are:
+- core → core;
+- tools → core;
+- render → core and three;
+- ui → core types, react and its own store;
+- app → everything;
+- tests → everything.
+
+| Rule | Enforced by | Status |
+|---|---|---|
+| Core imports only relative paths inside `src/core`. No packages at all, so no three and no react | boundary test | on main |
+| Core never uses `Math.random`, `Date`, `performance.`, `console.`, `window`/`document`/`globalThis`, `setTimeout`/`setInterval`/`requestAnimationFrame`, `structuredClone` or `for…in` | boundary test. DOM globals also fail the core typecheck | on main |
+| `Math.sin/cos/tan/asin/acos/atan/atan2/sinh/cosh/tanh/pow/exp/expm1/log*/hypot/cbrt` appear only in `core/geometry/{sample,clearance,templates}.ts` | boundary test | on main |
+| Tools never import three, render, ui or react, and never touch `window`/`document` | boundary test | on main |
+| Render never imports ui | boundary test | on main |
+| Render, tools and ui import core only through `sim/api.ts` (snapshot types and the façade; it re-exports the lattice helpers the edges need) and the pure `geometry/sample.ts`, so curve maths has one source | not yet enforced | from the approved plan. Add it to the test when `sim/api.ts` lands. `src/app`, the composition root, may import core directly; the smoke scene does |
+| Ui imports neither three nor render | convention | recommendation |
+
+**[tsconfig.core.json](../tsconfig.core.json)**
+- Settings: `lib: ["ES2022"]`, `types: []`, `strict`, `noUncheckedIndexedAccess`,
+  `exactOptionalPropertyTypes`.
+- Core code therefore has no DOM types and no ambient `@types` (no `vite/client`, no node), so
+  `window`, `document`, `performance` and `requestAnimationFrame` fail to typecheck.
+- It excludes `*.test.ts` and `*.bench.ts`: tests may use trig, ad-hoc PRNGs and Vitest.
+- `npm run typecheck` runs the app config ([tsconfig.json](../tsconfig.json): all of `src`,
+  `tests` and `vite.config.ts` with DOM types), then the core config.
+- What it cannot catch:
+  - an explicit package import;
+  - ES2022 built-ins such as `Math.random` and `Date`.
+
+  The boundary test covers both.
+
+**[tests/architecture.test.ts](../tests/architecture.test.ts)**
+- Loads every non-test `src/**/*.{ts,tsx}` as raw text through `import.meta.glob`.
+- Strips comments.
+- Extracts static, dynamic and side-effect import specifiers and resolves relative ones.
+- Applies the rules above.
+- The negative self-check proves each scanner fires:
+  - a synthetic core file with seven violations yields exactly seven findings;
+  - trig inside `geometry/sample.ts` passes;
+  - a tool importing three and a render file importing ui are flagged;
+  - a comment mentioning `Math.random()` and a relative import inside core both pass.
+
+There is no linter and no CI, so `npm test` (inside `npm run check`) is the guard, run before
+every push.
+
+**Known limits of the scan.**
+- It is a regex tripwire, not a proof.
+- String literals are not stripped. A core message containing a banned word (`Date`,
+  `window`, `document`) fails, so reason texts avoid those words, or the scanner learns to skip
+  strings.
+- Aliasing (`const M = Math; M.random()`) evades it. Code review covers that case.
+
+## Core API
+
+*Basis: ADR 0002 (Accepted), ADR 0012 (Proposed). Status: planned, S2–S12. Nothing in
+`src/core/sim/` exists yet.*
+
+The names and shapes below come from the design. `Drag`, `PieceSpec`, `PieceKey`, `NodeRef`,
+`Diff`, `Highlight`, `EntityRef` and the ID types are indicative; S2, S5 and S12 pin them down.
+
+```ts
+// src/core/sim/api.ts: the only core entry point for app, tools, render and ui
+createSim(scenario: Scenario): Sim
+loadSim(save: WorldSave): Sim
+
+interface Sim {
+  readonly tick: number
+  planTrack(drag: Drag): TrackPlan     // drag → resolved pieces; pure
+  preview(cmd: Command): Result        // execute's code path: no mutation, no IDs consumed
+  execute(cmd: Command): Result
+  step(ticks?: number): void           // whole 100 ms ticks, default 1
+  network(): NetworkView               // cached per network revision
+  frame(): FrameView                   // produced every tick
+  inspect(q: InspectQuery): Inspection // "why is this train waiting?"
+  save(): WorldSave                    // canonical, hashable
+}
+
+type Command =
+  | { type: "build-track"; pieces: PieceSpec[]; structure: "ground" | "bridge" | "tunnel" | "auto" }
+  | { type: "demolish"; pieces?: PieceKey[]; signals?: SignalId[];
+      platforms?: PlatformId[]; depots?: DepotId[] }
+  | { type: "place-signal"; node: NodeRef; facing: Heading; kind: "stop" | "chain" }
+  | { type: "place-platform"; pieces: PieceKey[] }
+  | { type: "place-depot"; node: NodeRef; facing: Heading }
+  | { type: "undo" }
+  | { type: "redo" }
+
+type Result =
+  | { ok: true; networkRev: number; diff: Diff; counts: { new: number; reused: number } }
+  | { ok: false; reason: { code: ReasonCode; message: string; refs: EntityRef[] };
+      highlight: Highlight }
+```
+
+**Contracts:**
+- **Resolved pieces, not drag input.** `planTrack` turns a drag into `PieceSpec[]`, and the
+  command carries the result, so later planner tuning never breaks a recorded replay.
+- **`preview` is `execute` minus the mutation.** It shares the code path and consumes no IDs.
+  A property test asserts preview == execute without mutation.
+- **One reason per rejection.** Validation runs in a fixed rule order and returns one reason
+  code, a message that suggests a fix, and highlights. The codes and their order live in
+  [simulation-model.md](simulation-model.md).
+- **Rejections are values.** An exception thrown from the core is a bug, not a validation
+  outcome (recommendation).
+- **Command timing.** Commands apply between ticks, as the first stage of the tick order.
+  Replays record them as `(tick, cmd)`.
+- **No-op builds.** A `build-track` whose pieces all exist already is a no-op with no history
+  entry. The "N new, M reused" counts are key lookups.
+- **Undo and redo** are commands over construction diffs, with a stack depth of 100.
+  - They are validated like any edit (`undo-blocked`).
+  - Trains, time, the operator and the ID allocators are never in history.
+- **Edits under traffic.** An edit that would strand a train's committed zone is refused with
+  `track-in-use` ([simulation-model.md](simulation-model.md)).
+- **No wall time.** `step` counts ticks only; speed is the host's concern.
+
+### NetworkView and FrameView
+
+`NetworkView` is cached per revision. It is the same object until the network changes, so
+consumers compare its revision instead of diffing contents.
+
+| NetworkView | Contents |
+|---|---|
+| pieces | key, kind, structure, `lengthMm`, `z0Dm`/`z1Dm`, `speedLimitMms`, render prims (lines and arcs) |
+| sections | including `blockId` and `conflictGroup` |
+| junctions, signals, platforms, stations, depots | derived entities with stable IDs |
+
+`FrameView` is produced every tick.
+
+| FrameView field | Meaning | Main consumer |
+|---|---|---|
+| `tick`, `simMs` | tick count and simulated time | HUD clock and date |
+| `trains[]` | id, lineId, status, `prevHeadMm`, `headMm`, window of sections, cars, `speedMms` | trains layer, counters, inspector |
+| `signalAspect: Uint8Array` | display aspect per signal | semaphores, block overlay |
+| `sectionHolder: Int32Array` | trainId holding each section, −1 when free | reservation ants |
+| `sectionOccupied` | occupancy per section | occupied overlay (red) |
+| `switchLeg` | current leg per switch | blade animation |
+| `events` | this tick's events (deadlock, spawn, withdrawal, …) | notifications, aria-live line |
+
+- **Views are read-only.**
+- **Frame lifetime** (recommendation): a consumer never keeps a `FrameView` past the next
+  `step`, so the core can reuse its typed arrays without allocating.
+- **Events.** The host drains `frame().events` after every `step()`, because one rendered
+  frame can run several ticks.
+
+### Interpolation contract
+
+- **alpha = min(acc / 100, 1).**
+  - The displayed moment is (tick − 1 + alpha) × 100 ms.
+  - The view trails the sim by at most one tick and never runs ahead.
+- **Train position.** The head is drawn at `lerp(prevHeadMm, headMm, alpha)`, measured along
+  arc length through the train's section window (the window covers both positions).
+  - Cars and bogies are placed behind the head along the same path, using
+    `geometry/sample.ts`.
+- **Never extrapolate.** When the step cap trips or the sim is paused, alpha stays ≤ 1, so a
+  train is drawn at or behind `headMm`. The core keeps `headMm` ≤ the end of authority, so a
+  train never visibly overshoots a red signal.
+- **Discrete state is not interpolated.** Aspects, holders, occupancy and switch legs show
+  the latest tick.
+  - Presentation may ease toward the new value: the semaphore arm over 400 ms, blades from
+    `switchLeg`.
+- **Paused.** At speed 0, `acc` stops growing and the image freezes where it was.
+
+### Host loop and time controls
+
+The loop lives in `src/app` and runs once per rendered frame. It is planned: the smoke scene
+has no loop yet.
+
+```ts
+acc += dtWall * speed                            // wall ms × {0, 1, 2, 4, 10}
+let n = 0
+while (acc >= 100 && n++ < 40) { sim.step(); drain(sim.frame().events); acc -= 100 }
+alpha = Math.min(acc / 100, 1)
+```
+
+- **Speeds.** 0 (pause), 1, 2, 4 and 10×.
+  - Space pauses; `,` and `.` step the speed down and up.
+  - The HUD's top-right control shows Pause/1/2/4/10×.
+- **Frame rate cannot change outcomes.** The core never sees wall time, and the replay
+  contract `step(1)×N == step(N) == step(10)×N/10` holds.
+- **Step cap.** A frame runs at most 40 ticks, which is 4 simulated seconds. Recommendations:
+  - When the cap trips, drop the whole-tick backlog (`acc %= 100`). A stall then slows sim
+    time instead of spiralling. Count each trip in PerfMonitor.
+  - Treat `dtWall` as 0 on the first frame after the page becomes visible, so hidden time is
+    not replayed.
+- **Scheduler link.** Speed > 0 sets the scheduler's `sim-running` reason; pause clears it.
+- **Date.** The ui formats the HUD date from `simMs`, starting at "January 1, 1900, 08:00 AM".
+
+## Renderer
+
+*Basis: ADR 0009 (Accepted) for the camera, coordinates and render-on-demand; ADR 0013
+(Proposed) for presets, materials and assets. Status: planned, R0–R7, except `coords.ts` and
+`palette.ts`.*
+
+- **Renderer.** `THREE.WebGLRenderer` from three `0.185.1`, pinned exactly. WebGPU is out of
+  M4.
+- **Shaders.** Tweaks go through isolated `onBeforeCompile` modules in `art/shaderChunks`:
+  grain, lattice, windSway, foliageTint, edgeFade.
+- **Materials.** About 12 `MeshLambertMaterial`s with vertex and instance colours. Every
+  colour comes from `art/palette.ts`.
+
+### Frame scheduler (render on demand)
+
+- `FrameScheduler.requestFrame(reason)` asks for one frame.
+- `setContinuous(reason)` keeps frames coming while a named reason is active.
+
+| Continuous reason | Active while | Rate |
+|---|---|---|
+| `sim-running` | speed > 0 | display rate |
+| `camera-anim` | the Q/E rotation ease (300 ms), zoom or pan inertia, a Show pan | display rate |
+| `ambient` | tree sway, water, windmill sails | 30 fps when it is the only reason. Off under reduced motion or the power-saver setting |
+| `particles-alive` | any steam puff is still alive | display rate |
+
+- **One-shot reasons:**
+  - input;
+  - a hover or snap change;
+  - resize or a DPR change;
+  - a new network revision;
+  - an overlay or label toggle;
+  - continuing a time-sliced rebuild;
+  - context restore.
+- **Idle.** No active reason means no `requestAnimationFrame` and zero frames. This is a D1
+  acceptance item.
+- **Hidden page.** The loop stops when the page is hidden and resumes when it is visible.
+
+### Per-frame order
+
+1. **Input → tools.** `InputRouter` gives camera gestures to the camera first and everything
+   else to the active tool. Preview is memoized.
+2. **Fixed-step sim**, using the host loop above.
+3. **Static diffs by revision.** When `network()` has a newer revision than the renderer has
+   applied, update the track batches, structures and overlays by piece key.
+   - Work over 8 ms is time-sliced into later frames.
+   - Recommendation: diff piece keys against the current `NetworkView` instead of replaying
+     every `Result.diff`, so the renderer heals itself after undo, redo or context loss.
+4. **Interpolate trains** with alpha.
+5. **Particles.**
+6. **Camera, then shadow fit**, so the shadow frustum follows this frame's final camera.
+7. **Dirty overlays only:** blocks, reservations, occupancy, the ghost.
+8. **Render.** CSS2D labels are laid out again only when something changed.
+9. **Perf sample** for PerfMonitor and its F3 overlay.
+
+**No allocations in the loop:**
+- scratch vectors and matrices;
+- preallocated typed arrays;
+- pooled instances (the steam pool holds 2,000).
+
+### Coordinates
+
+- **Core.** ENU metres (x east, y north, z up).
+  - Lattice nodes sit at x = a(q + r/2), y = a·r·√3/2, with a = 5 m
+    ([lattice.ts](../src/core/lattice.ts)).
+  - Heading 0 is +x (east).
+  - Lengths are integer mm and heights integer dm. The renderer converts them to metres
+    before converting axes.
+- **Three.** Y-up metres (X east, Y up, Z south).
+- **Conversion.** world = (x, z, −y), a −90° rotation about X with determinant +1.
+  - It never mirrors the scene; the legacy harness's (x, z, y) swap did.
+  - `SIM_TO_WORLD`, `simToWorld` and `worldToSim` in [coords.ts](../src/render/coords.ts) are
+    the only conversion point.
+- **Tests on main** ([coords.test.ts](../src/render/coords.test.ts)):
+  - the determinant is +1;
+  - the frame is right-handed: mapped east × mapped north = up, and sim up maps to world up;
+  - the matrix and the function agree and round-trip.
+- **Planned tests (D1):**
+  - the winding oracle: the projected (origin, east, north) triangle is counter-clockwise on
+    screen for all 6 yaws;
+  - a generator test that checks every procedural mesh's winding against its normals, because
+    materials use `FrontSide` only.
+- **Asset model space.** +Y up, origin at ground contact, forward +X. This applies to
+  procedural assets now and glTF later.
+
+### Camera
+
+| Parameter | Value |
+|---|---|
+| Projection | `OrthographicCamera`; halfW = cssW/(2·ppm), halfH = cssH/(2·ppm) |
+| Pitch | true isometric 35.264° (atan(1/√2)). One constant, so the look gate can A/B 30° |
+| Yaw | k·60°, k = 0–5, matched to the lattice. At k = 0, heading-0 lines are horizontal on screen and the camera looks north. Q/E rotate with a 300 ms ease |
+| Position | target + D·(sin(yaw)·cos(p), sin(p), cos(yaw)·cos(p)); D = 2000 m, near 10, far 4000 |
+| Zoom | continuous 0.75–24 ppm. Named levels (+/−): Far 0.9 · Region 2.5 · Default 6 · Close 12 · Detail 22 |
+| Wheel | factor 1.15 per notch; pinch arrives as ctrl-wheel. Zoom-to-cursor keeps the terrain point fixed, with drift < 0.5 px (D1 gate) |
+| Pan | right or middle drag; left drag on empty ground in Select; WASD or arrows at 700 CSS px/s (the arrows move the keyboard lattice cursor when it is active); small inertia, off under reduced motion |
+| Target | stays on the Y = 0 datum, clamped to the map ± 100 m |
+| LOD bands | ppm < 2 far, 2–5 mid, > 5 near. Track far LOD (< 4 ppm) hides sleepers |
+| Resize and DPR | `ResizeObserver` with `devicePixelContentBoxSize`; DPR changes via `matchMedia` |
+| Context loss | on restore, rebuild GPU resources from `NetworkView` and `FrameView` |
+
+### Quality presets and shadows
+
+| Preset | DPR | Shadows | Anti-aliasing and post |
+|---|---|---|---|
+| Low | 1 | none (baked AO only) | no post |
+| Medium (default) | ≤ 1.5 | 2048 PCF map, radius 2 | default MSAA; CSS vignette |
+| High | ≤ 2 | 4096 map | `EffectComposer`: MSAA target → half-res GTAO → grade pass → optional tilt-shift → `OutputPass`, all lazy-loaded |
+
+- **Scaling.** Dynamic resolution scale runs 0.7–1. The auto-preset drops one level if p90 >
+  20 ms over the first 3 s.
+- **The base look must work without post-processing.** Tilt-shift is off while a construction
+  tool is active.
+- **Shadow fitting.** One directional shadow map, no cascades.
+  - After the camera update, the view footprint (the orthographic frustum over the terrain's
+    height range) is taken into light space.
+  - The shadow camera's bounds are fitted to it.
+  - The light-space origin is snapped to whole texels, so edges don't shimmer during a pan.
+- **The sun is locked to camera yaw**, lighting the scene from the upper left of the screen,
+  so the light's direction changes only on Q/E.
+- **Shadow type.** `PCFShadowMap` with a radius and an intensity. `PCFSoftShadowMap` is
+  deprecated in r185.
+- **Light values.** Colours, intensities and bias live in [art-direction.md](art-direction.md).
+
+### Scene layers
+
+From bottom to top:
+
+| Layer | Contents and technique |
+|---|---|
+| Terrain | Lattice-triangle mesh from sim heights, chunked, with LOD. Splat map (dirt, cobble, field, forest floor), grain, baked AO tint map. **Earthworks** (embankments, cuttings, ballast skirts) move render vertices only; the core's heights never change. **Lattice overlay shader**: three line families, `fwidth`-anti-aliased 1 px lines and 1.5 px node dots. Opacity is 0 in view mode; in build mode 0.15 globally and 0.55 within 48 m of the cursor. It fades where lines would be < 5 px apart; precision mode adds a finer sub-lattice |
+| Water | opaque, depth-tinted |
+| Track | three `BatchedMesh`es (ballast, sleepers, rails), built along analytic arcs with chord error ≤ 2 cm; turnout timbers; blades animated from `switchLeg`. If multi-draw is missing, a chunk-merged fallback sits behind a `TrackBatch` interface |
+| Structures | stone arch viaduct (4–20 m over land); steel Warren truss (over water or spans > 30 m); plate-girder overpass; tunnel portals with a hill plug; piers avoid other tracks |
+| Scenery | instanced trees at 2 LODs with sway; grammar-built buildings merged per chunk; props |
+| Trains | an `InstancedMesh` per vehicle type; bogies evaluated along the path; pitch and cant |
+| Steam | instanced puffs with an `alphaHash` dissolve |
+| Overlays | block ribbons in 6 colours plus chevrons for one-way blocks; reservations as marching ants per train hue; occupied sections in red |
+| Ghost | two passes: depth-tested at 0.7 and see-through at 0.2 |
+| Handles | screen-constant billboards |
+| Labels | CSS2D |
+
+**Assets.** They are procedural first, behind `AssetRegistry.get(kind, variant, lod)`, which
+returns:
+- geometries per material slot;
+- anchors (smoke, bogie_front/rear, coupler, door);
+- a footprint and a budget.
+
+Later glTF assets (`GLTFLoader` with meshopt, no Draco) register against the same keys, and
+the procedural versions stay as the fallback (ADR 0013).
+
+### Picking and occlusion aids
+
+Picking lives in `src/render/picking/`. The app hands the result (layer, entity or piece key,
+lattice node at terrain height, screen distance) to the active tool. Candidates are tried in
+this order:
+
+1. screen-space handles within 14 px (drawn at 6–8 px);
+2. a proxy raycast in a never-rendered `pickScene` with layer bits TERRAIN, TRACK, DECK,
+   TUNNEL, SIGNAL, STATION, DEPOT and TRAIN, masked by the active tool (for example, the
+   Signal tool asks for TRACK);
+3. track-centreline distance within 10 px;
+4. an analytic heightfield ray march against the sim heights. Zoom-to-cursor also uses it.
+
+**Occlusion aids:**
+- H hides bridge decks;
+- U shows an underground x-ray;
+- C cycles through stacked hits;
+- the EntityList gives keyboard targets.
+
+This is the ADR 0004 lesson: depth alone did not solve occluded picking; a layer filter plus
+a keyboard list did.
+
+### Labels
+
+- **Renderer.** Labels are CSS2D.
+- **Station labels** are `<button>`s. They are focusable, and a click reaches the inspector
+  through the app, never through a render → ui import.
+- **Fonts.** Place names use self-hosted EB Garamond (OFL, a woff2 subset); UI numerals use
+  system-ui or Inter.
+- **Updates.** Labels are laid out again only when the camera or the label set changes. L
+  toggles them.
+
+## Tools
+
+*Status: planned, R4–R5. `src/tools/` does not exist yet.*
+
+- **Shape.** `(state, event, ctx) → [state, effects]`, pure: the same inputs give the same
+  outputs. No three, no DOM (boundary test).
+- **Events arrive already interpreted.**
+  - `InputRouter` in `src/app` turns DOM input into tool events that carry the pick result and
+    modifiers:
+    - precision: Ctrl, or ⌥ on macOS;
+    - height steps;
+    - R to flip or rotate;
+    - the keyboard lattice cursor, with Enter to start and commit.
+  - Tools never raycast or read the DOM.
+- **`ctx` is read-only:** the current `NetworkView`, `sim.planTrack`, the memoized preview, and
+  settings.
+- **Effects are data**, interpreted by the app:
+  - execute a command, through the single command gateway (tools never call `execute`);
+  - set the ghost: new is white, reused cyan, invalid red and dashed; elevated ghosts get drop
+    lines every 20 m and end-height tags;
+  - tooltip lines;
+  - highlights;
+  - an aria-live announcement;
+  - camera requests.
+- **Preview memo.**
+  - `sim.preview` runs only when the snapped key changes, through an LRU of 16.
+  - Recommended cache key: network revision + canonical command key, so a commit invalidates
+    old entries.
+  - If preview p95 exceeds 8 ms, file a sim-in-Worker ADR.
+- **Track tool.** Idle → Pressed → Dragging (> 4 px) or Anchored (click-click) → Commit →
+  chain (stays anchored at the new end). Esc steps back one level.
+- **Tool set.** Track, Signal, Station, Depot, Bridge, Tunnel and Demolish (keys 1–7).
+  Select is the default no-tool state (Esc), not a toolbar button.
+  - Bridge and Tunnel are the track tool with the structure forced; Track uses Auto.
+  - Depot places a depot. No tool buys, assigns or dispatches trains.
+- **Testing.** Reducer unit tests replay scripted event sequences without a browser.
+  Playwright covers the build → undo-to-empty loop (D3), and its runs are agent evidence.
+
+## UI (HUD)
+
+*Basis: ADR 0009 (Accepted). Status: planned, R4–R6 and D10. `src/ui/` does not exist yet;
+`index.html` already has the `#hud` mount point.*
+
+- **React 19, outside the frame loop.** React renders only when the store publishes. No
+  per-tick or per-frame `setState`; no React-driven animation.
+- **Store.**
+  - The store module lives in `src/ui`, and `src/app` is its only writer.
+  - It exposes `subscribe(listener)` and `getSnapshot()`. Components read it with
+    `useSyncExternalStore(store.subscribe, store.getSnapshot)`, through per-panel selectors.
+  - Snapshots are immutable, and `getSnapshot` returns the same reference until a value
+    changes (React requires this).
+  - Recommendation: the app publishes counters at a low fixed rate (4 Hz) and everything else
+    on change.
+- **Store contents:**
+  - the active tool;
+  - speed and date;
+  - the counters "Trains · Moving · Waiting · Avg wait" (no passenger or cargo counters);
+  - tooltip lines;
+  - the selection and its `inspect()` result;
+  - notifications;
+  - undo/redo availability;
+  - overlay toggles;
+  - the aria-live status line.
+- **Intents out.** The UI calls action functions that the app provides (set tool, set speed,
+  undo, redo, Show, toggle overlay). The app turns them into tool state, gateway commands or
+  camera moves.
+- **Inspector.** It explains waits ("Waiting at signal S-12: block B-7 occupied by Train 3").
+  **Show** pans the camera and draws a leader line through the render overlays.
+- **Layout.**
+  - top-left: the menu;
+  - top-centre: the counters;
+  - top-right: time controls, the date, Overlays, Help, Notifications and Settings;
+  - bottom-centre: the toolbar with Undo and Redo, on parchment panels.
+  - There is no buy, line, timetable or dispatch UI anywhere.
+- **Accessibility:**
+  - UI scale 90–150%;
+  - reduced motion is honoured;
+  - a colour-blind-safe overlay set;
+  - keyboard construction.
+
+## Persistence in M4
+
+*Status: planned, D12.*
+
+- **M4 has no player saves.** IndexedDB saves are an M4 exclusion; only replay fixtures and
+  command logs are in scope.
+- **`sim.save()` → `WorldSave`**, with `loadSim(save)`.
+  - The save is canonical JSON, hashed with FNV-1a (`util/hash.ts`).
+  - Terrain is stored as `{seed, generatorVersion}`.
+  - Loading never re-validates.
+  - It exists for the replay equalities and the determinism gate, not for players.
+- **Fixtures and replays.**
+  - `tests/fixtures/` holds golden scenarios built from commands only.
+  - `tests/replay/` asserts:
+    - `step(1)×N == step(N) == step(10)×N/10`;
+    - save → load → continue == uninterrupted play;
+    - a `(tick, cmd)` command log replays to identical checkpoint hashes.
+- **Any future IndexedDB store** (M5 save/replay) must use a **new database name, never
+  `infrastructurio`**. That database holds legacy road-era saves on the same dev origin
+  ([archive](archive/README.md)). Save-format compatibility is an M5 decision and needs its
+  own ADR.
+
+## Performance budgets
+
+- **Budgets live in one place:** the predeclared
+  [acceptance gates](evidence/m4/2026-09-26-acceptance-gates.md) and, for headless benches,
+  `bench/budgets.json`, committed before the first run.
+  - They are not restated here.
+  - The owner approves them before any measurement, and they are never retuned after results.
+- **Architectural choices that exist to meet them:**
+  - render on demand;
+  - no allocations in the loop;
+  - `BatchedMesh` and `InstancedMesh` for the draw-call budget;
+  - time-sliced static diffs;
+  - labels only on change;
+  - the lazy-loaded High post chain;
+  - dynamic resolution and the auto-preset.
+- **Measurement (D12):**
+  - PerfMonitor (F3 overlay);
+  - `vitest bench` headless;
+  - a Playwright bench that writes JSON reports.
+
+## Workers
+
+- **Everything runs on the main thread** (sim, tools and render) until measurement says
+  otherwise.
+- **Triggers for a sim-in-Worker ADR:**
+  - preview p95 > 8 ms;
+  - sim tick batches missing their gate budgets.
+- **Why a later move is cheap.** ADR 0002's command and snapshot boundary means the move
+  changes transport, not ownership, and `FrameView`'s typed arrays are transferable.
+- **Nothing is built speculatively:** no worker plumbing, no message protocol, no
+  `SharedArrayBuffer`.
+
+## Related decisions and guides
+
+- [ADR 0001](decisions/0001-web-based-prototype.md): web, TypeScript, Vite and React
+  (Accepted; its renderer scope was replaced by 0009).
+- [ADR 0002](decisions/0002-separate-simulation-from-presentation.md) (Accepted) and
+  [ADR 0008](decisions/0008-archive-road-era-and-restart.md): the archive and restart
+  (Accepted).
+- [ADR 0009](decisions/0009-render-isometric-threejs.md) (Accepted); ADRs
+  [0010](decisions/0010-triangular-lattice-track-geometry.md)–[0014](decisions/0014-autonomous-diorama-operator.md)
+  (Proposed).
+- Agent rules per layer: [src/core/CLAUDE.md](../src/core/CLAUDE.md) and
+  [src/render/CLAUDE.md](../src/render/CLAUDE.md), which [AGENTS.md](../AGENTS.md) routes
+  other agents to.
