@@ -12,6 +12,7 @@
     "research:m4:lanes": "node experiments/m4/run-lane-study.mjs",
     "research:m4:rendering": "node experiments/m4/rendering/run-study.mjs",
     "verify:m4:rendering": "node experiments/m4/rendering/verify-results.mjs",
+    "dev:construction": "vite --host 127.0.0.1 --port 5178 --strictPort",
     "research:m4:human": "node experiments/m4/rendering/serve-study.mjs"
   },
   "engines": {

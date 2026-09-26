@@ -94,3 +94,50 @@ memory, or production persistence/traffic introduces stronger lifecycle requirem
 ## History
 
 - 2026-09-07: Proposed for #51 with explicit #53 extension guidance.
+
+## #52/#53 implementation findings — 2026-09-07 (still Proposed)
+
+The earlier #53 guidance above is now implemented for **straight approaches only**.
+`section` authors a normalized plateau plus explicit entry/exit taper boundaries;
+`remove-section` restores the original local width. Curved local widening, narrowing
+below base counts and creation of a direction absent from the base road reject.
+Each added lane and section receives a stable ID; existing lane IDs and divider
+remain fixed. Multiple nonoverlapping plateaux/tapers remain independent. Counts
+are total plateau counts, not increments. Bounds include 10 m longitudinal taper
+per metre of maximum added width on either side (35 m for one extra lane).
+Reshape rejects if the stored normalized intervals would leave shorter tapers.
+
+Road edges are derived at sample stations from local section weights. Maximum
+width uses the widest section, not a sum of disjoint section lanes. Clearance still
+uses conservative whole-road maximum side envelopes: an edit may reject because
+of a nearby road outside the plateau, rather than proving exact swept-edge contact.
+That conservative limitation is visible through model rejection; the UI never
+widens the entire road as a fallback.
+
+`assign` authors an incoming lane's exact outgoing target list; `null` restores
+defaults, while `[]` explicitly closes its outgoing permissions. Snapshot candidates
+are separate from legal movements and authored overrides. Default local movements
+connect each added lane to the outer continuing lane through its taper. Movements
+carry `fromT`/`toT` road parameters and full transition paths; lane paths carry
+`startT`/`endT` so interior graph attachments are unambiguous. A consumer must split
+continuing lane traversal at attachment positions, not treat these as endpoint-only
+edges. No traffic graph consumer is introduced here.
+
+An added lane may instead target an inner continuing lane over its plateau plus
+exit taper. Its smoothstep lateral path has aligned endpoint tangents; the analytic
+maximum lateral slope is 1.5 times lateral displacement divided by available plan
+length. Require at most 0.1, equivalently 15 m span per metre of lateral change.
+This constraint also bounds curvature below the experiment's 20 m radius threshold
+for the supported lane-width changes. Reverse-direction paths have decreasing road
+parameters. Insufficient space removes that candidate and explicit assignment to it
+rejects atomically. Arbitrary cross-road lateral jumps at zero-length throats remain
+unsupported; only continuous cross-road defaults are candidates.
+
+Every edit revalidates explicit targets. Invalidated assignments reject with lane
+IDs; there is no silent remap. Undo restores the entire prior frozen snapshot and
+allocator, including overrides, candidates, attachment parameters and paths.
+Behavioral tests cover positive local widening, independent sections, space/overlap
+rejection, preserved unrelated state, alternative assignment, reverse travel,
+invalidated overrides and complete reverse undo. See
+[construction controls evidence](../research/m4/construction-controls.md).
+These findings update the experiment proposal, not production #31 or #55 acceptance.
