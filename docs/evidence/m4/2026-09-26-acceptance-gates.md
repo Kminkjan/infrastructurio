@@ -1,8 +1,9 @@
 # M4 acceptance gates (predeclared)
 
-- **Status:** Proposed 2026-09-26 — awaiting explicit owner approval in the PR that adds this
-  file ([#61](https://github.com/Kminkjan/infrastructurio/pull/61)); no measurement may be taken against these bounds before
-  approval, and bounds are never retuned after results.
+- **Status:** Approved 2026-09-26 by the owner, as written, by an explicit statement in
+  conversation naming this file; recorded in PR [#79](https://github.com/Kminkjan/infrastructurio/pull/79)
+  (the file was added in [#61](https://github.com/Kminkjan/infrastructurio/pull/61)). Bounds
+  are never retuned after results.
 - **Milestone:** M4 — Living Diorama
   ([milestone 8](https://github.com/Kminkjan/infrastructurio/milestone/8)); epic "M4 — Epic:
   Living Diorama" ([#62](https://github.com/Kminkjan/infrastructurio/issues/62)).
