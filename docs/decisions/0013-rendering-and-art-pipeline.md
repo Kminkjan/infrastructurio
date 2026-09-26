@@ -181,10 +181,10 @@ single constant); which glTF assets, if any, arrive before M5. WebGPU is out of 
 
 - **Agent code reading, 2026-09-26:** the skeleton smoke scene
   ([`src/app/main.ts`](../../src/app/main.ts)) uses Lambert, the hemisphere-plus-sun recipe,
-  `NeutralToneMapping` and palette colours. Its sun direction intends 42° but, because the
-  horizontal part is not unit length, sits at about 51.7° (agent arithmetic); D1 corrects
-  it. Commit 2147261 records a passing build, so the recipe compiles; no browser render was
-  observed for this ADR. It is not a look verdict and not evidence for any gate.
+  `NeutralToneMapping` and palette colours, with the sun at 42° elevation (a normalisation
+  bug that put it at ~51.7° was fixed in `ac1e6a7`). The build passes, so the recipe
+  compiles, and an agent browser check of PR #60 saw the smoke scene render. It is not a
+  look verdict and not evidence for any gate.
 - **Owner only:** Look Gate A (D11a: four bookmark views beside the mood board, rubric 1–5
   including originality) and Look Gate B (the walkthrough). Agents never perform, simulate
   or narrate them.

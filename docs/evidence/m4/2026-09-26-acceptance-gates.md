@@ -191,9 +191,9 @@ Pass: 12 of 12.
 - `git diff --check 4b825dc642cb6eb9a060e54bf8d69288fbee4904 <sha>`. That hash is git's
   empty tree, so every tracked file is checked, whichever branch the SHA is on.
 
-Whitespace findings in files that predate the reset (as of 2026-09-26: a blank line at EOF
-in three `.github/ISSUE_TEMPLATE` files and in ADRs 0001 and 0002) are fixed before
-approval; A6 is run only after that.
+The files that predated the reset and had a blank line at EOF (three `.github/ISSUE_TEMPLATE`
+files, ADRs 0001 and 0002, CONTRIBUTING.md) were fixed in `ac1e6a7` on 2026-09-26, so the
+whole-tree check is clean from the reset onward.
 
 ## B. Performance
 

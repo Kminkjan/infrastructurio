@@ -150,10 +150,9 @@ On 2026-09-26 `palette.ts` holds 18 tokens: `grass`, `grassLight`, `grassShade`,
 - `PCFSoftShadowMap` is deprecated in three r185, so softness comes from PCF plus `radius`.
 - **Baked AO carries the Low preset.** With the shadow map off, the vertex AO and the tint
   map are the only contact cues, so they must hold up alone.
-- The smoke scene already uses the hemisphere and sun values and `NeutralToneMapping`. It
-  does not yet fit a shadow map or lock the sun to yaw, and its sun sits at about 51.7°, not
-  42°, because the horizontal part of its direction is not unit length (agent arithmetic,
-  2026-09-26); D1 corrects it.
+- The smoke scene already uses the hemisphere and sun values (sun at 42°, fixed in
+  `ac1e6a7`) and `NeutralToneMapping`. It does not yet fit a shadow map or lock the sun to
+  yaw; D1 adds both.
 
 ## Materials
 
