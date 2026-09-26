@@ -128,11 +128,12 @@ extrapolates, so a train never visibly overshoots a red signal.
 
 **Reset sequence.**
 [#59](https://github.com/Kminkjan/infrastructurio/pull/59) (road-era handoff) → tags
-`legacy-m0-m4`/`legacy-m3` → PR 1 [#60](https://github.com/Kminkjan/infrastructurio/pull/60)
-(reset + skeleton) → PR 2 (docs) → PR 3 (architecture, ADRs 0009–0014, the CLAUDE.md set and
-[`AGENTS.md`](../AGENTS.md)) → PR 4 (predeclared acceptance gates) → one PR per slice. The
-owner merges every PR personally. PRs 2–4 may ship as one PR; the gates file is then
-approved by name in that PR, exactly as its rule 1 says.
+`legacy-m0-m4`/`legacy-m3` → [#60](https://github.com/Kminkjan/infrastructurio/pull/60)
+(reset + skeleton) → [#61](https://github.com/Kminkjan/infrastructurio/pull/61) (docs,
+architecture, ADRs 0009–0014, the CLAUDE.md set, [`AGENTS.md`](../AGENTS.md) and the
+predeclared acceptance gates; the planned PRs 2–4 combined) → one PR per slice. The owner
+merges every PR personally, and approves the gates file explicitly, separately from the
+merge, exactly as its rule 1 says.
 
 **Slices.** The design splits into core slices S0–S12 and render slices R0–R7. The backlog
 groups them into thirteen tracking keys:
@@ -185,7 +186,7 @@ gate    D1–D12 → D13 (automated and performance gates; owner walkthrough = L
 
 ## 6. Acceptance gates overview
 
-The gates are predeclared in the PR that adds the gates file (PR 4 above) and approved by
+The gates are predeclared in the PR that adds the gates file (#61) and approved by
 the owner **before any measurement**. They are never retuned after results. The
 authoritative text is the [acceptance gates record](evidence/m4/2026-09-26-acceptance-gates.md);
 this is a summary.

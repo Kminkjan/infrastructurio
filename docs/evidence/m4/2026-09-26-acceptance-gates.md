@@ -1,7 +1,7 @@
 # M4 acceptance gates (predeclared)
 
 - **Status:** Proposed 2026-09-26 — awaiting explicit owner approval in the PR that adds this
-  file (planned as PR 4; number TBD); no measurement may be taken against these bounds before
+  file ([#61](https://github.com/Kminkjan/infrastructurio/pull/61)); no measurement may be taken against these bounds before
   approval, and bounds are never retuned after results.
 - **Milestone:** M4 — Living Diorama (milestone TBD); epic "M4 — Epic: Living Diorama"
   (TBD).
@@ -565,5 +565,5 @@ Passing every gate would still not establish:
 
 ## History
 
-- 2026-09-26: Proposed in the PR that adds this file (planned as PR 4; number TBD; label:
+- 2026-09-26: Proposed in the PR that adds this file ([#61](https://github.com/Kminkjan/infrastructurio/pull/61); label:
   agent). No measurements exist.

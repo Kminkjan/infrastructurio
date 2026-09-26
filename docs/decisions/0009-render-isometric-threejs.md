@@ -173,5 +173,4 @@ is not evidence that any gate passes.
 
 - 2026-09-26: Accepted by explicit owner decision in conversation (rendering: web +
   TypeScript + Three.js 2.5D; "Mark ADR 0008/0009 Accepted"), in the same decision batch as
-  ADR 0008. Written up in the rail-first reset PR that adds ADRs 0009–0014 (planned as PR 3;
-  number TBD).
+  ADR 0008. Written up in the rail-first reset PR that adds ADRs 0009–0014 ([#61](https://github.com/Kminkjan/infrastructurio/pull/61)).

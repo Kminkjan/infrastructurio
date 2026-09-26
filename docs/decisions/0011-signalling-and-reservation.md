@@ -147,5 +147,4 @@ owner walkthrough speaks only for the owner; first-time-player evidence belongs 
 
 ## History
 
-- 2026-09-26: Proposed in the rail-first reset PR that adds ADRs 0009–0014 (planned as PR 3;
-  number TBD); owner decision pending.
+- 2026-09-26: Proposed in the rail-first reset PR that adds ADRs 0009–0014 ([#61](https://github.com/Kminkjan/infrastructurio/pull/61)); owner decision pending.
