@@ -102,7 +102,11 @@ describe("bounded construction model", () => {
     success(model.undo());
     success(model.undo());
     success(model.undo());
-    expect(model.snapshot().authored).toEqual({ nextId: 1, roads: [] });
+    expect(model.snapshot().authored).toEqual({
+      nextId: 1,
+      roads: [],
+      overrides: [],
+    });
     expect(model.undo().ok).toBe(false);
   });
   it("rejects impossible curves and dependent reshapes atomically with reasons", () => {
