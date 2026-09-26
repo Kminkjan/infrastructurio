@@ -13,7 +13,8 @@ ADR does not by itself complete an issue or milestone.
 | [0003 — Retain individual physical vehicles as the M4 reference](0003-m4-physical-traffic-reference.md) | Accepted, bounded research | Weight-1 lane fixture; tested spatial-platoon factors rejected. Production traffic design remains open. |
 | [0004 — Keep Pixi plan view as the bounded editing reference](0004-m4-renderer-camera-reference.md) | Accepted, bounded research | Paired editing experiment only. Production renderer/camera choice remains open. |
 | [0005 — Bound grid-assisted approaches and automatic curves](0005-m4-grid-and-automatic-curves.md) | Proposed | #51 experimental snapping, fitting, geometry and clearance limits. |
-| [0006 — Own construction identities and edits in the model](0006-m4-authored-identities-and-edit-boundaries.md) | Proposed | #51 command/snapshot ownership and #53 section/override extension proposal. |
+| [0006 — Own construction identities and edits in the model](0006-m4-authored-identities-and-edit-boundaries.md) | Proposed | #51 ownership and implemented #53 section/override findings. |
+| [0007 — Present the isolated construction tool with an SVG plan editor](0007-m4-construction-plan-editor.md) | Proposed | #52/#53 experimental controls and presentation; no production renderer acceptance. |
 
 Read each record's scope and limitations before applying it. Earlier decisions are
 not permanent constraints when new evidence or an explicit product direction warrants

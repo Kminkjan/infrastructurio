@@ -1,5 +1,9 @@
 # M4 construction geometry — #51 API handoff
 
+**Follow-up:** [#52/#53 controls, sections and lane assignments](construction-controls.md)
+implements the extension below. This document retains the original #51 handoff
+and validation record; current API additions and browser evidence are in that follow-up.
+
 This isolated proof starts at `f6b3de13acb4349d8ffcc4aac60594e174f3a3ae`
 on `codex/m4-orchestration` (main `f18878b` plus owner documentation). Implementation
 branch: `codex/m4-construction-geometry`. No PR #49 research tooling was imported.
