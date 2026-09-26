@@ -112,3 +112,12 @@ rendering verifier, TypeScript/production build and `git diff --check` pass.
 No production files changed. Original checkout remains at `18dc5ee` on
 `codex/issue-19-release-gate`, with ten modified files and binary diff SHA-256
 `42c4eec5ee1290dd8fbfd62cac7edccce0bf23b53579a12dff50c7877b993841`.
+
+## Subsequent disposition
+
+The [formal acceptance assessment](acceptance-disposition.md) now maps #27's four
+criteria to the reviewed evidence and recommends closure of that bounded research
+issue. The [v2 workflow](rendering/human-comparison.md) fixes the runner limitations
+identified above. This original review remains a historical record; its statements
+about v1 visibility, missing rebuild raw data and the failed 5173 startup still apply
+to that report. Human comparison and #26/#28 production decisions remain open.

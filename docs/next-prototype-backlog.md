@@ -42,8 +42,9 @@ Acceptance criteria:
 Establish a simulation model in which detailed junction design changes physical traffic outcomes.
 
 Review update (2026-09-06): deterministic comparisons reproduced exactly; weights
-2/4 remain rejected. See [review findings](research/m4/evidence-review.md). #27 stays
-open for acceptance disposition; reproduction alone does not close the gate.
+2/4 remain rejected. See [review findings](research/m4/evidence-review.md). #27 is now assessed as satisfying its bounded research criteria; see the
+[formal disposition](research/m4/acceptance-disposition.md). GitHub controls closure;
+this does not accept production traffic or close M4.
 
 Depends on: No new-prototype prerequisite.
 

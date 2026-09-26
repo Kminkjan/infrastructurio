@@ -110,3 +110,8 @@ No worker migration follows from the reviewed disconnected-kernel margin. Keep
 fixed-step semantics and renderer-independent snapshots; choose production cadence,
 worker transport and an integrated region budget only after connected measurements.
 #26 human comparison and production choice still block final #28 acceptance.
+
+Subsequent [formal disposition](acceptance-disposition.md) assesses #27's bounded
+research criteria as satisfied. This strengthens the weight-1 reference without
+selecting production cadence or removing #26's human/renderer dependency. The
+save-access/non-overwrite implementation remains #38; #28 is not complete.

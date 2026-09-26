@@ -21,13 +21,9 @@ let state,
   sampling = false,
   last = null;
 const rebuildTimingsMs = [];
-let visibilityEvents = [];
-document.addEventListener("visibilitychange", () => {
-  if (sampling) visibilityEvents.push({ atMs: performance.now(), state: document.visibilityState });
-});
 const status = document.querySelector("#status");
 function record(action, detail = {}) {
-  log.push({ atMs: performance.now(), action, ...detail });
+  log.push({ action, ...detail });
   document.querySelector("#log").textContent = log
     .slice(-6)
     .map((x) => JSON.stringify(x))
@@ -179,19 +175,14 @@ window.study = {
     frames = [];
     costs = [];
     last = null;
-    visibilityEvents = [{ atMs: performance.now(), state: document.visibilityState }];
     sampling = true;
   },
   endSample() {
-    visibilityEvents.push({ atMs: performance.now(), state: document.visibilityState });
     sampling = false;
     return {
-      visibilityEvents,
       frameIntervalsMs: frames,
       updateAndSubmitMs: costs,
       visibility: document.visibilityState,
     };
   },
 };
-
-await import("./human-session.mjs");
