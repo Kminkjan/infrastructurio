@@ -50,9 +50,11 @@ Terms are defined in the [glossary](glossary.md). Exact rules are in the
 - Drag-to-lay with a ghost (white = new, cyan = reused, red dashed = invalid), a "N new,
   M reused" counter, and exactly one rejection reason with a fix hint. Precision mode (Ctrl,
   ⌥ on macOS) picks the radius and end heading explicitly and stays on the lattice.
-- Grades up to 35‰ in integer-dm height steps. Structure is inferred as ground, bridge or
-  tunnel, or forced by the Bridge and Tunnel tools. A track crossing over another on a bridge
-  never connects to it.
+- Grades up to 35‰ in integer-mm height steps (175 mm per 5 m; mm replaced dm as a default
+  on 2026-09-26, see the
+  [ADR 0010 D2 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d2-track-model)).
+  Structure is inferred as ground, bridge or tunnel, or forced by the Bridge and Tunnel
+  tools. A track crossing over another on a bridge never connects to it.
 - Turnouts and diamonds are derived from geometry, never placed as entities. Stations form
   from straight platforms (40–200 m). Depots sit on stubs of ≥ 50 m. Signals are stop (block)
   or chain.

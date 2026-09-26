@@ -1,7 +1,10 @@
 # src/core — deterministic, DOM-free simulation
 
 The simulation is authoritative (ADR 0002): everything else reads its snapshots and sends it
-commands. Status 2026-09-26: `lattice.ts`, `terrain.ts` and `util/` (+ tests) exist (D1); slices S2–S12 add the rest
+commands. Status 2026-09-26: `lattice.ts`, `terrain.ts` and `util/` (+ tests) exist (D1);
+`geometry/` (templates, piece, sample, clearance), `track/` (authored, validate, history),
+`network/derive.ts` and `sim/` (`world.ts`, `api.ts`: build, demolish, undo, redo, preview,
+network) exist (D2); later slices add the rest
 ([simulation model](../../docs/simulation-model.md), [architecture](../../docs/architecture.md)).
 ADRs 0010 (lattice geometry), 0011 (signalling), 0012 (tick and determinism) and 0014
 (operator) are **Proposed**: their numbers are defaults to test, not owner decisions. The
@@ -46,9 +49,11 @@ and `*.bench.ts` exempt), and `tsconfig.core.json` compiles it with lib ES2022, 
 
 - Lengths and track positions: integer **mm** (`lengthMm`, `headMm`). Lattice a = 5000 mm;
   a secondary step is 8660 mm (`stepLengthMm`).
-- Elevation: integer **dm** per node (`z0Dm`, `z1Dm`; terrain Int16 dm). Node identity is
-  (q, r, z). Max grade 35‰. dm vs mm node z is open until S2 (dm caps 5 m straights at
-  20‰; [simulation model open point 2](../../docs/simulation-model.md#19-open-points-2026-09-26)).
+- Elevation: integer **mm** per node (`zMm`, `z0Mm`, `z1Mm`); terrain stays Int16 dm and
+  converts at its boundary. Node identity is (q, r, zMm). Max grade 35‰ (175 mm per 5 m).
+  Settled as a default on 2026-09-26 (#66 amendment,
+  [ADR 0010 D2 finding](../../docs/decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d2-track-model));
+  ADR 0010 stays Proposed.
 - Time: **1 tick = 100 ms (10 Hz)**; `simMs`, path costs, dwell and timeouts in integer ms
   or ticks, never float seconds.
 - Speed **mm/s** (`speedMms`; 60 km/h = 16,666), acceleration **mm/s²**.
