@@ -16,9 +16,10 @@ around 1900, shown as a 2.5D isometric diorama in the browser.
 The road-era build was archived and main restarted rail-first on 2026-09-26
 ([ADR 0008](docs/decisions/0008-archive-road-era-and-restart.md)). The current milestone is
 **M4 — Living Diorama** ([roadmap](ROADMAP.md), [contract](docs/prototype-plan.md)).
-Main holds the skeleton only: the lattice core, the sim → Three.js coordinate convention,
-the palette module, the architecture-boundary test and an isometric smoke scene. No M4
-claim is implemented, measured or accepted yet.
+Since D1 (2026-09-26, [#65](https://github.com/Kminkjan/infrastructurio/issues/65)) the tree
+holds the lattice core, integer utilities and seeded terrain, the sim → Three.js coordinate
+convention, the palette module, the architecture-boundary test and a render-on-demand
+isometric view of the terrain. No M4 gate is measured or accepted yet.
 
 ## Run locally
 
@@ -26,7 +27,7 @@ Requires Node.js `^20.19` or `>=22.12`.
 
 ```sh
 npm ci          # install exactly the locked dependencies
-npm run dev     # open the URL Vite prints (the skeleton smoke scene)
+npm run dev     # open the URL Vite prints (the seeded terrain; G toggles the lattice)
 ```
 
 ## Checks

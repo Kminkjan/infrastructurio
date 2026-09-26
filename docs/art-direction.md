@@ -7,9 +7,10 @@ Proposed in [ADR 0013](decisions/0013-rendering-and-art-pipeline.md). **No part 
 has been judged yet.** The owner scores it at Look Gate A (D11a) and Look Gate B (the M4
 walkthrough). Every spec number here comes from the design passes: they are starting values
 for lookdev, not measured results. Derived pixel and count figures are marked as
-calculated. Main holds a subset of the palette and an isometric smoke scene
-([`src/app/main.ts`](../src/app/main.ts)). That scene checks the wiring and is not lookdev
-evidence.
+calculated. Since D1 (2026-09-26) [`src/app/main.ts`](../src/app/main.ts) shows seeded
+terrain, water, lighting and the lattice overlay under the isometric camera, with a subset
+of the palette. It is a first pass for the owner to judge, not evidence that this page is
+met.
 
 Related: [vision](vision.md) · [prototype plan](prototype-plan.md) ·
 [backlog](backlog.md) (D11, [#75](https://github.com/Kminkjan/infrastructurio/issues/75)) ·
@@ -89,9 +90,11 @@ the renderer and the HUD.
   [`tests/architecture.test.ts`](../tests/architecture.test.ts) that rejects hex colour
   literals outside `palette.ts`. It does not exist yet.
 
-On 2026-09-26 `palette.ts` holds 18 tokens: `grass`, `grassLight`, `grassShade`, `spruce`,
+On 2026-09-26 main's `palette.ts` holds 18 tokens: `grass`, `grassLight`, `grassShade`, `spruce`,
 `deciduous`, `soil`, `ballast`, `sleeper`, `railTop`, `stucco`, `roofTile`, `water`, `haze`,
-`steam`, `latticeLine`, `sky`, `groundBounce` and `sun`. D11a brings it up to the full table.
+`steam`, `latticeLine`, `sky`, `groundBounce` and `sun`. The D1 branch adds six from the table
+below for terrain, water and the F3 overlay: `meadow`, `waterDeep`, `foam`, `uiParchment`,
+`uiBorder` and `uiInk` (24 in all). D11a brings it up to the full table.
 
 | Group | Colours |
 |---|---|
@@ -151,9 +154,13 @@ On 2026-09-26 `palette.ts` holds 18 tokens: `grass`, `grassLight`, `grassShade`,
 - `PCFSoftShadowMap` is deprecated in three r185, so softness comes from PCF plus `radius`.
 - **Baked AO carries the Low preset.** With the shadow map off, the vertex AO and the tint
   map are the only contact cues, so they must hold up alone.
-- The smoke scene already uses the hemisphere and sun values (sun at 42°, fixed in
-  `ac1e6a7`) and `NeutralToneMapping`. It does not yet fit a shadow map or lock the sun to
-  yaw; D1 adds both.
+- D1 (2026-09-26) uses the hemisphere and sun values (sun at 42°, first fixed in `ac1e6a7`)
+  and `NeutralToneMapping`, fits one shadow map to the view footprint with texel snapping,
+  and locks the sun to camera yaw (`art/lighting.ts`, `art/shadowFit.ts`). D1's terrain
+  alone casts no visible shadow: with `FrontSide` materials three draws back faces into the
+  map, and no slope reaches the 48° a heightfield needs to show the sun one (the golden
+  map's steepest is 33°); nor can a slope under 42° shade its neighbour. The map is there
+  for the casters D4 and D11a add (bridges, trees, buildings).
 
 ## Materials
 

@@ -1,7 +1,7 @@
 # src/render — imperative Three.js presentation
 
-Status 2026-09-26: `coords.ts` (+ test) and `art/palette.ts` exist; the smoke scene in
-`src/app/main.ts` stands in until slice R0 (D1). ADR 0009 (**Accepted**, owner, 2026-09-26)
+Status 2026-09-26: `coords.ts`, `camera/`, `core/`, `terrain/` and `art/` (+ tests) exist
+(D1: slices R0–R1); `src/app/main.ts` wires them. ADR 0009 (**Accepted**, owner, 2026-09-26)
 fixes the renderer, camera, coordinate convention, render-on-demand and React outside the
 frame loop; ADR 0013 (art pipeline) is Proposed. `three` is pinned at 0.185.1 (r185).
 Targets: [art direction](../../docs/art-direction.md), [architecture](../../docs/architecture.md).

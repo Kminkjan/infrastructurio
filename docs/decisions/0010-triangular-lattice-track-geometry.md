@@ -165,6 +165,59 @@ performance gate B ([acceptance gates](../evidence/m4/2026-09-26-acceptance-gate
 the **D3 owner feel check**, which is human only. Nothing here claims that construction
 feels right.
 
+## Findings (2026-09-26, D1 terrain)
+
+Recorded while implementing D1's core lane on branch `codex/d1-lattice-terrain`
+([`src/core/terrain.ts`](../../src/core/terrain.ts) and
+[`terrain.test.ts`](../../src/core/terrain.test.ts)). Automated evidence only, Node 26.7.0
+on macOS; the status of this ADR stays Proposed.
+- **The lattice needed no change for terrain.** `toWorld` places every terrain node and
+  `lattice.test.ts` (9 tests) passes unchanged on the branch.
+- **Terrain lives at lattice nodes in an offset-row layout.** Row = r, col = q + ⌊r/2⌋, one
+  Int16 dm height and one water flag per node, row-major. The axial rhombus becomes a
+  rectangle with its south-west node at the origin: even rows at x = 5·col m, odd rows
+  2.5 m further east, rows 4.33 m apart. Sim and renderer read the same node heights.
+- **The default map is 400 × 346 nodes** (138,400; 1997.5 × 1493.9 m; heights 0.28 MB),
+  replacing the "≈ 401 × 347" design estimate. The size stays a parameter.
+- **Generation is integer-only.** Each node's position is converted once to mm
+  (x = 2500·(2q + r) exactly, y = round(r · 4330.127…)); after that there is only integer
+  arithmetic: `hash32` value noise, 1024-scaled smoothstep, squared mm distances with
+  `isqrt` for the river and lake banks, and `divFloor` for every division. The largest
+  intermediate is a squared distance of about 6.25e12 at the default size, far below 2^53. No
+  transcendental `Math` and no floats accumulate, so the heights are engine-independent.
+- **Banks ramp through the waterline.** The first cut jumped from the bed straight to the
+  shore shelf at the channel edge: 2.3–3.4 m across one 5 m edge on every one of the golden
+  map's 2,091 shore edges, so the 10 m waterline crossed each at 70–80% of its length and
+  traced the lattice instead of the curve. A 10 m smoothstep ramp centred on the channel
+  edge now joins bed and shelf. The water edge moves out about 1.7 m (river) and 2.2 m
+  (lake). On the four test seeds no shore edge climbs more than 22 dm and crossings spread
+  over the whole edge (at most 18% of them in any tenth of it); on the golden map the
+  steepest triangle drops from 37.0° to 32.9°. A test holds the climb and spread. Version 1
+  had not shipped, so it stays 1 with a re-recorded hash.
+- **Measured (after the ramp):** golden terrain hash `9a922d9c` for seed `"baltic-diorama"`
+  at the default size; 5,850 water nodes (4.23%); heights 75–402 dm; generation took a
+  median of 59.2 ms over 10 runs (58.8–60.1 ms) on this machine, which is a dev
+  measurement, not a gate result. On four seeds the tests find exactly one river touching
+  both the west and east edges, exactly one lake (2,200–2,700 nodes, clear of the edges)
+  and no other water. A 300-seed probe (`s0`–`s299`) found the same on every seed, with
+  lakes of 2,527–2,541 nodes and 4.20–4.55% water.
+- **Consequences for later slices.** River and lake positions scale with the map size, so
+  heights depend on `{seed, columns, rows, generatorVersion}`: a save must also carry the
+  size, or each generator version must fix it (D12). The river and lake invariants hold
+  from about 300 × 260 nodes up (40 seeds per size). On smaller maps the lake is left out
+  when no candidate clears the river (the first cut merged it into the river instead, 21 of
+  40 seeds at 160 × 139), and around 100 × 87 the river can leave through the north or
+  south edge.
+- **The land clamp leaves flat plateaus, heavily on some seeds.** Clamping dry land to
+  water level + 0.5 m leaves 9.9% of the golden map's nodes exactly flat at 10.5 m. Over the
+  300-seed probe the share has a median of 11.5% and a 90th percentile of 21.1%; 5 seeds
+  pass 30% and the worst (`s80`) reaches 46.9%. M4 uses only the golden seed. Whether the
+  flats read as meadow or as a defect is for the owner's look gate, not this note; if they
+  are a defect, a continuous integer soft floor above 10.5 m would keep some relief.
+- **Not established:** that the terrain looks right, that the render mesh matches these
+  heights (the render lane's tests), or how grade, bridge and tunnel rules fare on this
+  relief (D4).
+
 ## Revisit when
 
 - The D3 feel check finds construction unsatisfying for reasons that planner tuning, chained
@@ -179,3 +232,8 @@ feels right.
 ## History
 
 - 2026-09-26: Proposed in the rail-first reset PR that adds ADRs 0009–0014 ([#61](https://github.com/Kminkjan/infrastructurio/pull/61)); owner decision pending.
+- 2026-09-26: D1 terrain findings added (offset-row node storage, 400 × 346 default map,
+  integer generation); status unchanged, still Proposed.
+- 2026-09-26: D1 terrain findings amended after review (shore ramp and re-recorded hash,
+  lake left out rather than merged on small maps, 300-seed flat-plateau distribution);
+  status unchanged, still Proposed.

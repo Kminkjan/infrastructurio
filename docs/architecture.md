@@ -51,7 +51,9 @@ exists. It is a design document, not evidence that any slice works.
 ## What exists and what is planned
 
 This is an agent reading of the branch on 2026-09-26. **On main** means the file shipped with
-the reset skeleton (PR 1, [#60](https://github.com/Kminkjan/infrastructurio/pull/60)). It
+the reset skeleton (PR 1, [#60](https://github.com/Kminkjan/infrastructurio/pull/60)).
+**D1 branch** means it exists on `codex/d1-lattice-terrain`
+([#65](https://github.com/Kminkjan/infrastructurio/issues/65)) and is not merged yet. Either
 records that the file is present, not that its tests pass on a given commit: run
 `npm run check` for that. Everything else is planned and lands slice by slice.
 
@@ -60,22 +62,22 @@ records that the file is present, not that its tests pass on a given commit: run
 | Boundary test with a negative self-check | [tests/architecture.test.ts](../tests/architecture.test.ts) | **On main** | S0 |
 | Core compiler config | [tsconfig.core.json](../tsconfig.core.json) | **On main** | S0 |
 | Triangular lattice and its tests | [src/core/lattice.ts](../src/core/lattice.ts) | **On main** | S1 (D1) |
-| Sim ↔ world conversion and its tests | [src/render/coords.ts](../src/render/coords.ts) | **On main**; the winding oracle is planned | R0 (D1) |
-| Palette | [src/render/art/palette.ts](../src/render/art/palette.ts) | **On main**: an 18-key subset of the art-direction palette | full set in D11a |
-| Smoke scene | [src/app/main.ts](../src/app/main.ts) | **On main**: fixed isometric view (yaw 0, 6 ppm) of lattice nodes on a grass plane, hemisphere and sun light, redrawn only on resize. It has no scheduler, controls or sim | replaced in R0 (D1) |
-| Core utilities, terrain | `src/core/util/`, `terrain.ts` | Planned | rest of S0, S3 |
+| Sim ↔ world conversion and its tests | [src/render/coords.ts](../src/render/coords.ts) | **On main**; **D1 branch** adds a non-allocating `worldToSim` target and the winding oracle (in `camera/isoMath.test.ts`) | R0 (D1) |
+| Palette | [src/render/art/palette.ts](../src/render/art/palette.ts) | **On main**: an 18-key subset of the art-direction palette. **D1 branch**: 24 keys (adds meadow, deep water, foam and three UI tokens) plus `cssColor` | full set in D11a |
+| Composition root | [src/app/main.ts](../src/app/main.ts) | **On main**: the skeleton smoke scene. **D1 branch**: replaced by seeded terrain, water and lighting under the iso camera, controller, scheduler, renderer host and perf monitor; G toggles the lattice overlay (debug, until D3). No sim loop yet | R0–R1 (D1) |
+| Core utilities, terrain | [src/core/util/](../src/core/util/), [src/core/terrain.ts](../src/core/terrain.ts) | **D1 branch**: `int`, `hash`, `prng`, `heap`; seeded integer terrain with a golden hash | rest of S0, S3 (D1) |
 | Geometry, track model, planner | `src/core/geometry/`, `src/core/track/` | Planned | S2–S4 (D2, D3) |
 | Network, pathfinding | `src/core/network/` | Planned | S5–S6 |
 | Trains, reservation, deadlock | `src/core/trains/`, `src/core/signals/` | Planned | S7–S9 (D8, D9) |
 | Operator and reasons | `src/core/services/` | Planned | S9–S10 (D9) |
 | Sim façade, remap, views, save | `src/core/sim/` | Planned. `api.ts` grows from S2; remap in S11a/b; views and save in S12 | (D10, D12) |
 | Scenario | `src/core/scenarios/baltic-diorama.ts` | Planned | D1, D11a |
-| Renderer host, scheduler, camera, perf monitor | `src/render/core/`, `src/render/camera/` | Planned | R0 (D1) |
-| Terrain, lighting, lattice shader | `src/render/terrain/`, `src/render/art/` | Planned | R1 (D1) |
+| Renderer host, scheduler, camera, perf monitor | [src/render/core/](../src/render/core/), [src/render/camera/](../src/render/camera/) | **D1 branch**: `RendererHost`, `FrameScheduler`, `PerfMonitor` (F3); `isoMath`, `IsoCamera`, `CameraController`. Pure parts unit-tested | R0 (D1) |
+| Terrain, lighting, lattice shader | [src/render/terrain/](../src/render/terrain/), [src/render/art/](../src/render/art/) | **D1 branch**: chunked lattice-triangle terrain (LOD0/LOD1), depth-tinted water, `lighting` with a fitted shadow map (`shadowFit`), lattice overlay (`shaderChunks/lattice`, `terrain/latticeMaterial`). Look not judged | R1 (D1) |
 | Track meshes | `src/render/track/` | Planned | R2 |
 | Scenery kit, labels | `src/render/scenery/`, `src/render/labels/` | Planned | R3 (D11a) → Look Gate A |
 | Tools | `src/tools/` (not yet created) | Planned | R4–R5 (D3–D7) |
-| Picking | `src/render/picking/` | Planned | D1 (terrain node), R4–R5 (handles, proxies) |
+| Picking | `src/render/picking/` | Terrain node: **D1 branch**, as [heightfieldRay.ts](../src/render/terrain/heightfieldRay.ts). Handles and proxies planned | D1 (terrain node), R4–R5 (handles, proxies) |
 | Overlays | `src/render/overlays/` | Planned | R5 (D7) |
 | Trains, steam, inspector | `src/render/trains/`, `src/ui/` | Planned | R6 (D8–D10) |
 | HUD | `src/ui/` (not yet created) | Planned | R4–R6, D10 |
@@ -138,7 +140,7 @@ The allowed import directions are:
 | `Math.sin/cos/tan/asin/acos/atan/atan2/sinh/cosh/tanh/pow/exp/expm1/log*/hypot/cbrt` appear only in `core/geometry/{sample,clearance,templates}.ts` | boundary test | on main |
 | Tools never import three, render, ui or react, and never touch `window`/`document` | boundary test | on main |
 | Render never imports ui | boundary test | on main |
-| Render, tools and ui import core only through `sim/api.ts` (snapshot types and the façade; it re-exports the lattice helpers the edges need) and the pure `geometry/sample.ts`, so curve maths has one source | not yet enforced | from the approved plan. Add it to the test when `sim/api.ts` lands. `src/app`, the composition root, may import core directly; the smoke scene does |
+| Render, tools and ui import core only through `sim/api.ts` (snapshot types and the façade; it re-exports the lattice helpers the edges need) and the pure `geometry/sample.ts`, so curve maths has one source | not yet enforced | from the approved plan. Add it to the test when `sim/api.ts` lands. `src/app`, the composition root, may import core directly; `main.ts` does. **D1 exception (2026-09-26):** `sim/api.ts` does not exist yet, so `render/terrain/{heightfieldRay,terrainGeometry,terrainShading,TerrainView}.ts` import `core/lattice` and `core/terrain` directly; when `sim/api.ts` lands (S2) they move to it before the rule enters the test |
 | Ui imports neither three nor render | convention | recommendation |
 
 **[tsconfig.core.json](../tsconfig.core.json)**
@@ -287,8 +289,8 @@ consumers compare its revision instead of diffing contents.
 
 ### Host loop and time controls
 
-The loop lives in `src/app` and runs once per rendered frame. It is planned: the smoke scene
-has no loop yet.
+The loop lives in `src/app` and runs once per rendered frame. It is planned: since D1
+(2026-09-26) `main.ts` renders the terrain on demand but has no sim loop yet.
 
 ```ts
 acc += dtWall * speed                            // wall ms × {0, 1, 2, 4, 10}
@@ -313,8 +315,9 @@ alpha = Math.min(acc / 100, 1)
 ## Renderer
 
 *Basis: ADR 0009 (Accepted) for the camera, coordinates and render-on-demand; ADR 0013
-(Proposed) for presets, materials and assets. Status: planned, R0–R7, except `coords.ts` and
-`palette.ts`.*
+(Proposed) for presets, materials and assets. Status: R0–R1 on the D1 branch (2026-09-26;
+host, scheduler, camera, perf monitor, terrain, lighting, lattice overlay; see the table
+above), R2–R7 planned.*
 
 - **Renderer.** `THREE.WebGLRenderer` from three `0.185.1`, pinned exactly. WebGPU is out of
   M4.
@@ -386,11 +389,12 @@ alpha = Math.min(acc / 100, 1)
   - the determinant is +1;
   - the frame is right-handed: mapped east × mapped north = up, and sim up maps to world up;
   - the matrix and the function agree and round-trip.
-- **Planned tests (D1):**
+- **D1 branch tests:**
   - the winding oracle: the projected (origin, east, north) triangle is counter-clockwise on
-    screen for all 6 yaws;
-  - a generator test that checks every procedural mesh's winding against its normals, because
-    materials use `FrontSide` only.
+    screen for all 6 yaws ([isoMath.test.ts](../src/render/camera/isoMath.test.ts));
+  - a generator test that checks every terrain and water triangle's winding against its
+    normals, because materials use `FrontSide` only
+    ([terrainGeometry.test.ts](../src/render/terrain/terrainGeometry.test.ts)).
 - **Asset model space.** +Y up, origin at ground contact, forward +X. This applies to
   procedural assets now and glTF later.
 
