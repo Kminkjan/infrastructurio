@@ -1,5 +1,8 @@
 # M4 paired presentation experiment — issue #26
 
+For the current runnable workflow, use [Human comparison and v2 reproduction](human-comparison.md).
+The report below describes the preserved original v1 experiment.
+
 Recorded 2026-09-06. This worktree started at `db4dc50dd87944b7ee98d70472de11864cf974f3`
 (merged PR #46), after fetching stale main and verifying that it contains
 `de77568257d22949684b9e4298947d755c11646e` (PR #45).

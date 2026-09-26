@@ -3,21 +3,14 @@ import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { defaultControls } from "./scene.mjs";
-import { startStudyServer } from "./serve-study.mjs";
-const output = process.argv[2];
-if (!output) throw new Error("Provide a NEW output directory; historic evidence is never overwritten.");
-const { existsSync } = await import("node:fs");
-if (existsSync(output)) throw new Error("Output directory already exists; choose a new path.");
-const server = await startStudyServer();
+const output = process.argv[2] ?? "docs/research/m4/rendering";
 await mkdir(output, { recursive: true });
 const browser = await chromium.launch({
   channel: "chrome",
   headless: false,
   args: ["--window-size=1320,900"],
-}).catch(async error => { await server.close(); throw error; });
+});
 const report = {
-  schemaVersion: 2,
-  provenance: server.provenance,
   recordedAt: new Date().toISOString(),
   method:
     "Automated Playwright DOM mouse/keyboard input with projected target coordinates; no human participants. Headed Chrome, one page at a time.",
@@ -43,8 +36,6 @@ for (const name of [
   "study.mjs",
   "index.html",
   "run-study.mjs",
-  "serve-study.mjs",
-  "human-session.mjs",
   "../../../src/rendering/map-camera.ts",
   "../../../package-lock.json",
 ])
@@ -63,7 +54,7 @@ function stats(values) {
 }
 try {
   const baseline = await browser.newPage({viewport: {width:1320,height:900},deviceScaleFactor:1});
-  await baseline.goto(server.url);
+  await baseline.goto('http://127.0.0.1:5173/');
   await baseline.locator('canvas').waitFor();
   await baseline.waitForTimeout(1000);
   await baseline.screenshot({path:`${output}/current-application.png`});
@@ -76,7 +67,7 @@ try {
     const errors = [];
     page.on("pageerror", (e) => errors.push(e.message));
     await page.goto(
-      `${server.url}/experiments/m4/rendering/index.html?mode=${mode}`,
+      `http://127.0.0.1:5173/experiments/m4/rendering/index.html?mode=${mode}`,
     );
     await page.waitForFunction(() => window.study);
     const run = {
@@ -184,8 +175,7 @@ try {
       await screenshot("top-camera");
     }
     run.interactionLog = await page.evaluate(() => study.log);
-    run.editRebuildRawMs = await page.evaluate(() => study.rebuildTimingsMs);
-    run.editRebuildCpu = stats(run.editRebuildRawMs);
+    run.editRebuildCpu = stats(await page.evaluate(() => study.rebuildTimingsMs));
     await page.locator("#reset").click();
     for (const workload of ["editing", "stress"]) {
       if (workload === "stress") await page.locator("#stress").click();
@@ -209,7 +199,6 @@ try {
   }
 } finally {
   await browser.close();
-  await server.close();
   await writeFile(
     `${output}/results.json`,
     JSON.stringify(report, null, 2) + "\n",
