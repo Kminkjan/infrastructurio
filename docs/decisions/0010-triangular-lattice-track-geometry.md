@@ -90,8 +90,10 @@ piece templates. Validation rules, reason codes and the planner in full live in
    - Geometry carries no allocated IDs, so undo cannot create an ID hazard. `derive` sorts
      pieces by key before assigning network IDs, so the network does not depend on
      insertion order. Stations and trains use monotonic allocators that never roll back.
-6. **Elevation and grade.** z is integer decimetres per node, and node identity is
-   (q, r, z), so a track above another at the same (q, r) is a different node. Structure
+6. **Elevation and grade.** z is integer decimetres per node (integer millimetres as a
+   default since 2026-09-26; see [Findings, D2](#findings-2026-09-26-d2-track-model)), and
+   node identity is (q, r, z), so a track above another at the same (q, r) is a different
+   node. Structure
    (ground, bridge, tunnel) is a piece property, inferred in Auto mode or forced by the
    Bridge and Tunnel tools. The maximum grade is 35‰, chosen so a train can always restart
    on it. The planner spreads elevation by length with largest-remainder rounding.
@@ -109,7 +111,8 @@ Open: off-lattice geometry and transition curves (clothoids) are deferred beyond
 the planner's feel is judged at D3. Node z resolution: integer dm quantises a 5 m primary
 straight to 0, 20 or 40‰, so the 35‰ maximum is unreachable per piece and primary
 straights cap at 20‰; decide dm vs integer-mm node z before S2
-([simulation model open point 2](../simulation-model.md#19-open-points-2026-09-26)).
+([simulation model open point 2](../simulation-model.md#19-open-points-2026-09-26))
+(settled as a default 2026-09-26, integer mm; see [Findings, D2](#findings-2026-09-26-d2-track-model)).
 
 ## Alternatives considered
 
@@ -246,6 +249,87 @@ flat plateaus above. Version 1 had not shipped in a save, so D11a bumped
 - **Not established:** that the banding is gone at Far or that the lowland reads well; both
   are for the owner's Look Gate A.
 
+## Findings (2026-09-26, D2 track model)
+
+Recorded while implementing D2's core lane on branch `codex/d2-track-model`
+([`src/core/geometry/`](../../src/core/geometry/), [`src/core/track/`](../../src/core/track/),
+[`src/core/network/derive.ts`](../../src/core/network/derive.ts) and
+[`src/core/sim/`](../../src/core/sim/), with their tests). Automated evidence only, Node 26.7.0
+on macOS (Apple M5 Pro); the status of this ADR stays Proposed.
+- **Node z is integer millimetres** (open point 2, settled as a default by the
+  [#66](https://github.com/Kminkjan/infrastructurio/issues/66) amendment of 2026-09-26, to test
+  rather than an owner decision). Keys, `NodeRef` and the network view carry `zMm`; terrain stays
+  Int16 dm and converts at its boundary. 35‰ over a 5 m straight is exactly 175 mm. A piece
+  stores its grade as the exact rational (z1 − z0)·1000 / `lengthMm` ‰, so D4's 35‰ rule can
+  compare integers.
+- **Template counts, exact:** 12 straights; 120 base curves (start headings 0 and 1) and 720
+  oriented curves, 48 per primary start heading and 72 per secondary one; 24 shifts (12 primary,
+  12 secondary). Curves are generated for left turns on headings 0 and 1, mirrored for right
+  turns, then rotated five times; the generator rebuilds every oriented template's primitives
+  from the unit table and throws unless they land on the node the rotated axial offset names.
+- **Why 1 / 1 or 3 / 2 variants.** A curve ends at A·u0 + B·u1 with A, B ≥ T (the tangent
+  length). Adding a straight moves A or B by one step, so one template is needed per class of
+  the cone modulo the straight-step lattice: |det(step(d0), step(d1))| of them, which is 1 for
+  30°, 1 (primary) or 3 (secondary) for 60° and 2 for 90°. Variants are the nodes of the cell
+  T ≤ A < T + |s0|, T ≤ B < T + |s1|, numbered by length, so describing a curve from its other
+  end keeps its variant index (the generator throws if two variants ever tied). Every
+  secondary 60° variant 0 is a pure arc with no lead-in or lead-out: T = R/√3 = (R/15)·5√3
+  is a whole number of secondary steps (R/15 = 4, 6, 8, 12, 16, 24), so A = B = T already
+  lands on a node.
+- **Tests now prove the design-pass claims:** every oriented template closes on its node with
+  start, joint and end tangents within 1e-9 rad; `lengthMm` = round(float length × 1000) for
+  every template; and each of 12,164 nodes in the cones of all 432 curve families (windowed to
+  four straights past the cell) is reached by exactly one variant plus non-negative straights.
+  Shifts measure 37,832 mm (R 82,272 mm) and 43,685 mm (R 95,000 mm), both 8,333 mm/s; the α
+  literal 0.22992184100141289 matches 2·atan(√3/15) within 1e-15. The integer template table
+  hashes to `5565e541`, held by a golden test.
+- **Key format.** `S:q,r,z0:d:z1`, `C:q,r,z0:d:turn:R:variant:z1`, `H:q,r,z0:d:side:z1` with
+  z in mm and side `left` or `right`, written from the end with the smaller (q, r, z). Parsing
+  accepts only canonical integers (no leading zeros, no `-0`), so parse and format are exact
+  inverses. `demolish` also accepts a key written from the other end.
+- **Topology choice (D2).** A node holds one piece (buffer) or two with opposite outward
+  headings (through). Everything else is rejected as `kinked-join`, the only D2 topology code:
+  a kink, a second piece on the same side (a turnout, which D5 turns into a legal node), and
+  three or more pieces. The messages tell the three cases apart. No clearer D2 code exists in
+  the catalogue; `turnout-too-many-legs` belongs to D5 and means more than two on one side.
+- **Clearance choices.** Arcs are sampled with sagitta ≤ 0.05 m and each piece containing an
+  arc pads the threshold by 0.05 m, so two curves are judged up to 0.1 m stricter than exact.
+  Heights compare as the gap between the two chords' height ranges, also conservative. Only
+  pieces sharing a node with the same (q, r, z) are exempt, so stacked track over one (q, r) is
+  `tracks-too-close` while |Δz| < 6.5 m until D4 adds `vertical-clearance`. The reason names
+  the first new piece (in command order) that clashes and its closest partner, ties going to
+  the smaller key: the distance comes from that pair alone, so the reason never depends on
+  insertion order, and the quoted distance is that piece's worst clash (a crossing reads
+  0.00 m, not a smaller-keyed neighbour's 2.50 m).
+- **Other rule choices.** `out-of-bounds` covers malformed nodes (non-integer q, r or z), end
+  nodes off the map, and a centreline leaving `terrainBoundsM` while both nodes are on the map
+  (a test finds such a curve at the east edge). An unknown kind, an invalid heading or a zero
+  turn is `no-fit`. `limit-reached` counts specs that do not resolve as new, so it can win over
+  a geometry reason at the cap. `auto` resolves to ground until D4 infers structures, and a
+  reused key keeps its existing structure (whether a structure change is an edit is for D4).
+  Node heights must lie within ±10 km (`Z_LIMIT_MM` = 10,000,000 mm), or the spec is
+  `out-of-bounds`: far outside terrain's Int16 dm range (±3,276.7 m), and it keeps the grade
+  numerator Δz·1000 at most 2e10, so the rational stays exact. A command's shape (its
+  `type`, a build's `structure`, the `pieces` arrays) is a programmer contract and throws a
+  `TypeError`; only its contents (specs and keys) are player-reachable, and those are
+  rejected with a reason, never thrown.
+- **`undo-blocked` is not reachable from commands in D2.** Every track change goes through
+  history, so sequential undo and redo always restore a state that was valid. Its fixture
+  starts from a loaded world whose redo diff no longer fits (the path a save takes, since loads
+  never re-validate) and triggers it with `redo`; trains make it reachable in D10.
+- **Performance, a dev measurement and not a gate.** These numbers come from one run of an
+  uncommitted dev probe, so the repository does not reproduce them: the committed smoke
+  ([`sim/perf.test.ts`](../../src/core/sim/perf.test.ts)) times the same preview but asserts
+  only that the median of 7 runs is under 20 ms, and never times execute, undo or
+  `network()`. Previewing a 100-piece build over 4,900 existing pieces (to the 5,000 cap, so
+  every rule runs) took a median of 0.37 ms over 30 runs (max 0.81 ms); a 10-piece execute
+  and its undo took 0.44 and 0.43 ms; the first `network()` at 4,900 pieces took 13.6 ms. A
+  100-piece build over 5,000 existing pieces stops at `limit-reached` and times almost
+  nothing. The gate numbers are D12's.
+- **Not established:** planner feel and new/reused counting from drags (D3), grade, structure
+  and vertical clearance (D4), turnouts and diamonds (D5), any behaviour under traffic (D10), or
+  that clearance decisions at exact thresholds match across JavaScript engines.
+
 ## Revisit when
 
 - The D3 feel check finds construction unsatisfying for reasons that planner tuning, chained
@@ -267,3 +351,10 @@ flat plateaus above. Version 1 had not shipped in a save, so D11a bumped
   status unchanged, still Proposed.
 - 2026-09-26: D11a terrain generator version 2 findings added (rotated octaves, soft floor,
   re-recorded golden hash); status unchanged, still Proposed.
+- 2026-09-26: D2 track-model findings added (node z in integer mm as a default, exact
+  template counts and variant rule, key format, kinked-join and clearance choices); status
+  unchanged, still Proposed.
+- 2026-09-26: D2 findings amended after review (why secondary 60° variant 0 is a pure arc,
+  clearance names the closest partner, the ±10 km node-height bound, the command-shape
+  contract, the performance numbers marked as an uncommitted probe) and decision 6 and the
+  open-point line pointed at the mm finding; status unchanged, still Proposed.
