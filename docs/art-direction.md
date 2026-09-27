@@ -664,3 +664,148 @@ slice named.
 | Chimney smoke and shore foam (deferred in D11a: smoke anchors exist, nothing is drawn yet) | D11b (proposed) |
 | The sun's screen direction: D1's sun casts shadows right and slightly up the screen, while this page says lower right | Look Gate A (owner) |
 | Camera pitch: true isometric 35.264° or 30° (the owner deferred the choice at Look Gate A, 2026-09-26) | Look Gate B (owner) |
+
+## Terrain look variants (2026-09-27)
+
+**Status (2026-09-27, agent):** built on branch `codex/terrain-crisp-look` at `31bc24f`, from
+the D3 branch at `c699393`, for the owner to compare side by side. **Not judged:** the owner
+decides which variant, if any, becomes the look, and nothing here is a Look Gate result. The
+sections above are unchanged, including "Smooth shading for terrain" under
+[Materials](#materials), which variant `b` departs from (see the recommendation).
+
+**Owner feedback (2026-09-27, as relayed to the implementing agent):** asked what was off,
+the owner chose "Terrain too blurry/flat: The ground reads as soft green blotches; needs more
+crispness or lattice/field detail." Their screenshot was at about Region zoom over open
+grassland.
+
+**Diagnosis** (automated probes on the golden terrain, and agent captures):
+- **The relief is gentle.** Land spans 10.5–39.6 m; over its 132,550 nodes the slope has a
+  median of 3.6°, a 90th percentile of 7.5° and a maximum of 32.6°. Under the 42° sun and
+  the 1.1 hemisphere fill, a 3.6° slope moves the lit colour by roughly ±5% (calculated).
+  D11a's 70 m grass patches span grass shade → light, which is far more. So the patches read
+  and the hills don't.
+- **Nothing on the grass is crisper than 5 m.** Every D11a grass variation is baked per
+  lattice node and interpolated across the 5 m triangles.
+- **Splat edges blur at Default and Close.** The splat is bilinear at 1 m per texel, which is
+  6–12 px there (calculated).
+- **Two dead ends shaped the variants** (agent captures). Steepening the lighting alone turns
+  the Int16 heights' 1 dm steps into streaks along the lattice rows. Deepening the baked
+  hollow tint draws the map's small pits as dark blobs.
+
+**The variants.** Pick one with `?terrain=`, which combines with `?bookmark=1..4` and
+`&pitch=30`. With no parameter (or an unknown value) the page shows the recommended default,
+`b`. Code: [`terrain/terrainLook.ts`](../src/render/terrain/terrainLook.ts).
+
+| URL | Variant | What it adds |
+|---|---|---|
+| `?terrain=d11a` | D11a | nothing: the look Look Gate A scored, bit-identical (the splat GLSL, baked colours and normals were checked against `c699393`) |
+| `?terrain=a` | Crisp relief | slope gain on smooth normals, a calmer bake, crisp grass detail, crisp splat edges, 8× anisotropic filtering of the splat and AO maps |
+| `?terrain=b` | Faceted (default) | `a`, plus each lattice triangle lit as a facet from Region zoom in, and the tone patches at 70% |
+| `?terrain=c` | Contour hint | `b`, plus a faint line every 2.5 m of height |
+
+So `a` → `b` isolates the facets and `b` → `c` the contours. The ingredients:
+- **Slope gain** ([`relief.ts`](../src/render/art/shaderChunks/relief.ts)). The shading
+  normal's slope tangent t becomes t·5 / (1 + t·5), keeping its aspect, so gentle slopes
+  light about five times as steep and none passes 45°. The median 3.6° slope is lit as
+  13.5°. Flat ground keeps its exact colour. The normals come from heights smoothed twice
+  (a six-neighbour binomial filter), which removes the streaks; only shading uses them.
+- **Calmer bake.** The 70 m patches are at a quarter and the per-node jitter is gone. The soft
+  meadow on the highest ground drops to 0.15, because the flecks below replace it.
+- **Crisp grass detail** ([`groundDetail.ts`](../src/render/art/shaderChunks/groundDetail.ts)),
+  run by the splat on the grass before fields, roads, cobbles and forest floor are laid, so
+  none of it shows through them. Every cut is antialiased with `fwidth`:
+  - tone patches: 16 m noise broken up at 5 m, cut into lighter grass (18% toward grass
+    light) and darker grass (12% toward grass shade);
+  - static-grass tufts: dots about 0.5 m across in 35% of 1.6 m cells, fading out before they
+    shrink under 2 px;
+  - meadow flecks that grow denser from 22 m up to 34 m of height, so hilltops read by colour
+    too;
+  - soil on slopes steeper than 17–32° (noise picks the angle), so steep banks fray;
+  - a wet, darker soil line up to 0.25–0.45 m above the water, so shores end crisply.
+- **Crisp splat edges.** Fields and cobbles are cut at weight 0.5. Roads and yards are cut at
+  0.45 and keep their weight past it (yards stay at 0.55). The forest floor's edge frays with
+  a 4 m noise.
+- **Facets** (`b`, `c`). Each triangle's own plane normal, from screen derivatives of the
+  world position, is added on top of the steepened smooth normal (weight 2.5). It fades in
+  between 1.5 and 2.5 ppm, so Far and the 10 m LOD stay smooth.
+- **Contour hint** (`c`). The lines are one pixel wide at any zoom, every fourth (10 m) is
+  1.6× stronger, and they fade out where lines would crowd under 4 px apart.
+
+Colours come only from existing tokens (grass, grass light, grass shade, meadow, soil), so the
+palette table is unchanged and **no token was added**. Lighting, water, trees, buildings and
+props are untouched. Terrain generation, the mesh, picking and the sim are untouched too. The
+only per-frame work is one uniform write (the zoom).
+
+**Agent observations** (headless Chrome through Playwright, 1280 × 800 at DPR 1, Apple M5 Pro,
+ANGLE Metal; `CAPTURE=1 npx playwright test --project=capture`, images in the gitignored
+`test-results/terrain-look/<variant>/`). These are agent notes on the captures, not a look
+verdict:
+- **Region, open grassland** (`grassland-region`). D11a is the soft 70 m mottle the owner
+  described. In `a`–`c` the broad light and dark areas follow the hills, with crisp tone
+  patches and meadow flecks on top. `b` adds a fine triangle grain.
+- **Far** (`bookmark-4`, `grassland-far`). The blotches give way to landforms: the lake's
+  bowl, the river valley and the hills. River banks show sparse soil patches. `c`'s contours
+  are faint at this zoom.
+- **Default and Close** (`grassland-default`, `hill-*`, `bookmark-1`). `a` shows calm
+  two-tone patches and tufts. `b`'s facets read as a hand-cut low-poly ground that matches
+  the flat-shaded trees and roofs. The cobble square's edge is crisp, and the town close-up
+  is otherwise unchanged.
+- **Track over a hill** (`track-hill-*`, a 36-step run laid with the real track tool). The
+  hill rises 7.7 m over about 120 m, then drops 11.8 m over about 60 m to the lake. The
+  steep side now reads as a lit or shaded slope (faceted in `b` and `c`), but the gentle
+  climb still reads only modestly. `c`'s contours give the clearest height cue.
+- **Build mode** (`track-hill-build`): the lattice overlay draws exactly as in D11a, and in
+  `b` the facets coincide with its triangles.
+- **One yaw step** (`hill-default-yaw1`): the relief turns with the sun, and the detail stays
+  anchored to the ground.
+- No page errors or warnings in any run.
+
+**Frame cost** (agent development readings on the machine above; never cite them against the
+[acceptance gates](evidence/m4/2026-09-26-acceptance-gates.md), where only D13 runs count).
+Each figure is the mean ms per frame over 60 back-to-back renders closed by one 1-pixel
+`readPixels`, after 120 warm-up renders. Draw calls and programs are the same in every
+variant. The 2560 × 1600 viewport stands in for DPR 2: headless Chrome kept the canvas at its
+CSS size with `deviceScaleFactor: 2`.
+
+| View | D11a | a | b | c | Draw calls |
+|---|---|---|---|---|---|
+| Region grassland, 1280 × 800 | 0.44 | 0.72 | 0.77 | 0.77 | 114 |
+| Bookmark 3 (Region), 1280 × 800 | 0.47 | 0.65 | 0.66 | 0.68 | 117 |
+| Bookmark 4 (Far), 1280 × 800 | 0.72 | 0.99 | 1.00 | 1.01 | 120 |
+| Region grassland, 2560 × 1600 | 1.39 | 2.15 | 2.21 | 2.21 | 247 |
+
+- Across all captured views the variants add 0.08–0.33 ms per frame at 1280 × 800 and
+  0.36–0.82 ms at 2560 × 1600; the Region grassland is the dearest view.
+- A layer ablation at `31bc24f` (2560 × 1600, Region grassland, two runs that agreed within
+  0.03 ms) split `b`'s +0.79–0.81 ms as follows:
+  - tufts 0.13–0.14 and tone patches 0.12–0.14;
+  - flecks, soil and waterline 0.27–0.28, including the shared 5 m noise they then no longer
+    need;
+  - facets and anisotropic filtering about 0;
+  - 0.25–0.26 for the rest: the crisp splat cuts and fray noise, and the relief maths.
+- Each detail layer sits behind a uniform branch, so a zero amount costs nothing. D11b's
+  presets can drop layers without new programs.
+- The initial JS grew from 274.49 to 278.02 kB gzip.
+- `EXT_disjoint_timer_query_webgl2` is exposed, but its readings exceeded the synchronous
+  frame time, so GPU times are "n/a".
+
+**Recommendation (agent; the owner decides): `b`, the default.**
+- **Crispest at Default and Close.** Its facets are the lattice itself, the "lattice detail"
+  the feedback names. They line up with the build-mode overlay and share the flat-shaded
+  facets of the trees, roofs and rocks.
+- **Hills read at Far and Region**, through the slope gain it shares with `a`.
+- **Palette untouched.** No token added, and flat ground keeps its D11a colour.
+- **Facets measured at about 0 cost** over `a`.
+- **Against it:** it departs from "Smooth shading for terrain" (Materials above), which
+  needs a dated amendment if the owner keeps it. Its facets also carry the 1 dm height steps'
+  irregularity.
+- **`c`** is the strongest cue for laying track over hills. But the lines read like a map,
+  something no physical diorama has. A build-mode-only contour hint is a possible middle
+  ground (not built).
+- **`a`** is the most conservative step from D11a.
+
+**Open (not established here):**
+- The owner's choice. After it, the losing variants go or become presets, and the chosen
+  look's rationale joins the sections above in a dated amendment.
+- Legibility was not assessed. The mid laptop, real DPR 2 and the Low preset are unmeasured.
+- Whether the owner reads the relief as hills and the detail as calm.

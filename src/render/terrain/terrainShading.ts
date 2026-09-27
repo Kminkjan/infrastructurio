@@ -28,26 +28,87 @@ const SOIL_BY_RING = [0, 0.7, 0.45, 0.2] as const;
 /** Grass patches: value-noise cells of about 70 m, in columns and rows. */
 const PATCH_CELL_COLS = 14;
 const PATCH_CELL_ROWS = 16;
-/**
- * Per-node jitter on top of the patches, so flat ground is not one flat colour.
- * Kept small: stronger jitter outlines the lattice triangles as mottling, and
- * the terrain should read smooth (the lattice overlay shows the grid on demand).
- */
-const JITTER = 0.06;
 /** Baked-AO window: ±5 nodes (about 25 m) around each node. */
 const AO_RADIUS = 5;
-/** A node this far (dm) below its surroundings gets the full AO darkening. */
-const AO_FULL_DM = 30;
-const AO_STRENGTH = 0.22;
 /** Low ground is slightly darker than high ground overall. */
 const HEIGHT_SHADE_MIN = 0.93;
 /** Bed depth (dm) at which the underwater colour is fully deep. */
 const BED_DEEP_DM = 25;
-const MEADOW_STRENGTH = 0.4;
 
-export function computeTerrainShading(t: Terrain): TerrainShading {
+/**
+ * The baked shading recipe. `D11A_TERRAIN_COLOURS` is the look Look Gate A
+ * scored; the terrain look variants (2026-09-27) calm the 70 m patches, drop
+ * the per-node jitter and the soft meadow (their shader draws crisp detail
+ * instead), and smooth the heights behind the normals, because their relief
+ * shading steepens slopes and would otherwise amplify the 1 dm height steps
+ * into streaks along the lattice rows.
+ */
+export interface TerrainColourOptions {
+  /**
+   * Passes of a six-neighbour binomial filter (weights 2 : 1 × 6, missing
+   * neighbours replaced by the node) on the heights behind the normals only;
+   * 0 is D11a's exact least-squares normal of the Int16 heights.
+   */
+  readonly normalSmoothing: number;
+  /** Share of the 70 m grass patch noise: 1 spans shade → light grass (D11a). */
+  readonly patchAmount: number;
+  /**
+   * Per-node jitter on top of the patches, so flat ground is not one flat colour.
+   * Kept small in D11a: stronger jitter outlines the lattice triangles as mottling.
+   */
+  readonly jitter: number;
+  /** Meadow on the highest ground, blended over the top 40% of the land's height span. */
+  readonly meadowStrength: number;
+  /** Darkening of a node this far (`aoFullDm`) below its ±25 m mean. */
+  readonly aoStrength: number;
+  readonly aoFullDm: number;
+  /** Lightening of a node `ridgeFullDm` above its ±25 m mean (0 in D11a). */
+  readonly ridgeStrength: number;
+  readonly ridgeFullDm: number;
+}
+
+export const D11A_TERRAIN_COLOURS: TerrainColourOptions = {
+  normalSmoothing: 0,
+  patchAmount: 1,
+  jitter: 0.06,
+  meadowStrength: 0.4,
+  aoStrength: 0.22,
+  aoFullDm: 30,
+  ridgeStrength: 0,
+  ridgeFullDm: 30,
+};
+
+export function computeTerrainShading(t: Terrain, colours: TerrainColourOptions = D11A_TERRAIN_COLOURS): TerrainShading {
   const waterDistance = computeWaterDistance(t);
-  return { normals: computeNodeNormals(t), colors: computeNodeColors(t, waterDistance), waterDistance };
+  const heights = colours.normalSmoothing > 0 ? smoothHeightsDm(t, colours.normalSmoothing) : t.heightsDm;
+  return { normals: computeNodeNormals(t, heights), colors: computeNodeColors(t, waterDistance, colours), waterDistance };
+}
+
+/**
+ * Heights (dm, float) after `passes` of a six-neighbour binomial filter:
+ * h′ = (2·h + Σ neighbours) / 8, a missing edge neighbour counting as the node
+ * itself. Presentation only (shading normals); the sim's heights never change.
+ */
+export function smoothHeightsDm(t: Terrain, passes: number): Float64Array {
+  const { columns, rows } = t;
+  let from = Float64Array.from(t.heightsDm);
+  let to = new Float64Array(from.length);
+  for (let pass = 0; pass < passes; pass++) {
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < columns; col++) {
+        const index = row * columns + col;
+        const h0 = from[index] ?? 0;
+        let sum = 2 * h0;
+        for (let n = 0; n < 6; n++) {
+          const ni = neighbourIndex(columns, rows, col, row, n);
+          sum += ni >= 0 ? (from[ni] ?? 0) : h0;
+        }
+        to[index] = sum / 8;
+      }
+    }
+    [from, to] = [to, from];
+  }
+  return from;
 }
 
 /** Multi-source breadth-first search over the six-neighbour lattice from every water node. */
@@ -85,10 +146,12 @@ export function computeWaterDistance(t: Terrain, cap: number = WATER_DISTANCE_CA
  * i.e. solve (Σ u_i·u_iᵀ)·∇h = Σ u_i·(h_i − h_0)/a. In the interior the matrix
  * is 3·I. A missing edge neighbour is mirrored through the node
  * (2·h_0 − h_opposite); a pair with neither side on the map (map corners) is
- * left out of the sum. Either way the result is exact on a plane.
+ * left out of the sum. Either way the result is exact on a plane. `heightsDm`
+ * defaults to the terrain's own (the smoothed heights of a terrain look variant
+ * otherwise).
  */
-export function computeNodeNormals(t: Terrain): Float32Array {
-  const { columns, rows, heightsDm } = t;
+export function computeNodeNormals(t: Terrain, heightsDm: ArrayLike<number> = t.heightsDm): Float32Array {
+  const { columns, rows } = t;
   const normals = new Float32Array(columns * rows * 3);
   const units = [0, 1, 2, 3, 4, 5].map((i) => unit(neighbourHeading(i)));
   const n = new Vector3();
@@ -142,11 +205,11 @@ export function computeNodeNormals(t: Terrain): Float32Array {
  * Baked vertex colours, all from the palette and mixed in linear space:
  * grass patches between shade, base and light plus a little per-node jitter;
  * meadow on the highest ground; soil on the rings nearest water; darker in
- * hollows (baked AO) and slightly darker low down; and an underwater bed that
- * darkens toward deep water, which shows as a wet band where the shoreline
- * triangles cross the water surface.
+ * hollows (baked AO), lighter on ridges (off in D11a) and slightly darker low
+ * down; and an underwater bed that darkens toward deep water, which shows as a
+ * wet band where the shoreline triangles cross the water surface.
  */
-export function computeNodeColors(t: Terrain, waterDistance: Uint8Array): Float32Array {
+export function computeNodeColors(t: Terrain, waterDistance: Uint8Array, o: TerrainColourOptions = D11A_TERRAIN_COLOURS): Float32Array {
   const { columns, rows, heightsDm, waterLevelDm } = t;
   const colors = new Float32Array(columns * rows * 3);
   const mean = localMeanHeights(t, AO_RADIUS);
@@ -177,16 +240,21 @@ export function computeNodeColors(t: Terrain, waterDistance: Uint8Array): Float3
         const depth = smoothstep(0, BED_DEEP_DM, waterLevelDm - h);
         c.copy(soil).lerp(deep, 0.35 + 0.5 * depth).multiplyScalar(0.85);
       } else {
-        const v = clamp01(patchNoise(col, row) + JITTER * (hash01(col, row, 0x5eed) * 2 - 1));
+        const noise = patchNoise(col, row);
+        // At patchAmount 1 the noise is used as is, so D11a's colours stay bit-identical.
+        const patch = o.patchAmount === 1 ? noise : 0.5 + (noise - 0.5) * o.patchAmount;
+        const v = clamp01(patch + o.jitter * (hash01(col, row, 0x5eed) * 2 - 1));
         if (v < 0.5) c.copy(grassShade).lerp(grass, v * 2);
         else c.copy(grass).lerp(grassLight, (v - 0.5) * 2);
         const high = (h - minLand) / landSpan;
-        c.lerp(meadow, MEADOW_STRENGTH * smoothstep(0.6, 1, high));
+        c.lerp(meadow, o.meadowStrength * smoothstep(0.6, 1, high));
         const ring = waterDistance[index] ?? WATER_DISTANCE_FAR;
         const soilWeight = ring < SOIL_BY_RING.length ? (SOIL_BY_RING[ring] ?? 0) : 0;
         if (soilWeight > 0) c.lerp(soil, soilWeight);
-        const hollow = smoothstep(0, AO_FULL_DM, (mean[index] ?? h) - h);
-        c.multiplyScalar((1 - AO_STRENGTH * hollow) * (HEIGHT_SHADE_MIN + (1 - HEIGHT_SHADE_MIN) * high));
+        const relief = (mean[index] ?? h) - h;
+        const hollow = smoothstep(0, o.aoFullDm, relief);
+        const ridge = smoothstep(0, o.ridgeFullDm, -relief);
+        c.multiplyScalar((1 - o.aoStrength * hollow) * (1 + o.ridgeStrength * ridge) * (HEIGHT_SHADE_MIN + (1 - HEIGHT_SHADE_MIN) * high));
       }
       colors[3 * index] = c.r;
       colors[3 * index + 1] = c.g;

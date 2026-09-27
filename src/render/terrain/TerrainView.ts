@@ -42,9 +42,10 @@ export class TerrainView {
   private readonly water1: Mesh | undefined;
   private lod: TerrainLod = 0;
 
-  constructor(terrain: Terrain, material: Material, waterMaterial: Material) {
+  /** `colours` is the baked shading recipe (a terrain look variant's; D11a's when omitted). */
+  constructor(terrain: Terrain, material: Material, waterMaterial: Material, colours?: Parameters<typeof computeTerrainShading>[1]) {
     this.group.name = "terrain";
-    const shading = computeTerrainShading(terrain);
+    const shading = computeTerrainShading(terrain, colours);
     this.shading = shading;
     const counts = chunkCounts(terrain);
     this.countX = counts.x;

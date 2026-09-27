@@ -34,6 +34,7 @@ import { TerrainView } from "../render/terrain/TerrainView";
 import { raycastTerrain, sampleTerrainHeightM } from "../render/terrain/heightfieldRay";
 import { LatticeOverlay } from "../render/terrain/latticeMaterial";
 import { terrainLodForPpm, terrainWorldBounds } from "../render/terrain/terrainGeometry";
+import { TERRAIN_LOOKS, applyTerrainLook, setTerrainAnisotropy, terrainChunkOptions } from "../render/terrain/terrainLook";
 import { FlashView, GhostView, HighlightView } from "../render/track/GhostView";
 import { SnapRing } from "../render/track/SnapRing";
 import { TrackView } from "../render/track/TrackView";
@@ -84,13 +85,16 @@ document.addEventListener("visibilitychange", () => scheduler.handleVisibilityCh
 
 const scene = new Scene();
 scene.background = new Color(palette.haze);
+// ?terrain=d11a|a|b|c: the terrain look variant (d11a is the look Look Gate A scored; see terrainLook.ts).
+const look = TERRAIN_LOOKS[params.terrain];
 const uniforms = createArtUniforms(terrainWorldBounds(terrain));
+applyTerrainLook(uniforms, look, terrain.waterLevelDm / 10);
 const materials = createWorldMaterials(uniforms);
 const trackMaterials = createTrackMaterials(uniforms);
-const lattice = new LatticeOverlay(reducedMotion, { terrain: terrainChunks(uniforms), water: waterChunks(uniforms) });
+const lattice = new LatticeOverlay(reducedMotion, { terrain: terrainChunks(uniforms, terrainChunkOptions(look)), water: waterChunks(uniforms) });
 let registry = new AssetRegistry();
 registerSceneryAssets(registry);
-let terrainView = new TerrainView(terrain, lattice.material, lattice.waterMaterial);
+let terrainView = new TerrainView(terrain, lattice.material, lattice.waterMaterial, look.colours);
 let sceneryView = new SceneryView(scenery, terrain, registry, materials, uniforms);
 scene.add(terrainView.group, sceneryView.group);
 const lighting = new SceneLighting(scene);
@@ -119,6 +123,11 @@ const host = new RendererHost(canvas, viewport, (size) => {
 });
 const controller = new CameraController({ canvas, camera, scheduler, bounds: box, home, reducedMotion });
 const perf = new PerfMonitor(document.body, host.renderer);
+/** The terrain look's filtering on the splat and AO maps; before their first upload (the first frame). */
+function applyTerrainFiltering(): void {
+  setTerrainAnisotropy([uniforms.splat.uSplatMap.value, uniforms.splat.uAoMap.value], look, host.renderer.capabilities.getMaxAnisotropy());
+}
+applyTerrainFiltering();
 
 // Track and construction overlays.
 const multiDraw = !forceChunkedTrack && host.renderer.extensions.has("WEBGL_multi_draw");
@@ -273,8 +282,9 @@ function rebuildBakedColours(): void {
   registry.dispose();
   registry = new AssetRegistry();
   registerSceneryAssets(registry);
-  terrainView = new TerrainView(terrain, lattice.material, lattice.waterMaterial);
+  terrainView = new TerrainView(terrain, lattice.material, lattice.waterMaterial, look.colours);
   sceneryView = new SceneryView(scenery, terrain, registry, materials, uniforms);
+  applyTerrainFiltering();
   scene.add(terrainView.group, sceneryView.group);
   trackMaterials.stripe.uTrackStripeColor.value.setHex(palette.sleeper);
   trackView.invalidate();
@@ -335,6 +345,7 @@ scheduler.onFrame((frame) => {
   uniforms.sway.uTime.value = ambientTimeS;
   sceneryView.update(camera.ppm, ambientTimeS);
   terrainView.setLod(terrainLodForPpm(camera.ppm));
+  uniforms.relief.uReliefPpm.value = camera.ppm;
   lighting.update(camera, box);
   // Resize the buffer in the frame that draws into it, so no blank canvas is painted.
   host.syncSize();
@@ -361,7 +372,11 @@ if (import.meta.env.DEV) {
   Object.assign(window, {
     __diorama: {
       scheduler,
+      scene,
       camera,
+      /** The shared art uniforms (agent lookdev probes; the terrain look's relief and detail live here). */
+      uniforms,
+      look,
       perf,
       terrain,
       scenery,

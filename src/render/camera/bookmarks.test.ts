@@ -3,6 +3,7 @@ import { DIORAMA_SEED, generateDiorama } from "../../core/scenarios/baltic-diora
 import { DEFAULT_TERRAIN_SIZE, generateTerrain } from "../../core/terrain";
 import { LOOK_AB_PITCH_RAD, MID_BAND_PPM, dioramaBookmarks, focusTarget, lakePoints, parseLookdevParams, showTweakPanel } from "./bookmarks";
 import { sampleTerrainHeightM } from "../terrain/heightfieldRay";
+import { DEFAULT_TERRAIN_LOOK } from "../terrain/terrainLook";
 import { ISO_PITCH_RAD, type IsoView, NAMED_ZOOMS, lodBandForPpm, worldToScreen } from "./isoMath";
 import { simToWorld } from "../coords";
 
@@ -19,10 +20,15 @@ describe("lookdev parameters", () => {
   });
 
   it("reads bookmarks 1–4 and the tweak switch, ignoring anything else", () => {
-    expect(parseLookdevParams("?bookmark=3&tweak=1")).toEqual({ bookmark: 3, pitch: ISO_PITCH_RAD, tweak: true });
+    expect(parseLookdevParams("?bookmark=3&tweak=1")).toEqual({ bookmark: 3, pitch: ISO_PITCH_RAD, tweak: true, terrain: DEFAULT_TERRAIN_LOOK });
     for (const bad of ["?bookmark=0", "?bookmark=5", "?bookmark=x", ""]) expect(parseLookdevParams(bad).bookmark).toBeUndefined();
     expect(parseLookdevParams("?tweak=0").tweak).toBe(false);
     for (const unset of ["", "?tweak=", "?tweak=yes", "?tweak=2"]) expect(parseLookdevParams(unset).tweak).toBeUndefined();
+  });
+
+  it("reads the terrain look variant, falling back to the recommended default", () => {
+    for (const id of ["d11a", "a", "b", "c"] as const) expect(parseLookdevParams(`?terrain=${id}&bookmark=2`).terrain).toBe(id);
+    for (const other of ["", "?terrain=", "?terrain=A", "?terrain=d", "?terrain=current"]) expect(parseLookdevParams(other).terrain).toBe(DEFAULT_TERRAIN_LOOK);
   });
 
   it("shows the tweak panel only with ?tweak=1", () => {

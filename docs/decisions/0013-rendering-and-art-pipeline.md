@@ -266,6 +266,51 @@ look verdict: Look Gate A is the owner's.
   camera), cast shadows fall to the right and slightly up the screen, while art direction
   says they fall toward the lower right. Which one is intended is a Look Gate A question.
 
+## Findings (2026-09-27, terrain look variants)
+
+Recorded on branch `codex/terrain-crisp-look` at `31bc24f` (from the D3 branch at
+`c699393`) after the owner found the ground "too blurry/flat" (relayed to the implementing
+agent). Automated tests (Vitest in Node) and an **agent** browser run (headless Chrome through
+Playwright, 1280 × 800 at DPR 1, Apple M5 Pro, ANGLE Metal). The status of this ADR stays
+**Proposed**; nothing here is a look verdict, and the owner chooses among the variants
+([art direction](../art-direction.md#terrain-look-variants-2026-09-27)).
+- **Decision 3 held, with two chunk additions.**
+  - A `relief` chunk ([`relief.ts`](../../src/render/art/shaderChunks/relief.ts), keys
+    `terrain-relief-v1` and `-facets`) steepens the shading normal's slope after three's
+    normal chunk. It optionally adds each lattice triangle's plane as facet detail and draws
+    a contour hint.
+  - The splat chunk gained opt-in crisp edges and ground detail
+    ([`groundDetail.ts`](../../src/render/art/shaderChunks/groundDetail.ts)), as
+    `terrain-splat-v3-crisp-detail`.
+  - Without options the splat is D11a's `terrain-splat-v2`, byte-identical. Each new piece
+    has a float64 mirror under test.
+  - Still one terrain material. The program count in the captures is unchanged (11–13), and
+    so are the draw calls.
+- **"Smooth terrain" is contested by variant `b`,** which adds facet shading as detail on top
+  of smooth normals. That is a proposed departure pending the owner's choice; variant `a`
+  keeps smooth-only shading. The facets are not toon banding: the lighting stays continuous
+  Lambert.
+- **Decision 6 held.** No post-processing: everything is in the terrain material. The
+  lighting recipe, palette values and data-texture resolutions are unchanged, and no token
+  or texture was added.
+  - The variants set 8× anisotropic filtering on the splat and AO maps. Its measured cost was
+    about 0.
+  - The variants' shading normals come from heights smoothed twice (presentation only). Under
+    the slope gain, the Int16 heights' 1 dm steps otherwise streak along the lattice rows.
+- **Cost** (agent development readings, not gate B), from back-to-back renders closed by a
+  `readPixels`:
+  - 0.08–0.33 ms more per frame at 1280 × 800 across the captured views (0.44 → 0.72–0.77 ms
+    at Region grassland);
+  - 0.36–0.82 ms more at 2560 × 1600;
+  - draw calls unchanged.
+  - Every detail layer sits behind a uniform branch, so D11b's presets can drop layers at no
+    program cost.
+  - The initial JS grew by 3.5 kB gzip (274.49 → 278.02 kB).
+  - `EXT_disjoint_timer_query_webgl2` readings exceeded the synchronous frame time on ANGLE
+    Metal, so no GPU times are recorded.
+- **Not established:** the owner's reading of any variant, the mid laptop, real DPR 2
+  (headless Chrome kept the canvas at its CSS size) and the Low preset.
+
 ## Revisit when
 
 - Look Gate A scores low on mood, cohesion or originality in a way parameters cannot fix
@@ -283,3 +328,6 @@ look verdict: Look Gate A is the owner's.
 - 2026-09-26: D11a lookdev findings added (asset registry, budgets, six materials, composed
   chunks, tone-mapped edge fade, data textures, agent draw calls); status unchanged, still
   Proposed.
+- 2026-09-27: terrain look variant findings added (a relief chunk, the splat's crisp and
+  detail options, contested smooth-terrain shading in variant `b`, agent frame costs); status
+  unchanged, still Proposed.
