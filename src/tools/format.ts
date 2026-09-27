@@ -1,4 +1,4 @@
-import type { Counts, NodeRef, Reason, TrackPlan } from "../core/sim/api";
+import { type Counts, type NodeRef, type PieceSpec, type Reason, type TrackPlan, resolvePiece } from "../core/sim/api";
 import type { GradeLevel, TooltipMetrics, TooltipModel } from "./types";
 
 /**
@@ -14,9 +14,8 @@ import type { GradeLevel, TooltipMetrics, TooltipModel } from "./types";
 export const HINT_LINE = "Hold Ctrl (⌥ on Mac) for precision · [ ] change height";
 export const PRECISION_CONTROLS = "wheel radius · Q/E end heading";
 
-/** Grade colour bands in ‰: green ≤ 1.5 %, amber ≤ 3 %, red above the 35‰ maximum. */
+/** Grade colour bands in ‰: green ≤ 1.5 %, amber up to the 35‰ (3.5 %) maximum, red above it. */
 export const GRADE_GREEN_MAX_PERMILLE = 15;
-export const GRADE_AMBER_MAX_PERMILLE = 30;
 export const MAX_GRADE_PERMILLE = 35;
 
 /**
@@ -40,9 +39,25 @@ export function formatLength(mm: number): string {
   return `${Math.round(mm / 1000)} m`;
 }
 
-/** ‰ as a percentage with one decimal: 12 → "1.2 %". */
+/** ‰ as a percentage with one decimal, rounded once (half up): 12.47 → "1.2 %". Pass the unrounded grade. */
 export function formatGrade(permille: number): string {
   return `${(Math.round(Math.abs(permille)) / 10).toFixed(1)} %`;
+}
+
+/**
+ * The steepest piece's grade in ‰, unrounded: the largest exact |rise| /
+ * length among the pieces, the value the planner's label rounds once. The
+ * plan's `maxGradePermille` is already rounded to 0.1 ‰, so rounding it
+ * again could disagree with the label (12.47 ‰ → 12.5 → "1.3 %" beside
+ * "1.2%"). 0 for no pieces.
+ */
+export function steepestPermille(pieces: readonly PieceSpec[]): number {
+  let steepest = 0;
+  for (const spec of pieces) {
+    const res = resolvePiece(spec);
+    if (res.ok) steepest = Math.max(steepest, Math.abs(res.piece.gradePermille.num) / res.piece.gradePermille.den);
+  }
+  return steepest;
 }
 
 /** A signed height in metres, to 0.1 m with trailing zeros trimmed: "+6 m", "−0.5 m", "0 m". */
@@ -56,10 +71,11 @@ export function formatHeight(mm: number): string {
 }
 
 export function formatMetrics(plan: TrackPlan, endHeightMm: number): TooltipMetrics {
+  const grade = steepestPermille(plan.pieces);
   return {
     length: `Length ${formatLength(plan.lengthMm)}`,
-    grade: `Grade ${formatGrade(plan.maxGradePermille)}`,
-    gradeLevel: gradeLevel(plan.maxGradePermille),
+    grade: `Grade ${formatGrade(grade)}`,
+    gradeLevel: gradeLevel(grade),
     minRadius: `Min radius ${plan.minRadiusM === null ? "—" : `${plan.minRadiusM} m`}`,
     endHeight: `End height ${formatHeight(endHeightMm)}`,
   };

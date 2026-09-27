@@ -1,4 +1,4 @@
-import { type NetworkNode, type NetworkView, type PlanPointMm, opposite, toWorld } from "../core/sim/api";
+import { type NetworkNode, type NetworkView, type PlanPointMm, toWorld } from "../core/sim/api";
 import type { ToolPick } from "./types";
 
 /**
@@ -37,7 +37,7 @@ export function planPointOfNode(q: number, r: number): PlanPointMm {
 export function pickOfNetworkNode(network: NetworkView, node: NetworkNode): ToolPick {
   const at = { q: node.q, r: node.r, zMm: node.zMm };
   const pointMm = planPointOfNode(node.q, node.r);
-  if (node.kind === "buffer") return { kind: "endpoint", node: at, pointMm, continueHeading: opposite(node.axis) };
+  if (node.kind === "buffer") return { kind: "endpoint", node: at, pointMm };
   const port = node.ports.a[0] ?? node.ports.b[0];
   const piece = port === undefined ? undefined : network.pieces[port.piece];
   return piece === undefined ? { kind: "track", node: at, pointMm } : { kind: "track", node: at, pointMm, pieceKey: piece.key };
