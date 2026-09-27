@@ -536,7 +536,8 @@ other tools are planned (R5).*
       resting mouse; a real pointer move takes the target back.
   - Tools never raycast or read the DOM.
 - **`ctx` is read-only:** the current `NetworkView`, `sim.planTrack`, the memoized preview, the
-  terrain height at a node, and settings (height step, radius cap).
+  ground height at a node (the planner's `groundMmAt`: the terrain, or the water surface over a
+  lower bed), and settings (height step, radius cap).
 - **Effects are data**, interpreted by the app:
   - execute a command, through the single command gateway (tools never call `execute`);
   - set the ghost: new is white, reused cyan, invalid red and dashed; elevated ghosts get drop
@@ -563,11 +564,18 @@ other tools are planned (R5).*
     track chains on outward. An undo or redo that removes the node a chain leaves from
     returns the tool to Idle. A commit's "Built. Pieces: …" leads the announcement of the
     re-plan that follows it.
-  - **Height (tool defaults, open to the owner's feel check).** One step is 1 m. The end sits
-    that many steps above the terrain at the end node (ground-following), so a drag across the
-    land lays track on the ground; PgUp/PgDn, `]`/`[` and Shift+wheel move it. Anchoring on
-    track starts at its height above ground, and chaining keeps the steps. A plan ending on an
-    existing node within half a step of its height takes that height (not in precision).
+  - **Height.** Track follows the ground (owner decision, 2026-09-27, for D3; D4 revisits it
+    with the 35‰ rule and earthworks): the planner lays every node on the ground plus an offset
+    it ramps from the start's to the end's ([simulation model §8](simulation-model.md#8-planner)),
+    and the tool sets only the end. The rest are tool defaults, open to the owner's feel check.
+    One step is 1 m. The end sits that many steps above the ground at the end node, so with no
+    steps a drag lays the whole track on the ground, hills included; PgUp/PgDn, `]`/`[` and
+    Shift+wheel move it. Anchoring on track starts at its height above ground, and chaining
+    keeps the steps. A plan ending on an existing node within half a step of its height takes
+    that height (not in precision). The tooltip's grade is the steepest piece's, so a level
+    drag over a hill shows its flanks. Curves and shifts are single pieces with one grade, so
+    only their ends follow the ground
+    ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-d3-ground-following)).
   - **Precision** (held): magnetism off, the wheel steps the radius class (from 180 m) and Q/E
     the end heading; the tooltip adds the planner's live label. Each activation starts with
     precision off unless the modifier is held.

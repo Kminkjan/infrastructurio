@@ -274,8 +274,11 @@ and arcs of the `NetworkView` render prims. Curves are sampled through
   dimensions and arc sampling are implemented in
   [`render/track/trackGeometry.ts`](../src/render/track/trackGeometry.ts). Choices the table
   leaves open: sleepers are spread evenly per piece at round(L / 0.9 m); rails stand on the
-  sleepers (0.14–0.30 m); the whole track is lifted 5 cm (render-only) so the ballast top never
-  z-fights the terrain it lies on; the far-LOD stripe is a centre band ±0.85 m wide in the
+  sleepers (0.14–0.30 m); the whole track is lifted (render-only) so the ballast top never
+  z-fights the terrain it lies on: 5 cm at first, 15 cm since 2026-09-27, when track began to
+  follow the ground and the terrain between nodes could otherwise cover the rails (measured in
+  the [ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-d3-ground-following));
+  the far-LOD stripe is a centre band ±0.85 m wide in the
   sleeper colour (a vertex attribute and the `trackStripe` chunk), and the rails stay. Turnout
   timbers, blades and earthworks are not built yet.
 
@@ -420,12 +423,13 @@ true bogies.
   - Colours: new white, reused cyan, invalid red and dashed.
   - Elevated ghosts show drop lines every 20 m and end-height tags.
 - **Handles** are screen-constant billboards drawn at 6–8 px and picked within 14 px.
-- **D3 status (2026-09-27; look not judged):** the ghost is a 2.6 m ribbon 0.4 m above the
-  track height (clear of the rail tops), in two passes at 0.7 (depth-tested) and 0.2
+- **D3 status (2026-09-27; look not judged):** the ghost is a 2.6 m ribbon 5 cm above the
+  drawn rail tops (0.4 m above the track height at first, 0.5 m since the 15 cm track lift of
+  2026-09-27), in two passes at 0.7 (depth-tested) and 0.2
   (see-through), dashed 3 m on, 2 m off when invalid; drop lines (ghost-valid white, 0.7) stand
   every 20 m of plan length and at the end wherever the ghost is more than 0.5 m above the
-  terrain, and an elevated ghost tags both ends with their height above the terrain in
-  parchment labels. Existing pieces a rejection names are overlaid in the invalid red. An undo
+  terrain (the water surface over water, since 2026-09-27), and an elevated ghost tags both ends
+  with their height above it in parchment labels. Existing pieces a rejection names are overlaid in the invalid red. An undo
   or redo flashes the added pieces in the snap green and the removed ones in red for 400 ms
   (held, not faded, under reduced motion). The snap ring is a 9 px screen-constant billboard in
   the snap green: filled on an endpoint, hollow on a free node, with a fork glyph on track.

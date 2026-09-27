@@ -328,9 +328,10 @@ and its [version 2 note](decisions/0010-triangular-lattice-track-geometry.md#fin
 new/reused counts and a label. `build-track` then carries those pieces.
 
 **Status 2026-09-27 (automated, D3, PR #82):** implemented in
-[`track/planner.ts`](../src/core/track/planner.ts), with 48 test cases in
+[`track/planner.ts`](../src/core/track/planner.ts), with 53 test cases in
 [`planner.test.ts`](../src/core/track/planner.test.ts) (a 23-case drag table, ranking,
-elevation and height-pinning tests, seeded properties), a brute-force two-bend oracle in
+elevation, height-pinning and ground-following tests, seeded properties, and a probe on the
+diorama map), a brute-force two-bend oracle in
 [`planner.twoBend.test.ts`](../src/core/track/planner.twoBend.test.ts), and a planner measurement in
 [`sim/perf.test.ts`](../src/core/sim/perf.test.ts). The choices this section left open are
 under "As built" below; numbers and limits are in the
@@ -350,10 +351,16 @@ Whether dragging feels right is not established: that is the owner's D3 feel che
 - **Two-bend fit.** When the drag ends on an existing port, position and heading are both
   fixed. The planner then fits two bends with straights between them, to join the port.
 - **Magnetism.** The drag snaps to existing endpoints and ports within 3 nodes.
-- **Elevation.** The height change is spread over the nodes in proportion to cumulative
-  length, using largest-remainder rounding to integer mm, between the heights of existing
-  nodes the drag passes ("As built" below). The start z comes from the snapped node; the
-  end z comes from the height keys.
+- **Elevation: track follows the ground** (owner decision, 2026-09-27, for D3; D4 revisits
+  it with the 35‰ rule and earthworks). Each node sits on the ground (the terrain, or the
+  water surface over a lower bed) plus an offset. The offset, not the absolute height, is
+  spread over the nodes in proportion to cumulative length, using largest-remainder
+  rounding to integer mm, between the heights of existing nodes the drag passes ("As built"
+  below). The start z comes from the snapped node; the end z comes from the height keys,
+  as steps above the ground at the end node. With no height steps a drag lies on the
+  ground at every node. Until 2026-09-27 the absolute height change was spread instead,
+  so hills between the ends swallowed the track
+  ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-d3-ground-following)).
 - **Counter.** Keys already present count as reused, the rest as new. An all-reused drag is
   a no-op: `execute` changes nothing and records no history entry.
 - **Precision mode** (Ctrl, or ⌥ on macOS):
@@ -388,14 +395,27 @@ Whether dragging feels right is not established: that is the owner's D3 feel che
   - **Precision:** curves only of the chosen radius class. An end heading keeps only
     single-bend fits that end on it.
   - **Elevation:** an intermediate node where existing track has a node within 6.5 m (the
-    clearance height) of the line from the last pinned node to the end takes that node's
-    height, so a drag that retraces or extends sloped track reuses the pieces it overlaps.
-    From 6.5 m on, the drag passes over or under and keeps its own height. With several
-    heights in reach, a height whose incoming piece already exists wins, then one whose
-    outgoing piece does, then the nearest, then the lower. Between pins (start, pinned
-    nodes, end): largest remainder over the per-piece rises, weighted by piece length, ties
-    to the earlier piece. A descent mirrors the climb
+    clearance height) of the plan's reference there takes that node's height, so a drag
+    that retraces or extends sloped track reuses the pieces it overlaps. The reference is
+    the ground plus the offset on the line, by length, from the last pinned node's offset
+    to the end's (since 2026-09-27; before, the absolute height on that line). From 6.5 m
+    on, the drag passes over or under and keeps its own height. With several heights in
+    reach, a height whose incoming piece already exists wins, then one whose outgoing
+    piece does, then the nearest, then the lower. Between pins (start, pinned nodes, end):
+    largest remainder over the per-piece offset changes, weighted by piece length, ties to
+    the earlier piece; each node is its ground plus its offset. A descent mirrors the climb
     ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-d3-height-pinning)).
+  - **Ground following** (the rule is the owner's decision of 2026-09-27; these details are
+    defaults): the ground is `groundMmAt` in [`terrain.ts`](../src/core/terrain.ts), which
+    the app also gives the track tool, so a plan's ends and inner nodes agree. A node off
+    the map takes the ground of the last on-map node before it on the path, else the first
+    after it. On flat terrain the profile is the old one exactly. Limits, measured on the
+    diorama map
+    ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-d3-ground-following)):
+    only nodes follow the ground, so a curve or shift, one piece with one grade (shifts
+    43.7 m, curves a median 68 m and up to 200 m there), can still pass under a hill or over
+    a hollow between its ends; and about half the pieces of a ground-following drag exceed
+    35‰, which nothing rejects until D4's grade rule.
   - **Malformed drags:** a non-integer start, non-finite pointer, or invalid heading or
     radius throws a `TypeError`. It is a programmer error, like a malformed command.
 

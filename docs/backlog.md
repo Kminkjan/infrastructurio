@@ -311,7 +311,10 @@ tool). Tool reducers go in `src/tools`, and the tooltip in the HUD.
   solves a 2×2 integer system over about 100 candidates, and selects in this order:
   valid → largest radius under the user cap → shortest → smallest |turn| → left before right.
 - [ ] A two-bend fit joins into existing ports. Magnetism snaps within 3 nodes. Elevation is
-  spread by length with largest-remainder rounding.
+  spread by length with largest-remainder rounding. *Refined by the owner decision of
+  2026-09-27: track follows the ground in D3, so the planner spreads the offset above the
+  ground rather than the absolute height, and D4 revisits it
+  ([ADR 0010 D3 ground-following finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-d3-ground-following)).*
 - [ ] A table of drag cases snaps to the exact expected pieces (unit tests). It covers
   one-bend, two-bend, shift and magnetism cases.
 - [ ] The executed command carries the resolved `PieceSpec[]`, never drag input.

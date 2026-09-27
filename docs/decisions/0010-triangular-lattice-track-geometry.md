@@ -478,6 +478,156 @@ as written above.
 - **Not established:** whether the shorter joins change how port joins feel; that is the
   owner's check.
 
+## Findings (2026-09-27, D3 ground following)
+
+Recorded on branch `codex/d3-construction-tool`
+([#82](https://github.com/Kminkjan/infrastructurio/pull/82);
+[#67](https://github.com/Kminkjan/infrastructurio/issues/67)). Measurements are automated
+evidence only, Vitest 4.1.10, Node 26.7.0 on macOS 26.6.2 (Apple M5 Pro). The status of this
+ADR stays Proposed: the owner decision below sets D3's height rule, and it accepts no ADR.
+- **Owner decision (2026-09-27, as relayed to the implementing agent).** In D3, track
+  follows the ground. It sits on the terrain at every node, and `[` `]` still raise or lower
+  it. The 35‰ grade rule, earthworks, bridges and tunnels come in D4, which will revisit
+  this. Following the ground exceeds 35‰ on this terrain, which is accepted for D3 because
+  validation has no grade rule yet.
+- **Defect.** The tool set only the end heights from the ground, and the planner spread the
+  height change linearly between pins, so hills between the ends swallowed the track.
+  - Probe on the diorama map (seed `"baltic-diorama"`, 400 × 346 nodes, generator version
+    2): 2,000 random straight drags of 10–40 steps on all 12 headings, both ends on the
+    ground, starts at least 300 m inside the map, PRNG seed `ground-probe`.
+  - Before, over 52,267 nodes: 24.1% lay more than 1 m and 9.5% more than 3 m below the
+    ground, and 23.1% more than 1 m above it. 45.6% of drags dipped more than 1 m, and the
+    worst node lay 24.8 m under.
+  - That agrees with the figures relayed with the decision (24%, 9%, 43% of drags, worst
+    14 m; their seed is not recorded here).
+- **Rule.** Each node's height is the ground there plus an offset. The mechanism follows
+  the decision; the details are defaults to test.
+  - The ground is `groundMmAt` in [`terrain.ts`](../../src/core/terrain.ts), exported
+    through `sim/api`: the terrain height (dm × 100), or the water surface where it lies
+    above a water node's bed. The app gives the track tool the same function, so a plan's
+    ends and inner nodes agree, over water too.
+  - The planner interpolates the offset, not the absolute height, between pins (the start,
+    the existing-node height pins, the end) by cumulative length, with largest-remainder
+    rounding as before. With both ends on the ground and no pin, every node lies on it; a
+    raised end ramps the offset from the start's to the end's.
+  - Height pinning keeps its 6.5 m rule. The reference is now the ground plus the offset on
+    the line from the last pin to the end, so overlaps with existing track are still
+    reused. A node off the map takes the ground of the nearest on-map node along the path.
+  - `Drag`, `TrackPlan`, commands and keys are unchanged, and no field was added. `dzMm`
+    still fixes only the end (`from.zMm + dzMm`, or a snapped port's height). No optional
+    linear profile was kept: nothing in D3 uses it, and D4 reopens the profile anyway.
+  - On flat terrain the profile is exactly the old one. All the flat-map drag cases,
+    height-pinning cases and properties pass unchanged.
+- **After (automated).**
+  - The same probe finds all 52,267 nodes exactly on the ground: none below, none above.
+  - 50.5% of its 50,267 pieces exceed 35‰, against 38.3% on the old, smoother but
+    underground profile.
+  - A committed probe in [`planner.test.ts`](../../src/core/track/planner.test.ts) plans 400
+    straight and free drags with zero height steps, re-planning the end onto the ground as
+    the tool does. All 6,882 of their nodes lie on the ground, and 50.0% of 6,526 pieces
+    exceed 35‰.
+- **Tests.**
+  - Five new planner tests:
+    - a drag over a ridge on the ground at every node;
+    - the offset ramped by a raised end and down from a raised start;
+    - existing-node pins on hilly ground, reused, with the offset ramped between pins;
+    - a seeded property on rolling hills, which pinned in 15 of 150 runs when written;
+    - the diorama probe.
+  - One `groundMmAt` test, one render-lift ordering test, and the render-lift measurement
+    below as an annotated dev test with loose guards.
+  - The property helper now checks ground plus offset, which equals the old check on flat
+    maps.
+  - Changed because they assumed linear interiors on seeded terrain:
+    - the contract test now starts and ends on the ground, and its label reads the
+      steepest ground piece (10.0%);
+    - the track tool test's `flat` session now runs a flat sim. It used to report flat
+      ground over seeded terrain that the planner now follows.
+  - The track picker tests now aim with the exported `PICK_LIFT_M`.
+- **Limit: pieces carry one grade each, so only nodes follow the ground.** A curve or shift
+  is a single piece, so its interior still runs straight in height between its two end
+  nodes (§6 grade).
+  - In the render measurement below, curves were a median 68 m long, up to 200 m. 13.8% of
+    curve centreline samples lay more than 1 m under the terrain (worst 14.6 m), and 11.8%
+    more than 1 m above it.
+  - Shifts (43.7 m) had 1.2% more than 1 m under and 2.0% more than 1 m above.
+  - Before the change, curve samples had 23.6% under and 21.4% above.
+  - No render lift can hide this. D4's earthworks (render-only cuttings and embankments), or
+    a different way for curves to carry height, would have to.
+- **Render lift (visual only; sim heights untouched).** How it was measured, in
+  [`render/track/trackLift.test.ts`](../../src/render/track/trackLift.test.ts). The suite
+  runs it at 300 plans; the numbers here are from the same code at `PLANS = 3000`:
+  - 3,000 plans with zero height steps, as the tool makes them: half straight drags of
+    10–40 steps, half free drags within ±150 m, ends re-planned onto the ground. That gave
+    53,871 pieces.
+  - Each piece's rendered centreline (the track meshes' own sampling) was resampled every
+    0.25 m.
+  - At each sample, the visible surface was compared with the track height. The surface is
+    the LOD0 lattice-triangle terrain, or the water plane where that is higher. The
+    comparison ran across the track at u = 0, ±0.817 m (rails), ±1.3 m (ghost ribbon edge),
+    ±1.6 m (ballast top edge) and ±2.2 m (shoulder base).
+  - On straights, where node following applies, the centreline never dips under the
+    surface on primary headings, and at most 0.29 m on secondary ones. At the rails the
+    terrain rises above the track height by at most 0.39 / 0.41 m at p99.9 (primary /
+    secondary), and by at most 0.52 / 0.57 m overall.
+
+  | Lift | Rail-top samples buried (primary / secondary) | Ballast-top edge buried | Gap > 5 cm under the shoulder (floating) |
+  |---|---|---|---|
+  | 0.05 m (before) | 0.271% / 0.262% | 28.4% / 27.9% | 3.1% / 3.3% |
+  | 0.10 m | 0.070% / 0.124% | 13.6% / 14.0% | 3.8% / 4.1% |
+  | **0.15 m (chosen)** | **0.007% / 0.055%** | **6.4% / 8.0%** | **5.2% / 5.6%** |
+  | 0.20 m | 0.002% / 0.018% | 4.1% / 4.6% | 8.1% / 8.3% |
+  | 0.25 m | 0.000% / 0.001% | 2.9% / 3.3% | 13.6% / 12.8% |
+
+  - **Chosen: 0.15 m** (`TRACK_LIFT_M` in
+    [`render/track/trackGeometry.ts`](../../src/render/track/trackGeometry.ts)), which puts
+    the rail tops at 0.45 m.
+    - It is the knee of the table. 0.02% (primary) and 0.18% (secondary) of straight pieces
+      keep any buried rail-top sample, against 0.63% and 0.77% at 0.05 m.
+    - Ballast-top edges still sink where the terrain slopes up across the track, which reads
+      as track cut into a hillside.
+    - On flat ground the 0.35 m ballast keeps its shoulders 0.2 m below the surface. Gaps
+      open only on the downhill side of cross slopes. 0.20 m would add little for the rails
+      and float more.
+  - **No depth bias.** A polygon offset shifts depth by far less than decimetres here. Big
+    enough to matter, it would also draw track over terrain that really hides it.
+  - **Derived lifts,** which keep overlays and picking on the drawn rails:
+    - The ghost ribbon moves from 0.4 m to 0.5 m, 5 cm over the rail tops, so a reused
+      (cyan) piece still shows over built track. The ribbon edge is hidden on 0.51% /
+      0.42% of straight samples, against 1.10% at 0.4 m.
+    - The snap ring stays at 0.6 m, now derived as the ribbon + 0.1 m.
+    - The track picker aims 0.4 m up (0.3 m before), still 5 cm under the rail tops, so
+      nodes and centrelines pick where they are drawn.
+    - The terrain ray march and the snap ring's node anchoring read sim heights and are
+      unchanged. A test holds the order ballast top < pick aim < rail tops < ribbon < ring.
+  - **Whole population, curves included:** 4.6% of rail-top samples are buried at 0.15 m
+    and 5.4% at 0.05 m. With the old profile at 0.05 m it was 36.5%.
+  - **Ghost marks:** zero-step plans that show drop lines and end-height tags fell from
+    1,525 to 348 of 3,000. Those that remain are curves more than 0.5 m over a hollow;
+    straights never float more than 0.41 m between nodes.
+  - The ghost's drop lines and tags now measure from the water surface over water (in
+    `src/app/main.ts`), as the tool's ground does.
+- **Agent browser check (Playwright captures in headless Chrome, same machine; agent
+  evidence, not the owner's feel check or a Look Gate).**
+  - A 30-piece straight was dragged with the real pointer across a hill 7.1 m above its
+    higher end. Built, it lies on the ground at 6, 14 and 24 ppm, and at yaw 0° and 60°. The
+    rails show along its whole length, with no gap visible under the ballast.
+  - The tooltip read "Grade 34.0 %" (red) for its steepest piece, which is truthful.
+  - In the D3 manual capture set, the reused ribbon still draws over built track, and the
+    elevated ghost's tags and drop lines still draw.
+- **Performance, a dev measurement and not a gate.** Three runs each of
+  [`sim/perf.test.ts`](../../src/core/sim/perf.test.ts):
+  - `planTrack` median: 0.087–0.090 ms before, 0.088–0.092 ms after;
+  - worst-case median: 1.845–1.903 ms before, 2.033–2.263 ms after (about +10%, one terrain
+    lookup per node per candidate profile).
+- **Not established:**
+  - whether ground-following track feels or looks right: that is the owner's D3 feel
+    check, and the look is for the Look Gates;
+  - the far terrain LOD (LOD1, below 2 ppm), which was not measured. It is coarser, but
+    1 m there is under 2 px;
+  - how D4 treats the profile. Its grade rule would reject about half the pieces of a
+    ground-following drag on this map, so D4 needs smoothing, earthworks or structures.
+    This finding does not choose among them.
+
 ## Revisit when
 
 - The D3 feel check finds construction unsatisfying for reasons that planner tuning, chained
@@ -515,3 +665,7 @@ as written above.
 - 2026-09-27: D3 review findings added (the two-bend solve's period divides |det| rather than
   equalling it; a brute-force oracle now checks the shortest fit); status unchanged, still
   Proposed.
+- 2026-09-27: D3 ground-following findings added (the relayed owner decision that track
+  follows the ground in D3, the offset interpolation between pins, before and after
+  underground numbers, the 0.15 m render lift and its measurement, the curve limit); status
+  unchanged, still Proposed.

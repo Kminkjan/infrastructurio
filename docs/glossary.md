@@ -191,9 +191,12 @@ different heights never share a node. Terrain heights are Int16 dm at lattice no
 convert at the terrain boundary. Millimetres are a default since 2026-09-26: dm could not
 hold 35‰ on a 5 m straight, while mm gives exactly 175 mm
 ([ADR 0010 D2 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d2-track-model)).
-The planner spreads elevation along a drag by length with largest-remainder rounding,
-between the heights of existing nodes the drag passes within 6.5 m, so retracing sloped
-track reuses it.
+Track follows the ground (owner decision, 2026-09-27, for D3; D4 revisits it with the 35‰
+rule): each planned node sits on the ground (the terrain, or the water surface over a lower
+bed) plus an offset. The planner spreads the offset along a drag by length with
+largest-remainder rounding, between the heights of existing nodes the drag passes within
+6.5 m, so retracing sloped track reuses it. A curve or shift has one grade, so only its ends
+follow the ground.
 
 ### End of authority (EOA)
 
