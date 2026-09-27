@@ -5,6 +5,8 @@ import { type ShaderChunk, installChunks } from "./shaderChunks/chunk";
 import { type EdgeFadeUniforms, createEdgeFadeChunk, createEdgeFadeUniforms, hazeForToneMapping } from "./shaderChunks/edgeFade";
 import { createFoliageTintChunk } from "./shaderChunks/foliageTint";
 import { type GrainUniforms, GRAIN_AMOUNT, createGrainChunk, createGrainUniforms } from "./shaderChunks/grain";
+import { type GroundDetailUniforms, createGroundDetailUniforms, syncGroundDetailColors } from "./shaderChunks/groundDetail";
+import { type ReliefUniforms, createReliefChunk, createReliefUniforms } from "./shaderChunks/relief";
 import { type SplatUniforms, createSplatChunk, createSplatUniforms, syncSplatColors } from "./shaderChunks/splat";
 import { type TrackStripeUniforms, createTrackStripeChunk, createTrackStripeUniforms } from "./shaderChunks/trackStripe";
 import { type WindSwayUniforms, SWAY_AMPLITUDE_M, createWindSwayChunk, createWindSwayUniforms } from "./shaderChunks/windSway";
@@ -25,6 +27,9 @@ import { type WindSwayUniforms, SWAY_AMPLITUDE_M, createWindSwayChunk, createWin
  */
 
 export interface ArtUniforms {
+  /** Terrain look variants (2026-09-27): relief shading and grass detail, installed only by the variants. */
+  readonly relief: ReliefUniforms;
+  readonly detail: GroundDetailUniforms;
   readonly sway: WindSwayUniforms;
   readonly grain: GrainUniforms;
   readonly waterGrain: GrainUniforms;
@@ -37,6 +42,8 @@ const WATER_GRAIN = GRAIN_AMOUNT / 2;
 
 export function createArtUniforms(bounds: { minX: number; minZ: number; maxX: number; maxZ: number }): ArtUniforms {
   const u: ArtUniforms = {
+    relief: createReliefUniforms(),
+    detail: createGroundDetailUniforms(),
     sway: createWindSwayUniforms(),
     grain: createGrainUniforms(),
     waterGrain: createGrainUniforms(WATER_GRAIN),
@@ -51,6 +58,7 @@ const haze = new Color();
 
 /** Re-reads palette-driven uniforms (after a tweak-panel change) for the current exposure. */
 export function syncArtColors(u: ArtUniforms, exposure: number): void {
+  syncGroundDetailColors(u.detail);
   hazeForToneMapping(haze.setHex(palette.haze), exposure, u.edge.uEdgeHaze.value);
   syncSplatColors(u.splat);
 }
@@ -60,9 +68,23 @@ export function setSwayEnabled(u: ArtUniforms, on: boolean): void {
   u.sway.uSwayAmplitude.value = on ? SWAY_AMPLITUDE_M : 0;
 }
 
-/** Chunks after the lattice on the terrain material. */
-export function terrainChunks(u: ArtUniforms): ShaderChunk[] {
-  return [createSplatChunk(u.splat), createGrainChunk(u.grain), createEdgeFadeChunk(u.edge)];
+/** What a terrain look variant adds to the terrain material (nothing: D11a's chunks exactly). */
+export interface TerrainChunkOptions {
+  readonly crispSplat?: boolean;
+  readonly detail?: boolean;
+  readonly relief?: boolean;
+  /** Compile the relief chunk's facet path (lattice triangles lit as facets). */
+  readonly facets?: boolean;
+}
+
+/**
+ * Chunks after the lattice on the terrain material. The relief chunk follows
+ * the splat, so its contour hint darkens fields and roads too.
+ */
+export function terrainChunks(u: ArtUniforms, options: TerrainChunkOptions = {}): ShaderChunk[] {
+  const splat = createSplatChunk(u.splat, { crisp: options.crispSplat === true, ...(options.detail ? { detail: u.detail } : {}) });
+  const relief = options.relief ? [createReliefChunk(u.relief, { facets: options.facets === true })] : [];
+  return [splat, ...relief, createGrainChunk(u.grain), createEdgeFadeChunk(u.edge)];
 }
 
 /** Chunks after the lattice on the water material. */

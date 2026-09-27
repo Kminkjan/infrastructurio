@@ -1,6 +1,7 @@
 import { type DioramaScenery, type Terrain, nodeOfOffset, terrainBoundsM, toWorld } from "../../core/sim/api";
 import { simToWorld } from "../coords";
 import { sampleTerrainHeightM } from "../terrain/heightfieldRay";
+import { type TerrainLookId, parseTerrainLook } from "../terrain/terrainLook";
 import { type GroundPoint, ISO_PITCH_RAD, NAMED_ZOOMS } from "./isoMath";
 
 /**
@@ -15,6 +16,8 @@ import { type GroundPoint, ISO_PITCH_RAD, NAMED_ZOOMS } from "./isoMath";
  *   the only place a pitch other than true isometric may come from.
  * - `?tweak=1` shows the lookdev tweak panel, in any build. Without it the
  *   panel stays hidden, so the gate views are clean by default.
+ * - `?terrain=d11a|a|b|c` picks the terrain look variant (2026-09-27; see
+ *   `terrain/terrainLook.ts`): `d11a` is the look Look Gate A scored.
  *
  * The bookmarks are computed from the scenario, so they follow the layout;
  * docs/art-direction.md records the exact states for the golden seed.
@@ -34,6 +37,8 @@ export interface LookdevParams {
   readonly pitch: number;
   /** `?tweak=1` true, `?tweak=0` false, otherwise undefined (hidden). */
   readonly tweak: boolean | undefined;
+  /** `?terrain=`: the terrain look variant (the recommended default when absent or unknown). */
+  readonly terrain: TerrainLookId;
 }
 
 export function parseLookdevParams(search: string): LookdevParams {
@@ -44,6 +49,7 @@ export function parseLookdevParams(search: string): LookdevParams {
     bookmark,
     pitch: params.get("pitch") === "30" ? LOOK_AB_PITCH_RAD : ISO_PITCH_RAD,
     tweak: tweakParam(params.get("tweak")),
+    terrain: parseTerrainLook(params.get("terrain")),
   };
 }
 
