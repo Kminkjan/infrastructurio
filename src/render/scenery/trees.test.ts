@@ -189,6 +189,45 @@ describe("tree layer", () => {
     registry.dispose();
   });
 
+  it("clears a tree for earthworks by collapsing its instances, and restores the placed matrix exactly", () => {
+    const registry = new AssetRegistry();
+    registerTreeAssets(registry);
+    const layer = new TreeLayer(trees, terrain, registry, new MeshLambertMaterial());
+    layer.update(0.9);
+    const all = [...(layer.group.getObjectByName("trees by chunk")!.children as InstancedMesh[]), ...drawn(layer)];
+    const before = all.map((m) => Float32Array.from(m.instanceMatrix.array));
+    const versions = all.map((m) => m.instanceMatrix.version);
+    const point = { x: 0, y: 0 };
+    layer.clearablePosition(1, point);
+    expect(point).toEqual({ x: 20, y: 12 });
+    expect(layer.clearableCount).toBe(4);
+    expect(layer.setCleared(1, true)).toBe(true);
+    expect(layer.setCleared(1, true)).toBe(false);
+    expect(layer.isCleared(1)).toBe(true);
+    layer.commitCleared();
+    // Exactly two instance slots changed (tree 1's chunk and far instances): basis zeroed, translation kept.
+    let changedSlots = 0;
+    all.forEach((m, i) => {
+      const a = m.instanceMatrix.array;
+      for (let k = 0; k < m.count; k++) {
+        const was = before[i]!.subarray(16 * k, 16 * k + 16);
+        const now = Array.from(a).slice(16 * k, 16 * k + 16);
+        if (now.every((v, e) => v === was[e])) continue;
+        changedSlots += 1;
+        for (const e of [0, 1, 2, 4, 5, 6, 8, 9, 10]) expect(now[e]).toBe(0);
+        for (const e of [12, 13, 14, 15]) expect(now[e]).toBe(was[e]);
+      }
+    });
+    // LOD1 chunk meshes share LOD0's attribute, so the shared slot shows up twice.
+    expect(changedSlots).toBe(3);
+    expect(all.some((m, i) => m.instanceMatrix.version !== versions[i])).toBe(true);
+    layer.setCleared(1, false);
+    layer.commitCleared();
+    all.forEach((m, i) => expect(Array.from(m.instanceMatrix.array)).toEqual(Array.from(before[i]!)));
+    layer.dispose();
+    registry.dispose();
+  });
+
   it("picks the tier by zoom: LOD0 from 4 ppm, LOD1 from 2 ppm, the whole-map meshes below", () => {
     expect([24, TREE_LOD0_FROM_PPM, 3.99, TREE_SHADOW_FROM_PPM, 1.99, 0.75].map(treeTierForPpm)).toEqual([0, 0, 1, 1, 2, 2]);
   });

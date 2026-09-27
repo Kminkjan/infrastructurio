@@ -4,6 +4,7 @@ import type { AssetData, AssetLod, AssetRegistry } from "../art/AssetRegistry";
 import { palette } from "../art/palette";
 import { simToWorld } from "../coords";
 import { sampleTerrainHeightM } from "../terrain/heightfieldRay";
+import type { ClearableLayer } from "./clearance";
 import { MeshBuilder } from "./meshBuilder";
 import { planYaw } from "./placement";
 
@@ -118,10 +119,17 @@ export function propPlacements(s: DioramaScenery): Record<PropKind, PropPlacemen
   return out;
 }
 
+/** The 3×3 basis entries of a column-major 4×4 matrix (translation and the w row stay). */
+const BASIS_ELEMENTS = [0, 1, 2, 4, 5, 6, 8, 9, 10] as const;
+
 /** All props as one `InstancedMesh` per kind. */
-export class PropLayer {
+export class PropLayer implements ClearableLayer {
   readonly group = new Group();
   private readonly meshes: InstancedMesh[] = [];
+  /** Every placed prop in kind order, with its mesh and instance, for earthworks clearing. */
+  private readonly placed: { readonly xM: number; readonly yM: number; readonly mesh: InstancedMesh; readonly k: number; readonly matrix: Float32Array }[] = [];
+  private readonly cleared: Uint8Array;
+  private readonly dirty = new Set<InstancedMesh>();
 
   constructor(scenery: DioramaScenery, terrain: Terrain, registry: AssetRegistry, material: Material) {
     this.group.name = "props";
@@ -143,6 +151,7 @@ export class PropLayer {
         rotation.setFromAxisAngle(up, p.yaw);
         scale.set(p.stretch * p.scale, p.scale, p.scale);
         mesh.setMatrixAt(i, matrix.compose(position, rotation, scale));
+        this.placed.push({ xM: p.xM, yM: p.yM, mesh, k: i, matrix: Float32Array.from(matrix.elements) });
         if (kind === "haystack") mesh.setColorAt(i, tint.setScalar(0.92 + 0.16 * (((i * 2654435761) >>> 24) / 255)));
       });
       mesh.name = `props ${kind}`;
@@ -154,6 +163,42 @@ export class PropLayer {
       this.meshes.push(mesh);
       this.group.add(mesh);
     }
+    this.cleared = new Uint8Array(this.placed.length);
+  }
+
+  get clearableCount(): number {
+    return this.placed.length;
+  }
+
+  clearablePosition(i: number, out: { x: number; y: number }): void {
+    const p = this.placed[i];
+    out.x = p?.xM ?? 0;
+    out.y = p?.yM ?? 0;
+  }
+
+  /** Hides (or restores) prop `i` where earthworks clear the ground; see `TreeLayer.setCleared`. */
+  setCleared(i: number, cleared: boolean): boolean {
+    const p = this.placed[i];
+    if (!p || (this.cleared[i] === 1) === cleared) return false;
+    this.cleared[i] = cleared ? 1 : 0;
+    const array = p.mesh.instanceMatrix.array as Float32Array;
+    array.set(p.matrix, 16 * p.k);
+    if (cleared) for (const e of BASIS_ELEMENTS) array[16 * p.k + e] = 0;
+    this.dirty.add(p.mesh);
+    return true;
+  }
+
+  commitCleared(): void {
+    for (const mesh of this.dirty) {
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.computeBoundingSphere();
+      mesh.computeBoundingBox();
+    }
+    this.dirty.clear();
+  }
+
+  isCleared(i: number): boolean {
+    return this.cleared[i] === 1;
   }
 
   get instanceCount(): number {

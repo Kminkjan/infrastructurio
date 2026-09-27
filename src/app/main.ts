@@ -28,6 +28,8 @@ import { LabelLayer } from "../render/labels/LabelLayer";
 import { dioramaLabels } from "../render/labels/placeLabels";
 import { pickTrack } from "../render/picking/trackPicker";
 import { SceneryView, registerSceneryAssets } from "../render/scenery/SceneryView";
+import { SceneryClearance } from "../render/scenery/clearance";
+import { EarthworksView } from "../render/terrain/EarthworksView";
 import { TerrainView } from "../render/terrain/TerrainView";
 import { raycastTerrain, sampleTerrainHeightM } from "../render/terrain/heightfieldRay";
 import { LatticeOverlay } from "../render/terrain/latticeMaterial";
@@ -51,7 +53,8 @@ import { isMacPlatform } from "./keymap";
 // windmill sails) keeps the `ambient` reason at 30 fps unless reduced motion
 // is on, in which case an idle page draws zero frames.
 // URL: ?bookmark=1..4 (Look Gate A views), ?pitch=30 (pitch A/B), ?tweak=1 or 0,
-// ?trackBatch=chunked (force the multi-draw fallback, for checks).
+// ?trackBatch=chunked (force the multi-draw fallback, for checks), ?earthworks=0
+// (draw the natural terrain under track, for before/after checks).
 
 const canvas = document.querySelector<HTMLCanvasElement>("#world");
 const viewport = document.querySelector<HTMLDivElement>("#viewport");
@@ -60,6 +63,7 @@ if (!canvas || !viewport || !hudRoot) throw new Error("missing #world canvas, #v
 
 const params = parseLookdevParams(window.location.search);
 const forceChunkedTrack = new URLSearchParams(window.location.search).get("trackBatch") === "chunked";
+const earthworksOn = new URLSearchParams(window.location.search).get("earthworks") !== "0";
 const listeners = new AbortController();
 const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
 const reducedMotion = (): boolean => reducedMotionQuery.matches;
@@ -124,6 +128,17 @@ const trackView = new TrackView({
   requestFrame: () => scheduler.requestFrame("rebuild"),
   now: () => performance.now(),
 });
+// Earthworks-lite (2026-09-27): render-only cuttings and embankments under ground track, kept in step with the
+// network like the track, clearing trees and props they claim. Picking marches the drawn (conformed) surface.
+const clearanceOf = (view: SceneryView) => new SceneryClearance(terrain, [view.trees, view.props]);
+const earthworks = new EarthworksView({
+  terrain,
+  target: terrainView,
+  requestFrame: () => scheduler.requestFrame("rebuild"),
+  now: () => performance.now(),
+  scenery: clearanceOf(sceneryView),
+  enabled: earthworksOn,
+});
 const waterLevelM = terrain.waterLevelDm / 10;
 /**
  * The surface under the ghost's drop lines and end-height tags: the terrain, or the water plane over a lower bed,
@@ -150,7 +165,7 @@ const simHit = { x: 0, y: 0, z: 0 };
 /** The construction pick at a canvas CSS pixel: an existing node, a piece, or the terrain's lattice node. */
 function pickAt(x: number, y: number): ToolPick | null {
   camera.screenToGroundRay(x, y, pickRay);
-  const ground = raycastTerrain(terrain, pickRay.origin, pickRay.direction, pickPoint) ? worldToSim(pickPoint, simHit) : null;
+  const ground = raycastTerrain(terrain, pickRay.origin, pickRay.direction, pickPoint, earthworks.heightfield) ? worldToSim(pickPoint, simHit) : null;
   const network = sim.network();
   const pick = pickTrack(network, camera, x, y, ground);
   if (!pick) return null;
@@ -263,6 +278,7 @@ function rebuildBakedColours(): void {
   scene.add(terrainView.group, sceneryView.group);
   trackMaterials.stripe.uTrackStripeColor.value.setHex(palette.sleeper);
   trackView.invalidate();
+  earthworks.retarget(terrainView, clearanceOf(sceneryView));
   scheduler.requestFrame("rebuild");
 }
 const tweak = showTweakPanel(params)
@@ -305,8 +321,10 @@ scheduler.onFrame((frame) => {
     lastView.width = camera.cssWidth;
     lastView.height = camera.cssHeight;
   }
-  // Static diffs by revision (time-sliced past 8 ms), then the track LOD.
+  // Static diffs by revision (time-sliced past 8 ms: the earthworks get what the track left), then the track LOD.
+  const syncStart = performance.now();
   trackView.sync(sim.network());
+  earthworks.sync(sim.network(), Math.max(1, 8 - (performance.now() - syncStart)));
   trackView.setLod(camera.ppm);
   if (flash.update(frame.nowMs)) scheduler.requestFrame("overlay");
   snapRing.update(camera.camera, camera.ppm);
@@ -367,18 +385,30 @@ if (import.meta.env.DEV) {
       },
       /** Page CSS px of lattice node (q, r) at height zMm (default: the terrain there). */
       nodeScreen,
+      /** Page CSS px of sim plan point (x, y) at height z, metres. */
+      planScreen(xM: number, yM: number, zM: number): { x: number; y: number } {
+        const s = worldToScreen(camera, simToWorld(xM, yM, zM, new Vector3()));
+        const rect = canvas.getBoundingClientRect();
+        return { x: rect.left + s.x, y: rect.top + s.y };
+      },
       network: () => sim.network(),
       groundZmm: (q: number, r: number) => construction.groundZmm(q, r),
       previewStats: () => construction.previewStats(),
       trackStats: () => trackView.stats,
+      earthworks,
+      earthworksStats: () => earthworks.stats,
+      /** Drawn (conformed) and natural terrain height (m) at sim plan (x, y), LOD0 or LOD1. */
+      drawnHeightM: (x: number, y: number, lod: 0 | 1 = 0) => (lod === 0 ? earthworks.heightfield : earthworks.heightfieldLod1).heightAtM(x, y),
+      naturalHeightM: (x: number, y: number, lod: 0 | 1 = 0) => (lod === 0 ? earthworks.heightfield : earthworks.heightfieldLod1).naturalAtM(x, y),
       tool: () => {
         const t = construction.trackState;
         return { active: construction.activeTool, phase: t.phase, heightSteps: t.heightSteps, cursor: t.cursor };
       },
       hud: () => store.getSnapshot(),
-      /** True once a frame has rendered and no track rebuild is pending. */
+      /** True once a frame has rendered and the track and earthworks match the current network revision. */
       get ready() {
-        return scheduler.frameCount > 0 && !trackView.busy;
+        const rev = sim.network().rev;
+        return scheduler.frameCount > 0 && trackView.stats.appliedRev === rev && (!earthworks.enabled || earthworks.stats.appliedRev === rev);
       },
       get sceneryView() {
         return sceneryView;

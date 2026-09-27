@@ -4,6 +4,7 @@ import { type AssetData, type AssetLod, type AssetRegistry } from "../art/AssetR
 import { palette } from "../art/palette";
 import { simToWorld } from "../coords";
 import { sampleTerrainHeightM } from "../terrain/heightfieldRay";
+import type { ClearableLayer } from "./clearance";
 import { MeshBuilder } from "./meshBuilder";
 
 /**
@@ -183,6 +184,9 @@ interface TreeChunkMeshes {
   readonly lod1: InstancedMesh;
 }
 
+/** The 3×3 basis entries of a column-major 4×4 matrix (translation and the w row stay). */
+const BASIS_ELEMENTS = [0, 1, 2, 4, 5, 6, 8, 9, 10] as const;
+
 /** Zoom tiers: LOD0 per chunk, LOD1 per chunk, LOD1 whole-map (no shadows). */
 export type TreeTier = 0 | 1 | 2;
 
@@ -198,16 +202,30 @@ export function treeTierForPpm(ppm: number): TreeTier {
  * copy of the instance data in one LOD1 mesh per species (about 76 bytes a
  * tree, 1.5 MB at the cap), filled once, so the far band costs three draws.
  */
-export class TreeLayer {
+export class TreeLayer implements ClearableLayer {
   readonly group = new Group();
   private readonly chunks = new Group();
   private readonly far = new Group();
   private readonly meshes: TreeChunkMeshes[] = [];
   private readonly farMeshes: InstancedMesh[] = [];
   private tier: TreeTier = 0;
+  /** Per tree: chunk mesh, instance, far mesh, far instance (−1 where the tree has no mesh). */
+  private readonly slots: Int32Array;
+  /** Per tree: its placed instance matrix, to restore after earthworks clear it. */
+  private readonly placed: Float32Array;
+  private readonly cleared: Uint8Array;
+  private readonly dirty = new Set<InstancedMesh>();
 
-  constructor(trees: TreeInstances, terrain: Terrain, registry: AssetRegistry, material: Material) {
+  constructor(
+    private readonly trees: TreeInstances,
+    terrain: Terrain,
+    registry: AssetRegistry,
+    material: Material,
+  ) {
     this.group.name = "trees";
+    this.slots = new Int32Array(trees.count * 4).fill(-1);
+    this.placed = new Float32Array(trees.count * 16);
+    this.cleared = new Uint8Array(trees.count);
     this.chunks.name = "trees by chunk";
     this.far.name = "trees far";
     this.far.visible = false;
@@ -224,7 +242,7 @@ export class TreeLayer {
       list.push(i);
       perSpecies.set(species, (perSpecies.get(species) ?? 0) + 1);
     }
-    const farOf = new Map<number, { mesh: InstancedMesh; next: number }>();
+    const farOf = new Map<number, { mesh: InstancedMesh; next: number; index: number }>();
     for (const [species, count] of [...perSpecies].sort((a, b) => a[0] - b[0])) {
       const kind = TREE_KIND_OF_SPECIES[species] ?? "tree-spruce";
       const geometry = registry.get(kind, 0, 1).slots.foliage;
@@ -232,7 +250,7 @@ export class TreeLayer {
       const mesh = new InstancedMesh(geometry, material, count);
       mesh.instanceColor = new InstancedBufferAttribute(new Float32Array(count * 3), 3);
       mesh.name = `trees far ${kind}`;
-      farOf.set(species, { mesh, next: 0 });
+      farOf.set(species, { mesh, next: 0, index: this.farMeshes.length });
       this.farMeshes.push(mesh);
     }
     const matrix = new Matrix4();
@@ -263,9 +281,14 @@ export class TreeLayer {
         scale.setScalar(look.scale);
         lod0.setMatrixAt(k, matrix.compose(position, rotation, scale));
         lod0.setColorAt(k, look.color);
+        matrix.toArray(this.placed, 16 * tree);
+        this.slots[4 * tree] = this.meshes.length;
+        this.slots[4 * tree + 1] = k;
         if (far) {
           far.mesh.setMatrixAt(far.next, matrix);
           far.mesh.setColorAt(far.next, look.color);
+          this.slots[4 * tree + 2] = far.index;
+          this.slots[4 * tree + 3] = far.next;
           far.next += 1;
         }
       });
@@ -296,6 +319,61 @@ export class TreeLayer {
 
   get instanceCount(): number {
     return this.meshes.reduce((n, m) => n + m.lod0.count, 0);
+  }
+
+  get clearableCount(): number {
+    return this.trees.count;
+  }
+
+  clearablePosition(i: number, out: { x: number; y: number }): void {
+    out.x = (this.trees.xMm[i] ?? 0) / 1000;
+    out.y = (this.trees.yMm[i] ?? 0) / 1000;
+  }
+
+  /**
+   * Hides (or restores) tree `i` where earthworks clear the ground: its
+   * instances collapse to a point at the trunk (scale 0, so every triangle is
+   * degenerate), and restoring writes back the placed matrix exactly. Returns
+   * whether anything changed; `commitCleared` uploads the changed meshes.
+   */
+  setCleared(i: number, cleared: boolean): boolean {
+    if ((this.cleared[i] === 1) === cleared || (this.slots[4 * i] ?? -1) < 0) return false;
+    this.cleared[i] = cleared ? 1 : 0;
+    const chunk = this.meshes[this.slots[4 * i] ?? -1];
+    const far = this.farMeshes[this.slots[4 * i + 2] ?? -1];
+    if (chunk) this.writeInstance(chunk.lod0, this.slots[4 * i + 1] ?? 0, i, cleared);
+    if (far) this.writeInstance(far, this.slots[4 * i + 3] ?? 0, i, cleared);
+    return true;
+  }
+
+  /** Uploads instance matrices changed by `setCleared` and refreshes their bounds. */
+  commitCleared(): void {
+    for (const mesh of this.dirty) {
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.computeBoundingSphere();
+      mesh.computeBoundingBox();
+      // LOD1 chunk meshes share LOD0's matrix attribute: refresh their bounds too.
+      for (const m of this.meshes) {
+        if (m.lod0 !== mesh) continue;
+        m.lod1.computeBoundingSphere();
+        m.lod1.computeBoundingBox();
+      }
+    }
+    this.dirty.clear();
+  }
+
+  /** Whether tree `i` is currently cleared. */
+  isCleared(i: number): boolean {
+    return this.cleared[i] === 1;
+  }
+
+  private writeInstance(mesh: InstancedMesh, k: number, tree: number, cleared: boolean): void {
+    const array = mesh.instanceMatrix.array as Float32Array;
+    const placed = this.placed.subarray(16 * tree, 16 * tree + 16);
+    array.set(placed, 16 * k);
+    // Column-major: zero the 3×3 basis, keep the translation.
+    if (cleared) for (const e of BASIS_ELEMENTS) array[16 * k + e] = 0;
+    this.dirty.add(mesh);
   }
 
   /** Chunk × species mesh pairs. */
