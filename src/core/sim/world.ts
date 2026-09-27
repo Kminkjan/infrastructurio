@@ -11,6 +11,7 @@ import {
   isEmptyDiff,
 } from "../track/authored";
 import { EMPTY_HISTORY, type History, recordEdit, stepHistory } from "../track/history";
+import { type Drag, type TrackPlan, planTrack } from "../track/planner";
 import {
   type Accepted,
   type Counts,
@@ -77,6 +78,8 @@ export interface WorldInit {
 export interface World {
   readonly terrain: Terrain;
   run(cmd: Command, commit: boolean): Result;
+  /** Reads the authored state, never changes it. */
+  plan(drag: Drag): TrackPlan;
   network(): NetworkView;
 }
 
@@ -147,7 +150,7 @@ export function createWorld(terrain: Terrain, init?: WorldInit): World {
     return view;
   }
 
-  return Object.freeze({ terrain, run, network });
+  return Object.freeze({ terrain, run, plan: (drag: Drag) => planTrack({ authored }, drag), network });
 }
 
 /** Throws a TypeError naming the fault when a command breaks the shape contract (see `Command`). */

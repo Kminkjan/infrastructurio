@@ -1,18 +1,20 @@
 import { type TerrainParams, generateTerrain } from "../terrain";
+import type { Drag, TrackPlan } from "../track/planner";
 import { type Command, type NetworkView, type Result, createWorld } from "./world";
 
 /**
  * The public surface of the core (architecture, "Core API"): app, tools,
- * render and ui import only this module and `geometry/sample.ts`. First slice
- * (D2): construction commands, preview/execute and the network view. `step`,
- * `frame`, `planTrack`, `inspect`, `save` and `loadSim` arrive with their
- * slices.
+ * render and ui import only this module and `geometry/sample.ts`. D2:
+ * construction commands, preview/execute and the network view. D3:
+ * `planTrack`. `step`, `frame`, `inspect`, `save` and `loadSim` arrive with
+ * their slices.
  */
 
 export type { Command, NetworkView, Result } from "./world";
 export type { Counts, Reason, ReasonCode, Ref, RuleFamily, StructureChoice } from "../track/validate";
 export { MAX_PIECES, REASON_CODES, RULE_ORDER } from "../track/validate";
 export { HISTORY_DEPTH } from "../track/history";
+export type { Drag, PlanFit, PlanPointMm, TrackPlan } from "../track/planner";
 export type { Diff, PieceRecord } from "../track/authored";
 export type { Network, NetworkNode, NetworkPiece, Port, Section } from "../network/derive";
 export type { NodeRef, PieceKey, PieceKind, PieceSpec, Structure } from "../geometry/piece";
@@ -53,6 +55,8 @@ export interface Scenario {
 export interface Sim {
   /** Simulated ticks so far; always 0 until the step lands (S7/S12). */
   readonly tick: number;
+  /** Drag → resolved pieces, counts and a label; reads the track, never changes it. */
+  planTrack(drag: Drag): TrackPlan;
   /** `execute`'s code path without the commit: never mutates, consumes no IDs. */
   preview(cmd: Command): Result;
   execute(cmd: Command): Result;
@@ -66,6 +70,7 @@ export function createSim(scenario: Scenario): Sim {
     get tick() {
       return 0;
     },
+    planTrack: (drag: Drag) => world.plan(drag),
     preview: (cmd: Command) => world.run(cmd, false),
     execute: (cmd: Command) => world.run(cmd, true),
     network: () => world.network(),
