@@ -83,7 +83,7 @@ describe("terrain splat", () => {
     expect(u.uSplatForestFloor.value.getHex()).toBe(palette.forestFloor);
   });
 
-  it("stays D11a's chunk without options, and adds crisp cuts and ground detail only when asked", () => {
+  it("stays D11a's chunk without options, and adds crisp cuts, ground detail and the earthwork fade only when asked", () => {
     const patched = (options: Parameters<typeof createSplatChunk>[1]) => {
       const chunk = createSplatChunk(createSplatUniforms(), options);
       const shader = { uniforms: {}, vertexShader: ShaderLib.lambert.vertexShader, fragmentShader: ShaderLib.lambert.fragmentShader };
@@ -94,14 +94,24 @@ describe("terrain splat", () => {
     expect(d11a.key).toBe("terrain-splat-v2");
     expect(d11a.glsl).not.toContain("splatCut");
     expect(d11a.glsl).not.toContain("groundDetail");
+    expect(d11a.glsl).not.toContain("earthwork");
     const crisp = patched({ crisp: true });
-    expect(crisp.key).toBe("terrain-splat-v3-crisp");
+    expect(crisp.key).toBe("terrain-splat-v4-crisp");
     expect(crisp.glsl).toContain("splat.b = splatCut( splat.b - 0.50 )");
     const both = patched({ crisp: true, detail: createGroundDetailUniforms() });
-    expect(both.key).toBe("terrain-splat-v3-crisp-detail");
+    expect(both.key).toBe("terrain-splat-v4-crisp-detail");
+    expect(both.glsl).toContain("groundDetail( base, splatXY, vArtWorld.y, splatUp, 1.0 )");
     // The detail runs on the grass before the surfaces are laid over it.
     expect(both.glsl.indexOf("base = groundDetail(")).toBeLessThan(both.glsl.indexOf("base = mix( base, uSplatForestFloor"));
-    expect(both.uniforms).toEqual(expect.arrayContaining(["uGdPatch", "uGdTufts", "uGdWaterLevel"]));
+    expect(both.uniforms).toEqual(expect.arrayContaining(["uGdPatch", "uGdTufts", "uGdWaterLevel", "uGdToneSoft", "uGdPatchMix", "uGdMeadowCuts"]));
+    // On earthworks: the surfaces and the AO tint fade by the earthwork weight, the slope soil by the lip.
+    const earthwork = patched({ crisp: true, detail: createGroundDetailUniforms(), earthwork: true });
+    expect(earthwork.key).toBe("terrain-splat-v4-crisp-detail-earthwork");
+    expect(earthwork.glsl).toContain("#define TERRAIN_EARTHWORK");
+    expect(earthwork.glsl.indexOf("splat *= 1.0 - splatEarthwork;")).toBeGreaterThan(earthwork.glsl.indexOf("splat.b = splatCut"));
+    expect(earthwork.glsl.indexOf("splat *= 1.0 - splatEarthwork;")).toBeLessThan(earthwork.glsl.indexOf("base = mix( base, uSplatForestFloor"));
+    expect(earthwork.glsl).toContain("groundDetail( base, splatXY, vArtWorld.y, splatUp, 1.0 - splatLip )");
+    expect(earthwork.glsl).toContain("texture( uAoMap, splatXY / uAoSizeM ).r * ( 1.0 - splatEarthwork )");
   });
 
   it("cuts splat weights to crisp edges, keeping road and yard weights and fraying the forest floor", () => {

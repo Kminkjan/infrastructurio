@@ -125,4 +125,37 @@ describe("terrain shading", () => {
     const i = 3 * (7 * plane.columns + 8);
     for (let k = 0; k < 3; k++) expect(fromSmoothed[i + k]).toBeCloseTo(exact[i + k] ?? 0, 6);
   });
+
+  it("gives made ground a dry colour: the land recipe without the shore soil, on water nodes at the water level", () => {
+    const t = generateTerrain({ seed: "baltic-diorama", ...DEFAULT_TERRAIN_SIZE });
+    const shading = computeTerrainShading(t, TERRAIN_LOOKS.b.colours);
+    let far = 0;
+    let shore = 0;
+    let grassy = 0;
+    let land = 0;
+    let greener = 0;
+    for (let i = 0; i < t.water.length; i++) {
+      const ring = shading.waterDistance[i] ?? 255;
+      const [r, g, b] = [0, 1, 2].map((k) => shading.dryColors[3 * i + k] ?? 0) as [number, number, number];
+      if (ring > 3) {
+        far += 1;
+        expect([r, g, b]).toEqual([0, 1, 2].map((k) => shading.colors[3 * i + k]));
+        continue;
+      }
+      shore += 1;
+      expect([r, g, b].every((v) => Number.isFinite(v) && v >= 0 && v <= 1)).toBe(true);
+      // Grass, not soil or the underwater bed: green leads red and blue.
+      if (g > r && g > b) grassy += 1;
+      // On the soil rings of the shore it is greener than the soil-tinted colour it replaces.
+      if (ring > 0 && ring < 3) {
+        land += 1;
+        if (g / r > (shading.colors[3 * i + 1] ?? 0) / (shading.colors[3 * i] ?? 1)) greener += 1;
+      }
+    }
+    expect(far).toBeGreaterThan(100_000);
+    expect(shore).toBeGreaterThan(1000);
+    expect(grassy / shore).toBeGreaterThan(0.99);
+    expect(land).toBeGreaterThan(500);
+    expect(greener).toBe(land);
+  });
 });

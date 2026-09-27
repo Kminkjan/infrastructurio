@@ -5,7 +5,20 @@ import { diorama } from "../../../tests/support/groundPlans";
 import { makeTerrain } from "../../../tests/support/makeTerrain";
 import { ISO_PITCH_RAD, type IsoView, worldToScreen, yawForStep } from "../camera/isoMath";
 import { worldToSim } from "../coords";
-import { ChunkPass, type EarthworkPiece, type PieceInput, chunksTouching, conformTerrain, earthworkPiece, piecesTouching } from "./earthworks";
+import { EARTHWORK_ITEM_SIZE, earthworkLipOf, earthworkWeightOf } from "../art/shaderChunks/earthwork";
+import {
+  CREST_ROUND_M,
+  ChunkPass,
+  EARTHWORK_WEIGHT_FROM_X,
+  type EarthworkPiece,
+  FORMATION_HALF_WIDTH_M,
+  type PieceInput,
+  SIDE_SLOPE_RUN,
+  chunksTouching,
+  conformTerrain,
+  earthworkPiece,
+  piecesTouching,
+} from "./earthworks";
 import { type EarthworkMeshData, buildEarthworkChunk } from "./earthworkMesh";
 import { type MeshData, buildChunkData } from "./terrainGeometry";
 import { computeTerrainShading } from "./terrainShading";
@@ -237,6 +250,78 @@ describe("earthwork chunk geometry", () => {
         expect(m.earthwork.every((w) => w === 0)).toBe(true);
       }
     }
+  });
+
+  it("carries the colour attribute: departure and distance where moved, and no colour on anything the rule left natural", () => {
+    const field = conformTerrain(terrain, { pieces: hillPlan() });
+    let moved = 0;
+    let natural = 0;
+    let coloured = 0;
+    for (const [key, m] of withEarthworks) {
+      if (!key.startsWith("0:")) continue;
+      expect(m.earthwork.length).toBe((m.positions.length / 3) * EARTHWORK_ITEM_SIZE);
+      for (let i = 0; i < m.positions.length / 3; i++) {
+        const s = worldToSim(vertex(m, i));
+        const departure = s.z - field.naturalAtM(s.x, s.y);
+        const [x, dep, dist] = [m.earthwork[3 * i] ?? 0, m.earthwork[3 * i + 1] ?? 0, m.earthwork[3 * i + 2] ?? 0];
+        if (Math.abs(departure) < 1e-4) {
+          natural += 1;
+          // Unmoved (plain, fan and natural sub-vertices alike, or moved by under 0.1 mm where the soft band starts):
+          // no earthwork colour, and no departure to speak of.
+          expect(earthworkWeightOf(x)).toBeLessThan(1e-3);
+          expect(Math.abs(dep)).toBeLessThan(1e-4);
+        } else {
+          moved += 1;
+          expect(dep).toBeCloseTo(departure, 3);
+          expect(dist).toBeLessThan(40);
+          if (earthworkWeightOf(x) > 0) coloured += 1;
+          // Anything moved lies on the lip at least, so the facets are gone there.
+          expect(earthworkLipOf(x)).toBeGreaterThan(0);
+        }
+      }
+    }
+    expect(moved).toBeGreaterThan(200);
+    expect(natural).toBeGreaterThan(1000);
+    expect(coloured).toBeGreaterThan(100);
+    expect(EARTHWORK_WEIGHT_FROM_X).toBeGreaterThan(0);
+  });
+
+  it("tilts moved normals by the departure's gradient: upright on the formation, 1 : 1.5 on a straight bank, eased between", () => {
+    const flatTerrain = makeTerrain(130, 70, () => 200);
+    const flatShading = computeTerrainShading(flatTerrain);
+    // A 6 m embankment: its slope runs straight from 5 m out (past the crest's round-off) to about 12 m (the toe's).
+    const run = Array.from({ length: 20 }, (_, i) => earthworkPiece(flatTerrain, inputOf({ kind: "straight", from: { q: 20 + i, r: 30, zMm: 26_000 }, heading: 0, z1Mm: 26_000 } as PieceSpec)));
+    const m = buildEarthworkChunk(passFor(flatTerrain, 0, 0, 0, run), flatShading);
+    const y0 = 30 * 2.5 * Math.sqrt(3);
+    const bank = (Math.atan(1 / SIDE_SLOPE_RUN) * 180) / Math.PI;
+    let bed = 0;
+    let slope = 0;
+    const eased: [number, number][] = [];
+    for (let i = 0; i < m.positions.length / 3; i++) {
+      const s = worldToSim(vertex(m, i));
+      // The run spans x = 5 · (20 + 30/2) = 175 m to 275 m; stay 30 m clear of its ends. Skip the plain chunk's
+      // vertices the refined triangles no longer use (they stay in the arrays at the natural height).
+      if (s.x < 205 || s.x > 245 || s.z < 20.2) continue;
+      const d = Math.abs(s.y - y0);
+      const n = new Vector3(m.normals[3 * i], m.normals[3 * i + 1], m.normals[3 * i + 2]);
+      const tilt = (Math.acos(n.y) * 180) / Math.PI;
+      if (d < FORMATION_HALF_WIDTH_M - 1.3) {
+        bed += 1;
+        expect(tilt).toBeLessThan(0.01);
+      } else if (d > FORMATION_HALF_WIDTH_M + CREST_ROUND_M + 1.3 && d < 10.8) {
+        slope += 1;
+        expect(tilt).toBeCloseTo(bank, 1);
+        // Facing away from the track.
+        expect(Math.sign(-n.z)).toBe(Math.sign(s.y - y0));
+      } else if (d > FORMATION_HALF_WIDTH_M && d < FORMATION_HALF_WIDTH_M + CREST_ROUND_M) eased.push([d, tilt]);
+    }
+    expect(bed).toBeGreaterThan(20);
+    expect(slope).toBeGreaterThan(20);
+    // Across the crest's round-off the tilt grows with the distance and stays between flat and the bank.
+    eased.sort((a, b) => a[0] - b[0]);
+    expect(eased.length).toBeGreaterThan(10);
+    for (const [, tilt] of eased) expect(tilt).toBeLessThanOrEqual(bank + 0.5);
+    expect(eased[eased.length - 1]![1]).toBeGreaterThan(eased[0]![1]);
   });
 
   it("meets its neighbour along chunk seams", () => {

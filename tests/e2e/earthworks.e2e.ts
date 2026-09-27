@@ -150,3 +150,74 @@ test("a curve laid across a hill stays visible: the drawn terrain is cut under i
   expect(after.stats.refinedTriangles).toBe(0);
   expect(errors).toEqual([]);
 });
+
+test("the owner's lake-shore curve: rails stay clear, the fill meets the water as a slope with no cliff, undo restores", async ({ page }) => {
+  // Render pass iteration (2026-09-27): a free drag on the lake's east shore, (50, 203) → (34, 246), gives ten
+  // straights over a hilltop, then an R 180 curve through a cutting onto a fill at the shore (the owner's scene).
+  // Round 1 capped the fill 10 cm under the water, which left near-vertical steps along the shore.
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await openDiorama(page);
+  await lookAtNode(page, 42, 224, 4);
+  await page.keyboard.press("1");
+  await dragBetween(page, await nodeScreen(page, 50, 203), await nodeScreen(page, 34, 246), 24);
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => window.__diorama?.ready === true);
+  const built = await readback(page);
+  expect(built.kinds).toContain("curve");
+  for (const worst of built.drawnOverRail) expect(worst).toBeLessThanOrEqual(0);
+  expect(Math.max(...built.naturalOverRail)).toBeGreaterThan(1);
+
+  // Around the shore end of the curve, sample the drawn surface every 0.5 m: where the natural ground lies under the
+  // water, no step between neighbouring samples may be steeper than the 1 : 1.5 side slope (plus sampling slack).
+  const shore = await page.evaluate(() => {
+    const h = window.__diorama as unknown as {
+      network(): { pieces: { kind: string; z0Mm: number; z1Mm: number; prims: Prim[] }[] };
+      drawnHeightM(x: number, y: number): number;
+      naturalHeightM(x: number, y: number): number;
+      terrain: { waterLevelDm: number };
+    };
+    const curve = h.network().pieces.find((p) => p.kind === "curve");
+    const arc = curve?.prims.find((q) => q.kind === "arc");
+    if (!curve || !arc) throw new Error("no curve");
+    // The curve's lower end (its lower z) is the shore end.
+    const a = curve.z0Mm < curve.z1Mm ? arc.startRad : arc.startRad + arc.sweepRad;
+    const cx = arc.cx + arc.radiusM * Math.cos(a);
+    const cy = arc.cy + arc.radiusM * Math.sin(a);
+    const water = h.terrain.waterLevelDm / 10;
+    let underwater = 0;
+    let steepest = 0;
+    let moved = 0;
+    // Round 1's signature: drawn ground flat at 10 cm under the water over a deeper natural bed (a shelf).
+    let shelf = 0;
+    const onShelf = (z: number) => Math.abs(z - (water - 0.1)) < 0.02;
+    for (let x = cx - 20; x <= cx + 20; x += 0.5) {
+      for (let y = cy - 20; y <= cy + 20; y += 0.5) {
+        const z = h.drawnHeightM(x, y);
+        const n = h.naturalHeightM(x, y);
+        if (!(n < water)) continue;
+        underwater += 1;
+        if (Math.abs(z - n) > 0.05) moved += 1;
+        if (n < water - 0.2 && onShelf(z) && onShelf(h.drawnHeightM(x + 0.5, y)) && onShelf(h.drawnHeightM(x, y + 0.5))) shelf += 1;
+        for (const [dx, dy] of [[0.5, 0], [0, 0.5]] as const) {
+          const z1 = h.drawnHeightM(x + dx, y + dy);
+          if (Number.isFinite(z1)) steepest = Math.max(steepest, Math.abs(z1 - z) / 0.5);
+        }
+      }
+    }
+    return { underwater, moved, steepest, shelf };
+  });
+  console.log(`[earthworks e2e] lake shore: ${JSON.stringify(shore)}`);
+  expect(shore.underwater).toBeGreaterThan(100);
+  expect(shore.moved).toBeGreaterThan(10);
+  expect(shore.steepest).toBeLessThan(0.75);
+  expect(shore.shelf).toBe(0);
+
+  await undoToEmpty(page);
+  await page.waitForFunction(() => window.__diorama?.ready === true);
+  const stats = await page.evaluate(() => (window.__diorama as unknown as { earthworksStats(): { chunksWithEarthworks: number; refinedTriangles: number } }).earthworksStats());
+  expect(stats.chunksWithEarthworks).toBe(0);
+  expect(stats.refinedTriangles).toBe(0);
+  expect(errors).toEqual([]);
+});

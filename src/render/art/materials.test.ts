@@ -29,9 +29,9 @@ describe("world materials", () => {
     m.dispose();
   });
 
-  it("gives the terrain splat, the earthwork fade after it, grain and edge fade, and the water a calmer grain and edge fade", () => {
+  it("gives the terrain splat (keeping the grass on earthworks), the earthwork colours after it, grain and edge fade, and the water a calmer grain and edge fade", () => {
     const u = createArtUniforms(bounds);
-    expect(terrainChunks(u).map((c) => c.key)).toEqual(["terrain-splat-v2", "terrain-earthwork-v1", "grain-v1", "edge-fade-v1"]);
+    expect(terrainChunks(u).map((c) => c.key)).toEqual(["terrain-splat-v4-earthwork", "terrain-earthwork-v2", "grain-v1", "edge-fade-v1"]);
     expect(waterChunks(u).map((c) => c.key)).toEqual(["grain-v1", "edge-fade-v1"]);
     expect(u.waterGrain.uGrainAmount.value).toBeLessThan(u.grain.uGrainAmount.value);
   });
@@ -40,13 +40,13 @@ describe("world materials", () => {
     const u = createArtUniforms(bounds);
     expect(terrainChunks(u, {}).map((c) => c.key)).toEqual(terrainChunks(u).map((c) => c.key));
     expect(terrainChunks(u, { crispSplat: true, detail: true, relief: true }).map((c) => c.key)).toEqual([
-      "terrain-splat-v3-crisp-detail",
-      "terrain-earthwork-v1",
-      "terrain-relief-v1",
+      "terrain-splat-v4-crisp-detail-earthwork",
+      "terrain-earthwork-v2",
+      "terrain-relief-v2",
       "grain-v1",
       "edge-fade-v1",
     ]);
-    expect(terrainChunks(u, { crispSplat: true, detail: true, relief: true, facets: true }).map((c) => c.key)[2]).toBe("terrain-relief-v1-facets");
+    expect(terrainChunks(u, { crispSplat: true, detail: true, relief: true, facets: true }).map((c) => c.key)[2]).toBe("terrain-relief-v2-facets");
   });
 
   it("turns sway off and on (reduced motion)", () => {

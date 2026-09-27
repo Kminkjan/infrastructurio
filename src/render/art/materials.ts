@@ -82,12 +82,13 @@ export interface TerrainChunkOptions {
 }
 
 /**
- * Chunks after the lattice on the terrain material: splat, then the earthwork
- * fade right after the splat it fades, then relief (its contour hint darkens
- * fields and roads too), grain and edge fade.
+ * Chunks after the lattice on the terrain material: splat (keeping the grass on
+ * earthworks), then the earthwork colours right after it, then relief (its
+ * contour hint darkens fields and roads too; its facets fade out on
+ * earthworks), grain and edge fade.
  */
 export function terrainChunks(u: ArtUniforms, options: TerrainChunkOptions = {}): ShaderChunk[] {
-  const splat = createSplatChunk(u.splat, { crisp: options.crispSplat === true, ...(options.detail ? { detail: u.detail } : {}) });
+  const splat = createSplatChunk(u.splat, { crisp: options.crispSplat === true, earthwork: true, ...(options.detail ? { detail: u.detail } : {}) });
   const relief = options.relief ? [createReliefChunk(u.relief, { facets: options.facets === true })] : [];
   return [splat, createEarthworkChunk(u.earthwork), ...relief, createGrainChunk(u.grain), createEdgeFadeChunk(u.edge)];
 }

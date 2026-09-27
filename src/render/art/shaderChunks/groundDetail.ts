@@ -19,7 +19,11 @@ import { palette } from "../palette";
  * 5. a wet, darker soil band where a bank meets the water.
  *
  * Cuts are antialiased with `fwidth` of the cut function, so they stay crisp
- * without aliasing at Far. Colours are mixed toward palette targets scaled by
+ * without aliasing at Far. The render pass iteration (2026-09-27) made the tone
+ * patches' edge width, their mixes and the fleck cut levels settings, so the
+ * default look can calm them (the owner found them hard-edged and noisy) while
+ * look `a` keeps its crisp values; and a soil mask (1 − the earthwork lip) keeps
+ * the slope soil off cuttings and embankments. Colours are mixed toward palette targets scaled by
  * the grass's relative brightness (as the splat does), so the baked hollows
  * and height shading still show. The splat chunk includes `GROUND_DETAIL_PARS`
  * and calls `groundDetail`; `groundDetailAlbedo` mirrors the GLSL for tests
@@ -35,12 +39,18 @@ export interface GroundDetailUniforms {
   /** Crisp tone patches, 0–1. */
   readonly uGdPatch: IUniform<number>;
   readonly uGdPatchCellM: IUniform<number>;
+  /** Half width of the tone patch and meadow fleck edges in noise units (0: one pixel). */
+  readonly uGdToneSoft: IUniform<number>;
+  /** How far light and dark patches move toward grass light and grass shade at full amount. */
+  readonly uGdPatchMix: IUniform<Vector2>;
   /** Share of 1.6 m cells holding a tuft, 0–1 (0 = none). */
   readonly uGdTufts: IUniform<number>;
   /** Meadow flecks, 0–1. */
   readonly uGdMeadowAmount: IUniform<number>;
   /** Flecks begin at x and are densest from y (world height, m). */
   readonly uGdMeadowM: IUniform<Vector2>;
+  /** Fleck cut levels on their noise at and below x's height and from y's (higher: fewer flecks). */
+  readonly uGdMeadowCuts: IUniform<Vector2>;
   /** Soil on steep ground, 0–1. */
   readonly uGdSlopeSoil: IUniform<number>;
   /** Cosines of the slope angles: steeper than x always, gentler than y never show soil; noise picks between. */
@@ -54,20 +64,40 @@ export interface GroundDetailUniforms {
 export interface GroundDetailSettings {
   readonly patch: number;
   readonly patchCellM: number;
+  /** Half width of the tone patch and meadow fleck edges in noise units (0: one pixel, crisp). */
+  readonly toneSoft: number;
+  /** [light, dark]: how far the patches move toward grass light and grass shade. */
+  readonly patchMix: readonly [number, number];
   readonly tufts: number;
   readonly meadow: number;
   readonly meadowM: readonly [number, number];
+  /** Fleck cut levels at and below the lower height and from the upper one (higher: fewer). */
+  readonly meadowCuts: readonly [number, number];
   readonly slopeSoil: number;
   /** [always, never]: soil on slopes steeper than the first angle, never below the second. */
   readonly slopeDeg: readonly [number, number];
   readonly waterline: number;
 }
 
-/** Detail off: `groundDetail` returns its input unchanged. */
-export const NO_GROUND_DETAIL: GroundDetailSettings = { patch: 0, patchCellM: 16, tufts: 0, meadow: 0, meadowM: [22, 34], slopeSoil: 0, slopeDeg: [16, 10], waterline: 0 };
-
-/** How far each detail layer moves toward its target at full amount. */
+/** How far each detail layer moves toward its target at full amount (the patches' are defaults: see `patchMix`). */
 export const DETAIL_MIX = { light: 0.18, dark: 0.12, tuft: 0.3, meadow: 0.35, soil: 0.35, wet: 0.72 } as const;
+/** Meadow cut level on the fleck noise at and below the lower height, and from the upper one (defaults: see `meadowCuts`). */
+export const MEADOW_CUTS = [0.95, 0.72] as const;
+
+/** Detail off: `groundDetail` returns its input unchanged. */
+export const NO_GROUND_DETAIL: GroundDetailSettings = {
+  patch: 0,
+  patchCellM: 16,
+  toneSoft: 0,
+  patchMix: [DETAIL_MIX.light, DETAIL_MIX.dark],
+  tufts: 0,
+  meadow: 0,
+  meadowM: [22, 34],
+  meadowCuts: MEADOW_CUTS,
+  slopeSoil: 0,
+  slopeDeg: [16, 10],
+  waterline: 0,
+};
 /** The patches' second octave: cells this share of the patch cell, with this weight. */
 export const PATCH_FINE_RATIO = 0.31;
 export const PATCH_FINE_WEIGHT = 0.35;
@@ -79,8 +109,6 @@ export const TUFT_RADIUS_M = 0.26;
 export const TUFT_FADE_PX = [1.5, 3] as const;
 /** Patch cut levels on the patch noise: above `light` lighter grass, below `dark` darker. */
 export const PATCH_CUTS = { light: 0.6, dark: 0.4 } as const;
-/** Meadow cut level on the fleck noise at and below the lower height, and from the upper one. */
-export const MEADOW_CUTS = [0.95, 0.72] as const;
 /** The wet band reaches this far above the water level, plus up to `WET_NOISE_M`. */
 export const WET_BAND_M = 0.25;
 export const WET_NOISE_M = 0.2;
@@ -97,9 +125,12 @@ export function createGroundDetailUniforms(settings: GroundDetailSettings = NO_G
     uGdSoil: { value: new Color() },
     uGdPatch: { value: 0 },
     uGdPatchCellM: { value: 16 },
+    uGdToneSoft: { value: 0 },
+    uGdPatchMix: { value: new Vector2() },
     uGdTufts: { value: 0 },
     uGdMeadowAmount: { value: 0 },
     uGdMeadowM: { value: new Vector2() },
+    uGdMeadowCuts: { value: new Vector2() },
     uGdSlopeSoil: { value: 0 },
     uGdSlopeCos: { value: new Vector2() },
     uGdWaterline: { value: 0 },
@@ -113,9 +144,12 @@ export function createGroundDetailUniforms(settings: GroundDetailSettings = NO_G
 export function applyGroundDetailSettings(u: GroundDetailUniforms, s: GroundDetailSettings): void {
   u.uGdPatch.value = s.patch;
   u.uGdPatchCellM.value = s.patchCellM;
+  u.uGdToneSoft.value = s.toneSoft;
+  u.uGdPatchMix.value.set(s.patchMix[0], s.patchMix[1]);
   u.uGdTufts.value = s.tufts;
   u.uGdMeadowAmount.value = s.meadow;
   u.uGdMeadowM.value.set(s.meadowM[0], s.meadowM[1]);
+  u.uGdMeadowCuts.value.set(s.meadowCuts[0], s.meadowCuts[1]);
   u.uGdSlopeSoil.value = s.slopeSoil;
   u.uGdSlopeCos.value.set(Math.cos((s.slopeDeg[0] * Math.PI) / 180), Math.cos((s.slopeDeg[1] * Math.PI) / 180));
   u.uGdWaterline.value = s.waterline;
@@ -138,9 +172,12 @@ uniform vec3 uGdMeadow;
 uniform vec3 uGdSoil;
 uniform float uGdPatch;
 uniform float uGdPatchCellM;
+uniform float uGdToneSoft;
+uniform vec2 uGdPatchMix;
 uniform float uGdTufts;
 uniform float uGdMeadowAmount;
 uniform vec2 uGdMeadowM;
+uniform vec2 uGdMeadowCuts;
 uniform float uGdSlopeSoil;
 uniform vec2 uGdSlopeCos;
 uniform float uGdWaterline;
@@ -166,18 +203,25 @@ float gdCut( float x ) {
   return smoothstep( - w, w, x );
 }
 
-// base: the grass albedo (linear), p: sim plan (m), h: world height (m), up: world normal y.
+// The same, but never narrower than ±soft (in x's units): a soft edge that still antialiases.
+float gdSoftCut( float x, float soft ) {
+  float w = max( fwidth( x ), max( soft, 1e-4 ) );
+  return smoothstep( - w, w, x );
+}
+
+// base: the grass albedo (linear), p: sim plan (m), h: world height (m), up: world normal y,
+// soilMask: 0–1 on the slope soil (0 on earthworks, which stay grassed).
 // Three value noises in all (16 m and 5 m for the patches, 6.5 m for flecks and fraying),
 // shared between layers; each layer sits behind a uniform branch, so a zero amount costs nothing.
-vec3 groundDetail( vec3 base, vec2 p, float h, float up ) {
+vec3 groundDetail( vec3 base, vec2 p, float h, float up, float soilMask ) {
   vec3 luma = vec3( ${LUMA.join(", ")} );
   float shade = clamp( dot( base, luma ) / max( dot( uGdGrass, luma ), 1e-3 ), ${SHADE_MIN.toFixed(2)}, ${SHADE_MAX.toFixed(2)} );
   float nFine = 0.0;
   if ( uGdPatch > 0.0 || uGdMeadowAmount > 0.0 ) nFine = gdNoise( p / ( ${PATCH_FINE_RATIO.toFixed(2)} * uGdPatchCellM ) + 17.0 );
   if ( uGdPatch > 0.0 ) {
     float n = ${(1 - PATCH_FINE_WEIGHT).toFixed(2)} * gdNoise( p / uGdPatchCellM ) + ${PATCH_FINE_WEIGHT.toFixed(2)} * nFine;
-    base *= mix( vec3( 1.0 ), uGdGrassLight / uGdGrass, ${DETAIL_MIX.light.toFixed(2)} * uGdPatch * gdCut( n - ${PATCH_CUTS.light.toFixed(2)} ) );
-    base *= mix( vec3( 1.0 ), uGdGrassShade / uGdGrass, ${DETAIL_MIX.dark.toFixed(2)} * uGdPatch * gdCut( ${PATCH_CUTS.dark.toFixed(2)} - n ) );
+    base *= mix( vec3( 1.0 ), uGdGrassLight / uGdGrass, uGdPatchMix.x * uGdPatch * gdSoftCut( n - ${PATCH_CUTS.light.toFixed(2)}, uGdToneSoft ) );
+    base *= mix( vec3( 1.0 ), uGdGrassShade / uGdGrass, uGdPatchMix.y * uGdPatch * gdSoftCut( ${PATCH_CUTS.dark.toFixed(2)} - n, uGdToneSoft ) );
   }
   if ( uGdTufts > 0.0 ) {
     vec2 tuftCell = p / ${TUFT_CELL_M.toFixed(2)};
@@ -193,12 +237,12 @@ vec3 groundDetail( vec3 base, vec2 p, float h, float up ) {
     float nFleck = gdNoise( p / 6.5 + 41.0 );
     if ( uGdMeadowAmount > 0.0 ) {
       float m = ${(1 - MEADOW_FINE_WEIGHT).toFixed(2)} * nFleck + ${MEADOW_FINE_WEIGHT.toFixed(2)} * nFine;
-      float meadowCut = mix( ${MEADOW_CUTS[0].toFixed(2)}, ${MEADOW_CUTS[1].toFixed(2)}, smoothstep( uGdMeadowM.x, uGdMeadowM.y, h ) );
-      base = mix( base, uGdMeadow * shade, ${DETAIL_MIX.meadow.toFixed(2)} * uGdMeadowAmount * gdCut( m - meadowCut ) );
+      float meadowCut = mix( uGdMeadowCuts.x, uGdMeadowCuts.y, smoothstep( uGdMeadowM.x, uGdMeadowM.y, h ) );
+      base = mix( base, uGdMeadow * shade, ${DETAIL_MIX.meadow.toFixed(2)} * uGdMeadowAmount * gdSoftCut( m - meadowCut, uGdToneSoft ) );
     }
     if ( uGdSlopeSoil > 0.0 ) {
       float slopeCos = mix( uGdSlopeCos.x, uGdSlopeCos.y, nFleck );
-      base = mix( base, uGdSoil * shade, ${DETAIL_MIX.soil.toFixed(2)} * uGdSlopeSoil * gdCut( slopeCos - up ) );
+      base = mix( base, uGdSoil * shade, ${DETAIL_MIX.soil.toFixed(2)} * uGdSlopeSoil * soilMask * gdCut( slopeCos - up ) );
     }
     if ( uGdWaterline > 0.0 ) {
       float wetTop = uGdWaterLevel + ${WET_BAND_M.toFixed(2)} + ${WET_NOISE_M.toFixed(2)} * nFleck;
@@ -288,9 +332,9 @@ export function tuftAt(x: number, y: number, density: number, metresPerPx = 0): 
 }
 
 /**
- * Mirror of `groundDetail` with hard cuts: the grass albedo at sim plan
- * (x, y), world height `h` (m) and world normal y `up`; `metresPerPx` only
- * affects the tufts (see `tuftAt`).
+ * Mirror of `groundDetail` with hard cuts (the tone layers' soft edges excepted): the
+ * grass albedo at sim plan (x, y), world height `h` (m) and world normal y `up`;
+ * `metresPerPx` only affects the tufts (see `tuftAt`), `soilMask` scales the slope soil.
  */
 export function groundDetailAlbedo(
   base: Rgb,
@@ -302,6 +346,7 @@ export function groundDetailAlbedo(
   c: GroundDetailColours,
   waterLevelM = 10,
   metresPerPx = 0,
+  soilMask = 1,
 ): [number, number, number] {
   const luma = (v: Rgb) => v[0] * LUMA[0] + v[1] * LUMA[1] + v[2] * LUMA[2];
   const shade = Math.min(SHADE_MAX, Math.max(SHADE_MIN, luma(base) / Math.max(luma(c.grass), 1e-3)));
@@ -318,19 +363,19 @@ export function groundDetailAlbedo(
   const nFine = gdNoise(x / fineCell + 17, y / fineCell + 17);
   if (s.patch > 0) {
     const n = (1 - PATCH_FINE_WEIGHT) * gdNoise(x / s.patchCellM, y / s.patchCellM) + PATCH_FINE_WEIGHT * nFine;
-    scale(ratio(c.grassLight), DETAIL_MIX.light * s.patch * gdCut(n - PATCH_CUTS.light));
-    scale(ratio(c.grassShade), DETAIL_MIX.dark * s.patch * gdCut(PATCH_CUTS.dark - n));
+    scale(ratio(c.grassLight), s.patchMix[0] * s.patch * gdCut(n - PATCH_CUTS.light, s.toneSoft));
+    scale(ratio(c.grassShade), s.patchMix[1] * s.patch * gdCut(PATCH_CUTS.dark - n, s.toneSoft));
   }
   if (s.tufts > 0) scale(ratio(c.grassShade), DETAIL_MIX.tuft * tuftAt(x, y, s.tufts, metresPerPx));
   const nFleck = gdNoise(x / 6.5 + 41, y / 6.5 + 41);
   if (s.meadow > 0) {
     const m = (1 - MEADOW_FINE_WEIGHT) * nFleck + MEADOW_FINE_WEIGHT * nFine;
-    const meadowCut = MEADOW_CUTS[0] + (MEADOW_CUTS[1] - MEADOW_CUTS[0]) * smoothstep(s.meadowM[0], s.meadowM[1], h);
-    toward(c.meadow, 1, DETAIL_MIX.meadow * s.meadow * gdCut(m - meadowCut));
+    const meadowCut = s.meadowCuts[0] + (s.meadowCuts[1] - s.meadowCuts[0]) * smoothstep(s.meadowM[0], s.meadowM[1], h);
+    toward(c.meadow, 1, DETAIL_MIX.meadow * s.meadow * gdCut(m - meadowCut, s.toneSoft));
   }
   if (s.slopeSoil > 0) {
     const [steep, gentle] = s.slopeDeg.map((deg) => Math.cos((deg * Math.PI) / 180)) as [number, number];
-    toward(c.soil, 1, DETAIL_MIX.soil * s.slopeSoil * gdCut(steep + (gentle - steep) * nFleck - up));
+    toward(c.soil, 1, DETAIL_MIX.soil * s.slopeSoil * soilMask * gdCut(steep + (gentle - steep) * nFleck - up));
   }
   if (s.waterline > 0) toward(c.soil, DETAIL_MIX.wet, s.waterline * gdCut(waterLevelM + WET_BAND_M + WET_NOISE_M * nFleck - h));
   return out;

@@ -1,4 +1,5 @@
 import { SQRT3 } from "../../core/sim/api";
+import { EARTHWORK_ITEM_SIZE } from "../art/shaderChunks/earthwork";
 import { type ChunkPass, EARTHWORK_MIN_M, REFINE, SUB_VERTS, forEachChunkTriangle, lodNodeIndex, subAxial, triangleCorners } from "./earthworks";
 import { type MeshData, buildChunkData } from "./terrainGeometry";
 import type { TerrainShading } from "./terrainShading";
@@ -7,30 +8,29 @@ import type { TerrainShading } from "./terrainShading";
  * Chunk geometry with earthworks (see `earthworks.ts`): the plain chunk mesh,
  * with each refined lattice triangle replaced by its 16 sub-triangles and
  * each plain triangle beside one replaced by a fan through the refined
- * edge's vertices. Every vertex keeps the plain mesh's colour (barycentric
- * where it is new), and a vertex the conform left natural its normal too, so a
- * refined or fanned triangle that did not move looks exactly like the plain
- * one. Moved vertices take the normal of the drawn surface (least squares over
- * the six sub-lattice neighbours). The `earthwork` attribute ramps with how far
- * the rule moves the ground, (d − 5 cm) / 45 cm unclamped, and the terrain
- * shader (`shaderChunks/earthwork.ts`) clamps it per fragment and paints the
- * palette's earthwork colours by slope.
+ * edge's vertices. A vertex the conform left natural keeps the plain mesh's
+ * colour and normal (barycentric where it is new), so a refined or fanned
+ * triangle that did not move looks exactly like the plain one. A moved
+ * vertex's normal is the smooth natural normal tilted by the departure's
+ * least-squares gradient over its six sub-lattice neighbours, and its colour
+ * blends toward the dry recipe (`TerrainShading.dryColors`, no shore soil) as
+ * it moves (render pass iteration, 2026-09-27). The vec3 `earthwork` attribute
+ * (encoded potential, signed departure, distance to the centreline;
+ * `ChunkPass.attributesAt`) drives the terrain shader's earthwork colours
+ * (`shaderChunks/earthwork.ts`). Plain corners that refined triangles reuse
+ * carry their true attribute too, so the colour interpolates correctly up to
+ * them; plain vertices elsewhere keep zeros, which the shader reads as natural
+ * ground, and so do fans, whose edge vertices the rule never moves.
  */
 
 export interface EarthworkMeshData extends MeshData {
-  /** Per vertex: the earthwork colour ramp, ≤ 0 on natural ground and ≥ 1 where fully earthwork. */
+  /** Per vertex, EARTHWORK_ITEM_SIZE floats: the `earthwork` attribute (zeros on natural ground). */
   readonly earthwork: Float32Array;
 }
 
-/** Ground moved by this much or more takes the full earthwork colour. */
-export const EARTHWORK_FULL_M = 0.5;
-
-/** The `earthwork` attribute for a departure of `movedM` (unclamped, so interpolation keeps the contour). */
-export function earthworkRamp(movedM: number): number {
-  return (movedM - EARTHWORK_MIN_M) / (EARTHWORK_FULL_M - EARTHWORK_MIN_M);
-}
-
 const HALF_SQRT3 = SQRT3 / 2;
+/** Made ground takes the dry colour (`TerrainShading.dryColors`) in full once it moved this far. */
+export const DRY_FULL_M = 0.6;
 /** Sub-lattice neighbour steps (dQs, dRs) and their plan unit vectors, headings 0, 2, …, 10: dq, dr, ux, uy per row. */
 const NEIGHBOURS = new Float64Array([1, 0, 1, 0, 0, 1, 0.5, HALF_SQRT3, -1, 1, -0.5, HALF_SQRT3, -1, 0, -1, 0, 0, -1, -0.5, -HALF_SQRT3, 1, -1, 0.5, -HALF_SQRT3]);
 
@@ -51,7 +51,7 @@ export function buildEarthworkChunk(pass: ChunkPass, shading: TerrainShading, pl
   const base = plain ?? buildChunkData(t, shading, pass.chunkX, pass.chunkY, lat.lod);
   const baseCount = base.positions.length / 3;
   const { refined, fans } = pass.stats;
-  if (refined === 0 && fans === 0) return { ...base, earthwork: new Float32Array(baseCount) };
+  if (refined === 0 && fans === 0) return { ...base, earthwork: new Float32Array(baseCount * EARTHWORK_ITEM_SIZE) };
 
   const k = REFINE;
   const sub = lat.spacingM / k;
@@ -63,7 +63,7 @@ export function buildEarthworkChunk(pass: ChunkPass, shading: TerrainShading, pl
   const positions = new Float32Array(capacity * 3);
   const normals = new Float32Array(capacity * 3);
   const colors = new Float32Array(capacity * 3);
-  const earthwork = new Float32Array(capacity);
+  const earthwork = new Float32Array(capacity * EARTHWORK_ITEM_SIZE);
   positions.set(base.positions);
   normals.set(base.normals);
   colors.set(base.colors);
@@ -144,25 +144,24 @@ export function buildEarthworkChunk(pass: ChunkPass, shading: TerrainShading, pl
     nx /= len;
     ny /= len;
     nz /= len;
-    if (pass.isModified(qs, rs)) {
-      const moved = Math.abs(drawn - pass.naturalAt(qs, rs));
-      // Least-squares slope of the drawn surface over the six neighbours: (Σ u·Δh) / (3·spacing).
-      let gx = 0;
-      let gy = 0;
-      for (let i = 0; i < 24; i += 4) {
-        const h = pass.drawnAt(qs + (NEIGHBOURS[i] ?? 0), rs + (NEIGHBOURS[i + 1] ?? 0));
-        const dh = Number.isNaN(h) ? 0 : h - drawn;
-        gx += (NEIGHBOURS[i + 2] ?? 0) * dh;
-        gy += (NEIGHBOURS[i + 3] ?? 0) * dh;
-      }
-      gx /= 3 * sub;
-      gy /= 3 * sub;
-      // Sim normal (−gx, −gy, 1) → world (x, z, −y), blended in over the first 30 cm of movement.
-      const l = Math.hypot(gx, gy, 1);
-      const w = smoothstep(EARTHWORK_MIN_M, EARTHWORK_MIN_M + 0.3, moved);
-      nx += (-gx / l - nx) * w;
-      ny += (1 / l - ny) * w;
-      nz += (gy / l - nz) * w;
+    // The drawn surface is the natural one plus the departure D = C − N, so its normal is the smooth natural
+    // normal tilted by D's least-squares gradient over the six neighbours, (Σ u·ΔD) / (3·spacing). D is smooth
+    // and exactly 0 on natural ground, so the normals stay continuous across the lip; the 5 m lattice facets
+    // a raw drawn-surface normal would carry never enter it (the relief chunk's slope gain magnifies those).
+    const d0 = pass.departureAt(qs, rs);
+    let gx = 0;
+    let gy = 0;
+    for (let i = 0; i < 24; i += 4) {
+      const dd = pass.departureAt(qs + (NEIGHBOURS[i] ?? 0), rs + (NEIGHBOURS[i + 1] ?? 0)) - d0;
+      gx += (NEIGHBOURS[i + 2] ?? 0) * dd;
+      gy += (NEIGHBOURS[i + 3] ?? 0) * dd;
+    }
+    if (gx !== 0 || gy !== 0) {
+      // World surface y = f(x, z) has n ∝ (−f_x, 1, −f_z); sim (x, y) → world (x, −z), so D_x = gx and D_z = −gy.
+      const s0 = 1 / Math.max(ny, 1e-3);
+      nx = nx * s0 - gx / (3 * sub);
+      nz = nz * s0 + gy / (3 * sub);
+      ny = 1;
       len = Math.hypot(nx, ny, nz) || 1;
       nx /= len;
       ny /= len;
@@ -171,10 +170,13 @@ export function buildEarthworkChunk(pass: ChunkPass, shading: TerrainShading, pl
     normals[3 * id] = nx;
     normals[3 * id + 1] = ny;
     normals[3 * id + 2] = nz;
-    colors[3 * id] = blend(shading.colors, 0);
-    colors[3 * id + 1] = blend(shading.colors, 1);
-    colors[3 * id + 2] = blend(shading.colors, 2);
-    earthwork[id] = earthworkRamp(pass.departureAt(qs, rs));
+    // Made ground blends toward the colour without the shore soil (and never the underwater bed's), as it moves.
+    const dry = smoothstep(EARTHWORK_MIN_M, DRY_FULL_M, Math.abs(d0));
+    for (let axis = 0; axis < 3; axis++) {
+      const natural = blend(shading.colors, axis);
+      colors[3 * id + axis] = dry > 0 ? natural + (blend(shading.dryColors, axis) - natural) * dry : natural;
+    }
+    pass.attributesAt(qs, rs, earthwork, EARTHWORK_ITEM_SIZE * id);
     return id;
   };
 
@@ -187,7 +189,11 @@ export function buildEarthworkChunk(pass: ChunkPass, shading: TerrainShading, pl
   const cornerOrVertex = (Q: number, R: number, up: 0 | 1, a: number, b: number): number => {
     subAxial(Q, R, up, a, b, s);
     const corner = a === 0 && b === 0 ? 0 : a === k && b === 0 ? 1 : a === 0 && b === k ? 2 : -1;
-    if (corner >= 0 && !pass.isModified(s.qs, s.rs)) return baseIndex(corners[2 * corner] ?? 0, corners[2 * corner + 1] ?? 0);
+    if (corner >= 0 && !pass.isModified(s.qs, s.rs)) {
+      const plainVertex = baseIndex(corners[2 * corner] ?? 0, corners[2 * corner + 1] ?? 0);
+      pass.attributesAt(s.qs, s.rs, earthwork, EARTHWORK_ITEM_SIZE * plainVertex);
+      return plainVertex;
+    }
     return vertexAt(s.qs, s.rs);
   };
 
@@ -268,7 +274,7 @@ export function buildEarthworkChunk(pass: ChunkPass, shading: TerrainShading, pl
     indices: count > 0xffff ? idx.slice(0, ni) : Uint16Array.from(idx.subarray(0, ni)),
     nodeIndices,
     triangleCount: ni / 3,
-    earthwork: earthwork.slice(0, count),
+    earthwork: earthwork.slice(0, count * EARTHWORK_ITEM_SIZE),
   };
 }
 

@@ -19,7 +19,11 @@ import { ALBEDO_ANCHOR, type ShaderChunk, ensureArtWorld, inject } from "./chunk
  *   smooth normal: n = normalize(n′ + w·(n_facet − n_smooth)). The hills keep
  *   the smooth gain; the facets add a crisp, hand-cut tone per triangle (the
  *   Int16 heights' 1 dm steps included, which is what makes them irregular).
- *   `w` fades in between two zooms, so Far zoom stays smooth.
+ *   `w` fades in between two zooms, so Far zoom stays smooth. On earthworks
+ *   (the terrain's `earthwork` attribute, when present) the facets fade out
+ *   by its lip weight: the refined 1.25 m triangles of a cutting or bank would
+ *   otherwise show as stair-stepped facets along its crest (render pass
+ *   iteration, 2026-09-27).
  * - **Contour hint** (optional). A faint line every `uReliefContourM` metres of
  *   height, one pixel wide at any zoom (distance to the line over `fwidth`),
  *   every `uReliefContourMajor`-th a little stronger, faded out where lines
@@ -127,6 +131,9 @@ const FRAGMENT_NORMAL = /* glsl */ `
   vec3 reliefF = cross( dFdx( vArtWorld ), dFdy( vArtWorld ) );
   reliefF = normalize( reliefF.y < 0.0 ? - reliefF : reliefF );
   float reliefFacetW = uReliefFacet * smoothstep( uReliefFacetPpm.x, uReliefFacetPpm.y, uReliefPpm );
+  #ifdef TERRAIN_EARTHWORK
+  reliefFacetW *= 1.0 - earthworkLip();
+  #endif
   reliefN = normalize( reliefN + reliefFacetW * ( reliefF - reliefSmooth ) );
   #endif
   normal = normalize( ( viewMatrix * vec4( reliefN, 0.0 ) ).xyz );
@@ -139,7 +146,7 @@ export const NORMAL_ANCHOR = "#include <normal_fragment_maps>";
 export function createReliefChunk(uniforms: ReliefUniforms, options: { readonly facets?: boolean } = {}): ShaderChunk {
   const facets = options.facets === true;
   return {
-    key: facets ? "terrain-relief-v1-facets" : "terrain-relief-v1",
+    key: facets ? "terrain-relief-v2-facets" : "terrain-relief-v2",
     patch(shader) {
       Object.assign(shader.uniforms, uniforms);
       ensureArtWorld(shader);
@@ -177,9 +184,9 @@ function smoothstep(e0: number, e1: number, x: number): number {
   return t * t * (3 - 2 * t);
 }
 
-/** How much of the facet normal the shader blends in at a zoom. */
-export function facetWeight(facet: number, ppm: number, fadePpm: readonly [number, number]): number {
-  return facet * smoothstep(fadePpm[0], fadePpm[1], ppm);
+/** How much of the facet normal the shader blends in at a zoom, over earthwork lip weight `lip` (0 off earthworks). */
+export function facetWeight(facet: number, ppm: number, fadePpm: readonly [number, number], lip = 0): number {
+  return facet * smoothstep(fadePpm[0], fadePpm[1], ppm) * (1 - lip);
 }
 
 /** A triangle's upward unit normal from its world vertices (what the derivative cross product gives). */

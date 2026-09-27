@@ -1,6 +1,7 @@
 import { Color, type IUniform, type Texture, Vector2 } from "three";
 import { palette } from "../palette";
 import { ALBEDO_ANCHOR, type ShaderChunk, ensureArtWorld, inject } from "./chunk";
+import { ensureEarthworkVarying } from "./earthwork";
 import { GROUND_DETAIL_PARS, type GroundDetailUniforms } from "./groundDetail";
 
 /**
@@ -28,6 +29,13 @@ import { GROUND_DETAIL_PARS, type GroundDetailUniforms } from "./groundDetail";
  *   yards at 0.45 (keeping the yard's partial weight), and the forest floor at
  *   a noisy level, each over one pixel (`crispSplatWeight` mirrors it).
  * - `detail`: runs `groundDetail` on the grass before any surface is laid.
+ *
+ * The terrain material always adds a third (render pass iteration, 2026-09-27):
+ * - `earthwork`: reads the terrain's `earthwork` attribute (see
+ *   `shaderChunks/earthwork.ts`) and fades the surfaces and the AO tint by its
+ *   earthwork weight, and the grass detail's slope soil by its lip, so cuttings
+ *   and embankments keep the grass (and its detail) instead of fields, roads,
+ *   forest floor or a frayed soil rim. Off earthworks the colour is unchanged.
  */
 
 export const FURROW_SPACING_M = 1.4;
@@ -154,21 +162,29 @@ const CRISP_MAIN = /* glsl */ `  splat.r *= splatCut( splat.r - ${SPLAT_CUTS.dir
 
 // The grass detail runs on the vertex colour before any surface is laid over it; the
 // surfaces keep their shade from the undetailed grass, so no patch shows through a road.
-const DETAIL_MAIN = /* glsl */ `  #ifdef FLAT_SHADED
+function detailMain(earthwork: boolean): string {
+  return /* glsl */ `  #ifdef FLAT_SHADED
   float splatUp = abs( normalize( cross( dFdx( vArtWorld ), dFdy( vArtWorld ) ) ).y );
   #else
   float splatUp = ( vec4( normalize( vNormal ), 0.0 ) * viewMatrix ).y;
   #endif
-  base = groundDetail( base, splatXY, vArtWorld.y, splatUp );
+  base = groundDetail( base, splatXY, vArtWorld.y, splatUp, ${earthwork ? "1.0 - splatLip" : "1.0"} );
+`;
+}
+
+// Earthworks keep the grass: surfaces fade by the earthwork weight, the slope soil by the lip.
+const EARTHWORK_MAIN = /* glsl */ `  float splatEarthwork = earthworkWeight();
+  float splatLip = earthworkLip();
+  splat *= 1.0 - splatEarthwork;
 `;
 
-function fragmentMain(crisp: boolean, detail: boolean): string {
+function fragmentMain(crisp: boolean, detail: boolean, earthwork: boolean): string {
   return /* glsl */ `
 {
   vec2 splatXY = vec2( vArtWorld.x, -vArtWorld.z );
   vec2 splatUv = splatXY / uSplatSizeM;
   vec4 splat = texture( uSplatMap, splatUv );
-${crisp ? CRISP_MAIN : ""}  vec3 luma = vec3( ${LUMA.join(", ")} );
+${crisp ? CRISP_MAIN : ""}${earthwork ? EARTHWORK_MAIN : ""}  vec3 luma = vec3( ${LUMA.join(", ")} );
   float shade = clamp( dot( diffuseColor.rgb, luma ) / max( dot( uSplatGrassRef, luma ), 1e-3 ), ${SHADE_MIN.toFixed(2)}, ${SHADE_MAX.toFixed(2)} );
   ivec2 fieldSize = textureSize( uFieldMap, 0 );
   ivec2 fieldTexel = clamp( ivec2( floor( splatUv * vec2( fieldSize ) ) ), ivec2( 0 ), fieldSize - 1 );
@@ -183,11 +199,11 @@ ${crisp ? CRISP_MAIN : ""}  vec3 luma = vec3( ${LUMA.join(", ")} );
   vec3 field = uSplatCrops[ crop ] * ( 1.0 - uFurrowStrength * stripe );
   vec3 cobble = mix( uSplatCobble, uSplatCobbleDark, splatNoise( splatXY * 1.6 ) );
   vec3 base = diffuseColor.rgb;
-${detail ? DETAIL_MAIN : ""}  base = mix( base, uSplatForestFloor * shade, splat.a );
+${detail ? detailMain(earthwork) : ""}  base = mix( base, uSplatForestFloor * shade, splat.a );
   base = mix( base, field * shade, splat.b );
   base = mix( base, uSplatDirt * shade, splat.r );
   base = mix( base, cobble * shade, splat.g );
-  diffuseColor.rgb = base * ( 1.0 - uAoStrength * texture( uAoMap, splatXY / uAoSizeM ).r );
+  diffuseColor.rgb = base * ( 1.0 - uAoStrength * texture( uAoMap, splatXY / uAoSizeM ).r${earthwork ? " * ( 1.0 - splatEarthwork )" : ""} );
 }
 `;
 }
@@ -197,21 +213,25 @@ export interface SplatOptions {
   readonly crisp?: boolean;
   /** Ground detail on the grass under the surfaces (terrain look variants). */
   readonly detail?: GroundDetailUniforms;
+  /** Keep the grass on earthworks (reads the terrain's `earthwork` attribute; the terrain material always sets it). */
+  readonly earthwork?: boolean;
 }
 
 /** Without options this is D11a's splat, GLSL and cache key unchanged. */
 export function createSplatChunk(uniforms: SplatUniforms, options: SplatOptions = {}): ShaderChunk {
   const crisp = options.crisp === true;
   const detail = options.detail;
-  const extras = `${crisp ? "-crisp" : ""}${detail ? "-detail" : ""}`;
+  const earthwork = options.earthwork === true;
+  const extras = `${crisp ? "-crisp" : ""}${detail ? "-detail" : ""}${earthwork ? "-earthwork" : ""}`;
   const pars = `${FRAGMENT_PARS}${crisp ? CRISP_PARS : ""}${detail ? GROUND_DETAIL_PARS : ""}`;
-  const main = fragmentMain(crisp, detail !== undefined);
+  const main = fragmentMain(crisp, detail !== undefined, earthwork);
   return {
-    key: extras === "" ? "terrain-splat-v2" : `terrain-splat-v3${extras}`,
+    key: extras === "" ? "terrain-splat-v2" : `terrain-splat-v4${extras}`,
     patch(shader) {
       Object.assign(shader.uniforms, uniforms);
       if (detail) Object.assign(shader.uniforms, detail);
       ensureArtWorld(shader);
+      if (earthwork) ensureEarthworkVarying(shader);
       shader.fragmentShader = inject(shader.fragmentShader, "#include <common>", pars, "after");
       shader.fragmentShader = inject(shader.fragmentShader, ALBEDO_ANCHOR, main, "before");
     },

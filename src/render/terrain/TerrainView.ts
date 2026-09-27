@@ -1,6 +1,6 @@
 import { BufferAttribute, type BufferGeometry, Group, type Material, Mesh } from "three";
 import type { Terrain } from "../../core/sim/api";
-import { EARTHWORK_ATTRIBUTE } from "../art/shaderChunks/earthwork";
+import { EARTHWORK_ATTRIBUTE, EARTHWORK_ITEM_SIZE } from "../art/shaderChunks/earthwork";
 import type { WorldBox } from "../art/shadowFit";
 import type { TerrainLod } from "./offsetGrid";
 import { type MeshData, buildChunkData, buildWaterData, chunkCounts, terrainHeightRangeM, terrainWorldBounds, toBufferGeometry } from "./terrainGeometry";
@@ -134,10 +134,10 @@ export class TerrainView {
   }
 }
 
-/** A terrain chunk's geometry: the mesh data plus its `earthwork` attribute (zeros for natural ground). */
+/** A terrain chunk's geometry: the mesh data plus its vec3 `earthwork` attribute (zeros for natural ground). */
 export function terrainChunkGeometry(data: MeshData & { readonly earthwork?: Float32Array }): BufferGeometry {
   const geometry = toBufferGeometry(data);
-  const weights = data.earthwork ?? new Float32Array(data.positions.length / 3);
-  geometry.setAttribute(EARTHWORK_ATTRIBUTE, new BufferAttribute(weights, 1));
+  const attribute = data.earthwork ?? new Float32Array((data.positions.length / 3) * EARTHWORK_ITEM_SIZE);
+  geometry.setAttribute(EARTHWORK_ATTRIBUTE, new BufferAttribute(attribute, EARTHWORK_ITEM_SIZE));
   return geometry;
 }

@@ -5,6 +5,8 @@ import { NEUTRAL_RELIEF } from "../art/shaderChunks/relief";
 import { D11A_TERRAIN_COLOURS } from "./terrainShading";
 import {
   DEFAULT_TERRAIN_LOOK,
+  FACET_DETAIL_V1,
+  FACET_RELIEF_V1,
   TERRAIN_LOOKS,
   TERRAIN_LOOK_IDS,
   applyTerrainLook,
@@ -46,7 +48,32 @@ describe("terrain look variants", () => {
     expect(c.relief?.contour).toBeGreaterThan(0);
     expect(b.relief?.contour).toBe(0);
     const u = createArtUniforms(bounds);
-    expect(terrainChunks(u, terrainChunkOptions(b)).map((k) => k.key)).toEqual(["terrain-splat-v3-crisp-detail", "terrain-earthwork-v1", "terrain-relief-v1-facets", "grain-v1", "edge-fade-v1"]);
+    expect(terrainChunks(u, terrainChunkOptions(b)).map((k) => k.key)).toEqual(["terrain-splat-v4-crisp-detail-earthwork", "terrain-earthwork-v2", "terrain-relief-v2-facets", "grain-v1", "edge-fade-v1"]);
+  });
+
+  it("calm b after the owner found it noisy: weaker facets, softer, larger and weaker patches, fewer tufts and flecks, the same hills", () => {
+    const { a, b } = TERRAIN_LOOKS;
+    const relief = b.relief;
+    const detail = b.detail;
+    if (!relief || !detail || !a.detail) throw new Error("b and a have relief and detail");
+    // The owner's pick at 3e8a8d3, kept for the record.
+    expect(FACET_RELIEF_V1.facet).toBe(2.5);
+    expect(FACET_DETAIL_V1.patch).toBe(0.7);
+    expect(relief.facet).toBeLessThanOrEqual(FACET_RELIEF_V1.facet / 2);
+    expect(relief.facet).toBeGreaterThan(0);
+    expect(relief.gain).toBe(FACET_RELIEF_V1.gain);
+    expect(relief.maxTan).toBe(FACET_RELIEF_V1.maxTan);
+    expect(detail.toneSoft).toBeGreaterThan(0);
+    expect(detail.patchCellM).toBeGreaterThan(FACET_DETAIL_V1.patchCellM);
+    // Patch contrast, light and dark, under the owner's pick's (70% of the crisp mixes); light, the yellowish one, most.
+    expect(detail.patch * detail.patchMix[0]).toBeLessThan(0.7 * FACET_DETAIL_V1.patch * FACET_DETAIL_V1.patchMix[0]);
+    expect(detail.patch * detail.patchMix[1]).toBeLessThan(FACET_DETAIL_V1.patch * FACET_DETAIL_V1.patchMix[1]);
+    expect(detail.tufts).toBeLessThan(FACET_DETAIL_V1.tufts);
+    expect(detail.meadow).toBeLessThan(FACET_DETAIL_V1.meadow);
+    expect(detail.meadowCuts[1]).toBeGreaterThan(FACET_DETAIL_V1.meadowCuts[1]);
+    // a keeps its crisp detail exactly.
+    expect(a.detail.toneSoft).toBe(0);
+    expect(a.detail.patchMix).toEqual(FACET_DETAIL_V1.patchMix);
   });
 
   it("write their settings and the water level into the shared uniforms", () => {

@@ -17,6 +17,14 @@ export interface TerrainShading {
   readonly colors: Float32Array;
   /** Lattice rings to the nearest water node: 0 on water, WATER_DISTANCE_FAR beyond the cap. */
   readonly waterDistance: Uint8Array;
+  /**
+   * Linear-space RGB per node for made ground: the land recipe without the shore soil tint, on
+   * water nodes at the water level. Earthworks blend toward it as they move, so an embankment
+   * running into a lake stays grassed down to the waterline detail's thin wet line instead of
+   * taking the underwater bed's or the shore rings' brown (render pass iteration, 2026-09-27).
+   * Away from water it equals `colors`.
+   */
+  readonly dryColors: Float32Array;
 }
 
 export const WATER_DISTANCE_FAR = 255;
@@ -81,7 +89,8 @@ export const D11A_TERRAIN_COLOURS: TerrainColourOptions = {
 export function computeTerrainShading(t: Terrain, colours: TerrainColourOptions = D11A_TERRAIN_COLOURS): TerrainShading {
   const waterDistance = computeWaterDistance(t);
   const heights = colours.normalSmoothing > 0 ? smoothHeightsDm(t, colours.normalSmoothing) : t.heightsDm;
-  return { normals: computeNodeNormals(t, heights), colors: computeNodeColors(t, waterDistance, colours), waterDistance };
+  const colors = computeNodeColors(t, waterDistance, colours);
+  return { normals: computeNodeNormals(t, heights), colors, waterDistance, dryColors: computeDryColors(t, colors, waterDistance, colours) };
 }
 
 /**
@@ -212,22 +221,7 @@ export function computeNodeNormals(t: Terrain, heightsDm: ArrayLike<number> = t.
 export function computeNodeColors(t: Terrain, waterDistance: Uint8Array, o: TerrainColourOptions = D11A_TERRAIN_COLOURS): Float32Array {
   const { columns, rows, heightsDm, waterLevelDm } = t;
   const colors = new Float32Array(columns * rows * 3);
-  const mean = localMeanHeights(t, AO_RADIUS);
-  let minLand = Infinity;
-  let maxLand = -Infinity;
-  for (let i = 0; i < heightsDm.length; i++) {
-    const h = heightsDm[i] ?? 0;
-    if (h >= waterLevelDm) {
-      minLand = Math.min(minLand, h);
-      maxLand = Math.max(maxLand, h);
-    }
-  }
-  const landSpan = Math.max(1, maxLand - minLand);
-
-  const grass = new Color(palette.grass);
-  const grassLight = new Color(palette.grassLight);
-  const grassShade = new Color(palette.grassShade);
-  const meadow = new Color(palette.meadow);
+  const land = landColourer(t, o);
   const soil = new Color(palette.soil);
   const deep = new Color(palette.waterDeep);
   const c = new Color();
@@ -239,29 +233,77 @@ export function computeNodeColors(t: Terrain, waterDistance: Uint8Array, o: Terr
       if (h < waterLevelDm) {
         const depth = smoothstep(0, BED_DEEP_DM, waterLevelDm - h);
         c.copy(soil).lerp(deep, 0.35 + 0.5 * depth).multiplyScalar(0.85);
-      } else {
-        const noise = patchNoise(col, row);
-        // At patchAmount 1 the noise is used as is, so D11a's colours stay bit-identical.
-        const patch = o.patchAmount === 1 ? noise : 0.5 + (noise - 0.5) * o.patchAmount;
-        const v = clamp01(patch + o.jitter * (hash01(col, row, 0x5eed) * 2 - 1));
-        if (v < 0.5) c.copy(grassShade).lerp(grass, v * 2);
-        else c.copy(grass).lerp(grassLight, (v - 0.5) * 2);
-        const high = (h - minLand) / landSpan;
-        c.lerp(meadow, o.meadowStrength * smoothstep(0.6, 1, high));
-        const ring = waterDistance[index] ?? WATER_DISTANCE_FAR;
-        const soilWeight = ring < SOIL_BY_RING.length ? (SOIL_BY_RING[ring] ?? 0) : 0;
-        if (soilWeight > 0) c.lerp(soil, soilWeight);
-        const relief = (mean[index] ?? h) - h;
-        const hollow = smoothstep(0, o.aoFullDm, relief);
-        const ridge = smoothstep(0, o.ridgeFullDm, -relief);
-        c.multiplyScalar((1 - o.aoStrength * hollow) * (1 + o.ridgeStrength * ridge) * (HEIGHT_SHADE_MIN + (1 - HEIGHT_SHADE_MIN) * high));
-      }
+      } else land(col, row, h, waterDistance[index] ?? WATER_DISTANCE_FAR, c);
       colors[3 * index] = c.r;
       colors[3 * index + 1] = c.g;
       colors[3 * index + 2] = c.b;
     }
   }
   return colors;
+}
+
+/**
+ * `colors` with the shore soil tint taken out: every node within the soil rings of water, and
+ * every water node (taken at the water level), recoloured by the land recipe with no soil.
+ * Other nodes keep their colour exactly.
+ */
+export function computeDryColors(t: Terrain, colors: Float32Array, waterDistance: Uint8Array, o: TerrainColourOptions = D11A_TERRAIN_COLOURS): Float32Array {
+  const out = Float32Array.from(colors);
+  const land = landColourer(t, o);
+  const c = new Color();
+  for (let index = 0; index < t.heightsDm.length; index++) {
+    if ((waterDistance[index] ?? WATER_DISTANCE_FAR) >= SOIL_BY_RING.length) continue;
+    const row = Math.floor(index / t.columns);
+    land(index - row * t.columns, row, Math.max(t.heightsDm[index] ?? 0, t.waterLevelDm), WATER_DISTANCE_FAR, c);
+    out[3 * index] = c.r;
+    out[3 * index + 1] = c.g;
+    out[3 * index + 2] = c.b;
+  }
+  return out;
+}
+
+/**
+ * The land colour recipe as a function of a node (col, row), a height `h` (dm) and a ring
+ * distance to water: grass patches between shade, base and light plus a little per-node
+ * jitter; meadow on the highest ground; soil on the rings nearest water; darker in hollows
+ * below the ±25 m mean (baked AO), lighter on ridges (off in D11a) and slightly darker low
+ * down.
+ */
+function landColourer(t: Terrain, o: TerrainColourOptions): (col: number, row: number, h: number, ring: number, out: Color) => Color {
+  const { columns, heightsDm, waterLevelDm } = t;
+  const mean = localMeanHeights(t, AO_RADIUS);
+  let minLand = Infinity;
+  let maxLand = -Infinity;
+  for (let i = 0; i < heightsDm.length; i++) {
+    const h = heightsDm[i] ?? 0;
+    if (h >= waterLevelDm) {
+      minLand = Math.min(minLand, h);
+      maxLand = Math.max(maxLand, h);
+    }
+  }
+  const landSpan = Math.max(1, maxLand - minLand);
+  const grass = new Color(palette.grass);
+  const grassLight = new Color(palette.grassLight);
+  const grassShade = new Color(palette.grassShade);
+  const meadow = new Color(palette.meadow);
+  const soil = new Color(palette.soil);
+  return (col, row, h, ring, c) => {
+    const index = row * columns + col;
+    const noise = patchNoise(col, row);
+    // At patchAmount 1 the noise is used as is, so D11a's colours stay bit-identical.
+    const patch = o.patchAmount === 1 ? noise : 0.5 + (noise - 0.5) * o.patchAmount;
+    const v = clamp01(patch + o.jitter * (hash01(col, row, 0x5eed) * 2 - 1));
+    if (v < 0.5) c.copy(grassShade).lerp(grass, v * 2);
+    else c.copy(grass).lerp(grassLight, (v - 0.5) * 2);
+    const high = (h - minLand) / landSpan;
+    c.lerp(meadow, o.meadowStrength * smoothstep(0.6, 1, high));
+    const soilWeight = ring < SOIL_BY_RING.length ? (SOIL_BY_RING[ring] ?? 0) : 0;
+    if (soilWeight > 0) c.lerp(soil, soilWeight);
+    const relief = (mean[index] ?? h) - h;
+    const hollow = smoothstep(0, o.aoFullDm, relief);
+    const ridge = smoothstep(0, o.ridgeFullDm, -relief);
+    return c.multiplyScalar((1 - o.aoStrength * hollow) * (1 + o.ridgeStrength * ridge) * (HEIGHT_SHADE_MIN + (1 - HEIGHT_SHADE_MIN) * high));
+  };
 }
 
 /**

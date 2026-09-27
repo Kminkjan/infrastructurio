@@ -11,17 +11,26 @@ import { CHUNK_NODES, chunkCounts } from "./terrainGeometry";
  *
  * **The conformed surface.** For every ground-structure piece, with d the plan
  * distance from its centreline and z the track height at the nearest centreline
- * point (linear in arc length, as the track meshes draw it):
- * - the cut envelope U = z + max(0, d − W) / S bounds the terrain from above;
- * - the fill envelope L = z − max(0, d − W) / S bounds it from below;
- * W = 3 m is the formation's half width (a 6 m bed under the 4.4 m ballast
- * base) and S = 1.5 the side slopes' run per unit rise (1 : 1.5, about 34°).
- * Over all pieces, U is the lowest and L the highest envelope, and the drawn
- * height is C = min(U, max(N, L)) for the natural surface N: cuts always win,
- * so no fill (and no other track's embankment) can rise over a track. Under
- * water the fill stops 10 cm below the surface, so it never z-fights the water
- * plane. Where |C − N| ≤ 5 cm the ground stays natural, so ground-level track
- * on gentle ground leaves the terrain untouched.
+ * point (linear in arc length, as the track meshes draw it), the side slope
+ * rises e(d) = ease(d − W) / S beside a flat formation: W = 3 m is the
+ * formation's half width (a 6 m bed under the 4.4 m ballast base), S = 1.5 the
+ * slopes' run per unit rise (1 : 1.5, about 34°), and `ease` bends the slope in
+ * over CREST_ROUND_M past the formation edge (0, then x² / 2b, then x − b/2), so
+ * crests and toes are rounded rather than kinked. Then
+ * - the cut envelope U = z + e(d) bounds the terrain from above;
+ * - the fill envelope L = z − e(d) bounds it from below.
+ * Over all pieces, U is the lowest and L the highest envelope. The drawn height
+ * clamps the natural surface N between them, C = min(U, max(N, L)), with a
+ * smooth clamp at the daylight line (a polynomial smooth minimum over
+ * DAYLIGHT_ROUND_M of height, narrowed on shallow ground) so the slope blends
+ * into natural ground instead of meeting it at a kink. C never exceeds U (cuts
+ * always win, so no fill and no other track's embankment can rise over a track)
+ * and equals the bed exactly on the formation. Moves up to EARTHWORK_MIN_M stay
+ * natural, blending in fully by twice that, so there is no step at the edge.
+ * Fills continue their slope under water (the opaque water plane hides them),
+ * so a bank meets the shore as a slope, not a shelf with vertical steps.
+ * (Round-1 earthworks-lite, `329b69a`, had sharp kinks, a hard 5 cm step and a
+ * fill capped 10 cm under the water; see the render pass iteration finding.)
  *
  * **Mesh.** The terrain is lattice triangles at 5 m (LOD0) or 10 m (LOD1).
  * Every triangle where C departs from N at a sample is refined 4 × 4 into the
@@ -40,12 +49,31 @@ import { CHUNK_NODES, chunkCounts } from "./terrainGeometry";
 export const FORMATION_HALF_WIDTH_M = 3;
 /** Side slopes: horizontal run per unit rise (1 : 1.5, about 33.7°), for cuts and fills alike. */
 export const SIDE_SLOPE_RUN = 1.5;
+/** The side slope eases in over this plan band past the formation edge: a rounded crest or toe, not a kink. */
+export const CREST_ROUND_M = 2;
+/** Height band of the smooth clamp where a slope meets natural ground (the daylight line and the toe). */
+export const DAYLIGHT_ROUND_M = 0.6;
 /** The bed lies at the track height, 0.15 m under the drawn ballast top (TRACK_LIFT_M), so the ballast reads. */
 export const BED_BELOW_TRACK_M = 0;
-/** Departures from the natural ground up to this size are left natural. */
+/** Departures from the natural ground up to this size are left natural; from twice this they are drawn in full. */
 export const EARTHWORK_MIN_M = 0.05;
-/** An underwater fill stops this far below the water surface. */
-export const WATER_FILL_CLEARANCE_M = 0.1;
+/**
+ * The colour attribute's first channel encodes the potential (`earthworkPotential`): 0 at
+ * EARTHWORK_LIP_M outside the envelopes (the smooth clamp's lip starts inside that), the
+ * earthwork colour weight from EARTHWORK_MIN_M inside them to full at EARTHWORK_FULL_M.
+ * The terrain shader (`shaderChunks/earthwork.ts`) decodes it.
+ */
+export const EARTHWORK_LIP_M = 1;
+export const EARTHWORK_FULL_M = 0.4;
+/** Potentials below this are clamped before encoding (untouched sub-vertices take it). */
+export const EARTHWORK_POTENTIAL_MIN_M = -3;
+/** The encoded value at which the earthwork colour weight starts (the lip weight is full there). */
+export const EARTHWORK_WEIGHT_FROM_X = (EARTHWORK_MIN_M + EARTHWORK_LIP_M) / (EARTHWORK_FULL_M + EARTHWORK_LIP_M);
+
+/** The attribute's first channel for potential p (m): 0 at −EARTHWORK_LIP_M, 1 at EARTHWORK_FULL_M, linear and unclamped above. */
+export function encodeEarthworkPotential(p: number): number {
+  return ((p > EARTHWORK_POTENTIAL_MIN_M ? p : EARTHWORK_POTENTIAL_MIN_M) + EARTHWORK_LIP_M) / (EARTHWORK_FULL_M + EARTHWORK_LIP_M);
+}
 /** Each affected lattice triangle splits into REFINE² sub-triangles (a 4× finer triangular lattice). */
 export const REFINE = 4;
 /** Reach cap: beyond about 78 m of cut or fill the slope stops short (none on the diorama map). */
@@ -136,10 +164,13 @@ export function earthworkPiece(terrain: Terrain, piece: PieceInput): EarthworkPi
   const z1M = piece.z1Mm / 1000 - BED_BELOW_TRACK_M;
   const bedMin = Math.min(z0M, z1M);
   const bedMax = Math.max(z0M, z1M);
-  let reach = FORMATION_HALF_WIDTH_M + 2 * SIDE_SLOPE_RUN;
+  // The daylight line lies where e(d) reaches the relief: d = W + b/2 + S·relief once the slope is straight;
+  // its smooth clamp reaches DAYLIGHT_ROUND_M of height further out, plus a metre of margin.
+  const reachFor = (relief: number) => FORMATION_HALF_WIDTH_M + CREST_ROUND_M / 2 + SIDE_SLOPE_RUN * (relief + DAYLIGHT_ROUND_M) + 1;
+  let reach = reachFor(2);
   for (let pass = 0; pass < 8; pass++) {
     const range = naturalRange(terrain, minX - reach, minY - reach, maxX + reach, maxY + reach);
-    const need = Math.min(MAX_REACH_M, FORMATION_HALF_WIDTH_M + SIDE_SLOPE_RUN * Math.max(0, range.max - bedMin, bedMax - range.min) + 1);
+    const need = Math.min(MAX_REACH_M, reachFor(Math.max(0, range.max - bedMin, bedMax - range.min)));
     if (need <= reach) break;
     reach = need;
   }
@@ -236,12 +267,26 @@ export function bedAt(p: EarthworkPiece, s: number): number {
   return p.lengthM > 0 ? p.z0M + ((p.z1M - p.z0M) * s) / p.lengthM : p.z0M;
 }
 
+/** Side-slope rise (m) at plan distance d from the centreline: 0 on the formation, eased in over CREST_ROUND_M, then 1 : SIDE_SLOPE_RUN. */
+export function slopeRiseM(d: number): number {
+  const x = d - FORMATION_HALF_WIDTH_M;
+  if (x <= 0) return 0;
+  return (x < CREST_ROUND_M ? (x * x) / (2 * CREST_ROUND_M) : x - CREST_ROUND_M / 2) / SIDE_SLOPE_RUN;
+}
+
+/** Polynomial smooth minimum of a and b over band k: never above min(a, b), equal to it once |a − b| ≥ k. */
+export function smoothMin(a: number, b: number, k: number): number {
+  if (k <= 0) return a < b ? a : b;
+  const h = 1 - Math.abs(a - b) / k;
+  return (a < b ? a : b) - (h > 0 ? (k / 4) * h * h : 0);
+}
+
 /**
  * The analytic conformed height at plan (x, y) over natural height `natural`
- * (NaN off the map): C = min(U, max(N, L)) over `pieces`. Used by tests and
- * for single points; the chunk pass evaluates the same rule on the sub-lattice.
+ * (NaN off the map) for `pieces`. Used by tests and for single points; the
+ * chunk pass evaluates the same rule on the sub-lattice.
  */
-export function conformedHeightM(pieces: readonly EarthworkPiece[], x: number, y: number, natural: number, waterLevelM: number): number {
+export function conformedHeightM(pieces: readonly EarthworkPiece[], x: number, y: number, natural: number): number {
   let u = Infinity;
   let l = -Infinity;
   for (const p of pieces) {
@@ -249,19 +294,56 @@ export function conformedHeightM(pieces: readonly EarthworkPiece[], x: number, y
     const n = nearestOnPiece(p, x, y);
     if (n.d >= p.reachM) continue;
     const bed = bedAt(p, n.s);
-    const slope = Math.max(0, n.d - FORMATION_HALF_WIDTH_M) / SIDE_SLOPE_RUN;
-    if (bed + slope < u) u = bed + slope;
-    if (bed - slope > l) l = bed - slope;
+    const rise = slopeRiseM(n.d);
+    if (bed + rise < u) u = bed + rise;
+    if (bed - rise > l) l = bed - rise;
   }
-  return conformRule(natural, u, l, waterLevelM);
+  return conformRule(natural, u, l);
 }
 
-/** C = min(U, max(N, L)), the fill capped under water; N itself when the change is within EARTHWORK_MIN_M. */
-export function conformRule(natural: number, u: number, l: number, waterLevelM: number): number {
-  if (Number.isNaN(natural)) return natural;
-  const fill = natural < waterLevelM ? Math.min(l, waterLevelM - WATER_FILL_CLEARANCE_M) : l;
-  const c = Math.min(u, Math.max(natural, fill));
-  return Math.abs(c - natural) > EARTHWORK_MIN_M ? c : natural;
+/**
+ * The natural height `natural` clamped smoothly between the fill envelope `l`
+ * and the cut envelope `u` (both infinite where no piece reaches). The clamp
+ * is mid + sign(x)·smoothMin(|x|, half, k) about the envelopes' middle, so it
+ * is exact on the formation (half = 0) and never leaves [l, u]; k is
+ * DAYLIGHT_ROUND_M, narrowed to twice the smaller of |x| and half so shallow
+ * ground cannot flip sign. Conflicting envelopes (l ≥ u, two tracks close
+ * together) give u: cuts win. Then the "leave natural" band: moves up to
+ * EARTHWORK_MIN_M give N, from twice that the clamp in full, smoothly between.
+ */
+export function conformRule(natural: number, u: number, l: number): number {
+  if (Number.isNaN(natural) || u === Infinity) return natural;
+  let c: number;
+  if (l >= u) c = u;
+  else {
+    const mid = (u + l) / 2;
+    const half = (u - l) / 2;
+    const x = natural - mid;
+    const ax = x < 0 ? -x : x;
+    const m = smoothMin(ax, half, Math.min(DAYLIGHT_ROUND_M, 2 * (ax < half ? ax : half)));
+    c = x < 0 ? mid - m : mid + m;
+  }
+  const t = c > natural ? c - natural : natural - c;
+  if (t <= EARTHWORK_MIN_M) return natural;
+  if (t >= 2 * EARTHWORK_MIN_M) return c;
+  const f = (t - EARTHWORK_MIN_M) / EARTHWORK_MIN_M;
+  return natural + (c - natural) * f * f * (3 - 2 * f);
+}
+
+/**
+ * How far natural height `natural` lies outside the envelopes, metres: max(N − U, L − N),
+ * positive inside a cut or fill (the sharp rule's daylight line is its zero), negative on
+ * natural ground between them, −Infinity where no piece reaches. Where the envelopes conflict
+ * (L ≥ U, where the rule draws U) it is |N − U|, which meets the other form at L = U. It is
+ * continuous and piecewise smooth, so linear interpolation across the sub-lattice keeps its
+ * contours: the earthwork colour weight is a ramp of it (`encodeEarthworkPotential`).
+ */
+export function earthworkPotential(natural: number, u: number, l: number): number {
+  if (Number.isNaN(natural) || u === Infinity) return -Infinity;
+  if (l >= u) return natural > u ? natural - u : u - natural;
+  const cut = natural - u;
+  const fill = l - natural;
+  return cut > fill ? cut : fill;
 }
 
 // ---------------------------------------------------------------------------
@@ -378,6 +460,9 @@ export interface ChunkPassStats {
   readonly evaluated: number;
 }
 
+/** Distance attribute of sub-vertices no piece reaches (beyond any shoulder). */
+const FAR_M = 99;
+
 const AFFECTED_DOWN = 1;
 const AFFECTED_UP = 2;
 
@@ -411,6 +496,8 @@ export class ChunkPass {
   private lower = new Float32Array(0);
   private drawn = new Float32Array(0);
   private natural = new Float32Array(0);
+  /** Plan distance to the nearest centreline of any piece reaching the sub-vertex. */
+  private dist = new Float32Array(0);
   private modified = new Uint8Array(0);
   private touched = new Int32Array(0);
   private touchedCount = 0;
@@ -423,7 +510,6 @@ export class ChunkPass {
   /** LOD rows holding a refined triangle (chunk and ring), for sweeping only the rows that can change. */
   private flagRowMin = Infinity;
   private flagRowMax = -Infinity;
-  private waterLevelM = 0;
   private readonly sub = { qs: 0, rs: 0 };
 
   /** Chunk box in plan metres, grown by one LOD cell (the ring), for picking candidate pieces. */
@@ -449,7 +535,6 @@ export class ChunkPass {
     this.i1 = Math.min(this.i0 + lat.chunkCells, lat.columns - 1);
     this.j1 = Math.min(this.j0 + lat.chunkCells, lat.rows - 1);
     this.refined.clear();
-    this.waterLevelM = terrain.waterLevelDm / 10;
     this.stats = { refined: 0, fans: 0, maxCutM: 0, maxFillM: 0, evaluated: 0 };
     if (this.i1 <= this.i0 || this.j1 <= this.j0) return false;
     this.prepare();
@@ -477,19 +562,32 @@ export class ChunkPass {
   }
 
   /**
-   * How far the conform rule moves sub-vertex (Qs, Rs), metres, before the
-   * "leave natural" threshold: |min(U, max(N, L)) − N|, 0 where no piece reaches.
-   * The earthwork colour ramps with it, so the edge of a cutting follows this
-   * smooth field even where the drawn height snapped back to natural.
+   * The `earthwork` vertex attribute at sub-vertex (Qs, Rs), written to `out` at `offset`:
+   * the encoded potential (`earthworkPotential`, clamped at −3 m below: untouched vertices
+   * take that), the signed departure C − N (m; negative in cuts) and the plan distance to
+   * the nearest centreline (m; far where no piece reaches). The colour weight ramps with the
+   * potential, whose contours follow the smooth daylight line even across vertices the rule
+   * left natural.
    */
+  attributesAt(Qs: number, Rs: number, out: Float32Array, offset: number): void {
+    const g = this.gridIndex(Qs, Rs);
+    if (g < 0 || this.stamp[g] !== this.gen) {
+      out[offset] = encodeEarthworkPotential(-Infinity);
+      out[offset + 1] = 0;
+      out[offset + 2] = FAR_M;
+      return;
+    }
+    const n = this.natural[g] ?? Number.NaN;
+    out[offset] = encodeEarthworkPotential(earthworkPotential(n, this.upper[g] ?? Infinity, this.lower[g] ?? -Infinity));
+    out[offset + 1] = this.modified[g] === 1 ? (this.drawn[g] ?? n) - n : 0;
+    out[offset + 2] = this.dist[g] ?? FAR_M;
+  }
+
+  /** The departure C − N (m) at sub-vertex (Qs, Rs): 0 wherever the pass left the natural surface. */
   departureAt(Qs: number, Rs: number): number {
     const g = this.gridIndex(Qs, Rs);
-    if (g < 0 || this.stamp[g] !== this.gen) return 0;
-    const n = this.natural[g] ?? Number.NaN;
-    if (Number.isNaN(n)) return 0;
-    const l = this.lower[g] ?? -Infinity;
-    const fill = n < this.waterLevelM ? Math.min(l, this.waterLevelM - WATER_FILL_CLEARANCE_M) : l;
-    return Math.abs(Math.min(this.upper[g] ?? Infinity, Math.max(n, fill)) - n);
+    if (g < 0 || this.stamp[g] !== this.gen || this.modified[g] !== 1) return 0;
+    return (this.drawn[g] ?? 0) - (this.natural[g] ?? 0);
   }
 
   /** Whether the pass moved sub-vertex (Qs, Rs) off the natural surface. */
@@ -535,6 +633,7 @@ export class ChunkPass {
       this.lower = new Float32Array(n);
       this.drawn = new Float32Array(n);
       this.natural = new Float32Array(n);
+      this.dist = new Float32Array(n);
       this.modified = new Uint8Array(n);
       this.touched = new Int32Array(n);
       this.gen = 0;
@@ -585,16 +684,18 @@ export class ChunkPass {
         evaluated += 1;
         if (n.d >= p.reachM) continue;
         const bed = bedAt(p, n.s);
-        const slope = n.d > FORMATION_HALF_WIDTH_M ? (n.d - FORMATION_HALF_WIDTH_M) / SIDE_SLOPE_RUN : 0;
+        const rise = slopeRiseM(n.d);
         const g = rowBase + cs;
         if (this.stamp[g] !== this.gen) {
           this.stamp[g] = this.gen;
-          this.upper[g] = bed + slope;
-          this.lower[g] = bed - slope;
+          this.upper[g] = bed + rise;
+          this.lower[g] = bed - rise;
+          this.dist[g] = n.d;
           this.touched[this.touchedCount++] = g;
         } else {
-          if (bed + slope < (this.upper[g] ?? Infinity)) this.upper[g] = bed + slope;
-          if (bed - slope > (this.lower[g] ?? -Infinity)) this.lower[g] = bed - slope;
+          if (bed + rise < (this.upper[g] ?? Infinity)) this.upper[g] = bed + rise;
+          if (bed - rise > (this.lower[g] ?? -Infinity)) this.lower[g] = bed - rise;
+          if (n.d < (this.dist[g] ?? Infinity)) this.dist[g] = n.d;
         }
       }
     }
@@ -613,7 +714,7 @@ export class ChunkPass {
       const qs = cs - Math.floor(rs / 2);
       const nat = naturalAtSub(this.terrain, this.lat, qs, rs);
       this.natural[g] = nat;
-      const c = conformRule(nat, this.upper[g] ?? Infinity, this.lower[g] ?? -Infinity, this.waterLevelM);
+      const c = conformRule(nat, this.upper[g] ?? Infinity, this.lower[g] ?? -Infinity);
       if (Number.isNaN(nat) || c === nat) {
         this.modified[g] = 0;
         this.drawn[g] = nat;

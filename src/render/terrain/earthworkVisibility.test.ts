@@ -171,7 +171,6 @@ describe("earthworks-lite visibility guarantee on the diorama map", () => {
     const { terrain } = diorama();
     const plans = groundPlans(PLANS);
     const pass = new ChunkPass();
-    const waterM = terrain.waterLevelDm / 10;
     const rowM = 2.5 * Math.sqrt(3);
     const nodeXY = (col: number, row: number) => ({ x: 5 * (col + (row & 1) / 2), y: row * rowM });
     const stats = {
@@ -193,7 +192,7 @@ describe("earthworks-lite visibility guarantee on the diorama map", () => {
             if (nodes.has(index)) continue;
             const { x, y } = nodeXY(col, row);
             const natural = (terrain.heightsDm[index] ?? 0) / 10;
-            const c = conformedHeightM(pieces, x, y, natural, waterM);
+            const c = conformedHeightM(pieces, x, y, natural);
             if (c !== natural) nodes.set(index, c);
           }
         }

@@ -3,6 +3,7 @@ import { palette } from "../palette";
 import {
   DETAIL_MIX,
   type GroundDetailSettings,
+  MEADOW_CUTS,
   NO_GROUND_DETAIL,
   TUFT_CELL_M,
   TUFT_RADIUS_M,
@@ -22,9 +23,12 @@ const grass = colours.grass;
 const FULL: GroundDetailSettings = {
   patch: 1,
   patchCellM: 16,
+  toneSoft: 0,
+  patchMix: [DETAIL_MIX.light, DETAIL_MIX.dark],
   tufts: 0.35,
   meadow: 1,
   meadowM: [22, 34],
+  meadowCuts: MEADOW_CUTS,
   slopeSoil: 1,
   slopeDeg: [32, 17],
   waterline: 1,
@@ -123,6 +127,47 @@ describe("ground detail layers", () => {
     expect(share(24)).toBeLessThan(0.9);
   });
 
+  it("calms the patches with softer edges and weaker mixes (render pass iteration), and keeps them crisp at the defaults", () => {
+    const crisp = only({ patch: 1, patchCellM: 26 });
+    const soft = only({ patch: 1, patchCellM: 26, toneSoft: 0.08 });
+    const weak = only({ patch: 1, patchCellM: 26, patchMix: [0.08, 0.07] });
+    let partial = 0;
+    let crispPartial = 0;
+    let crispMax = 0;
+    let weakMax = 0;
+    for (const [x, y] of points) {
+      const g = grass[1] ?? 0;
+      const c = (groundDetailAlbedo(grass, x, y, HIGH_AND_DRY, FLAT, crisp, colours)[1] ?? 0) - g;
+      const sft = (groundDetailAlbedo(grass, x, y, HIGH_AND_DRY, FLAT, soft, colours)[1] ?? 0) - g;
+      const w = (groundDetailAlbedo(grass, x, y, HIGH_AND_DRY, FLAT, weak, colours)[1] ?? 0) - g;
+      crispMax = Math.max(crispMax, Math.abs(c));
+      weakMax = Math.max(weakMax, Math.abs(w));
+      // A hard cut is all or nothing; a soft one passes through intermediate tones over its band.
+      const full = Math.abs(c) > 1e-12 ? Math.abs(c) : 1;
+      if (Math.abs(sft) > 1e-9 && Math.abs(sft) < 0.9 * full) partial += 1;
+      if (Math.abs(c) > 1e-9 && Math.abs(Math.abs(c) - crispMax) > 1e-9 && Math.abs(c) < 0.5 * crispMax) crispPartial += 1;
+    }
+    expect(partial).toBeGreaterThan(points.length * 0.05);
+    expect(crispPartial).toBe(0);
+    expect(weakMax).toBeLessThan(crispMax * 0.5);
+  });
+
+  it("thins the meadow flecks as their cut levels rise", () => {
+    const share = (cuts: readonly [number, number]) =>
+      points.filter(([x, y]) => changed(groundDetailAlbedo(grass, x, y, 36, FLAT, only({ meadow: 1, meadowCuts: cuts }), colours), grass)).length / points.length;
+    expect(share([0.97, 0.8])).toBeLessThan(share(MEADOW_CUTS) * 0.6);
+    expect(share([0.97, 0.8])).toBeGreaterThan(0);
+  });
+
+  it("keeps the slope soil off earthworks through the soil mask", () => {
+    const s = only({ slopeSoil: 1 });
+    const steep = Math.cos((33 * Math.PI) / 180);
+    for (const [x, y] of points.slice(0, 300)) {
+      expect(groundDetailAlbedo(grass, x, y, HIGH_AND_DRY, steep, s, colours)).not.toEqual([...grass]);
+      expect(groundDetailAlbedo(grass, x, y, HIGH_AND_DRY, steep, s, colours, 10, 0, 0)).toEqual([...grass]);
+    }
+  });
+
   it("wets a band just above the water level only", () => {
     const s = only({ waterline: 1 });
     for (const [x, y] of points.slice(0, 300)) {
@@ -168,6 +213,10 @@ describe("ground detail uniforms", () => {
     expect(u.uGdSoil.value.getHex()).toBe(palette.soil);
     expect(u.uGdSlopeCos.value.x).toBeCloseTo(Math.cos((32 * Math.PI) / 180), 12);
     expect(u.uGdSlopeCos.value.y).toBeCloseTo(Math.cos((17 * Math.PI) / 180), 12);
+    expect(u.uGdPatchMix.value.toArray()).toEqual([DETAIL_MIX.light, DETAIL_MIX.dark]);
+    expect(u.uGdMeadowCuts.value.toArray()).toEqual([...MEADOW_CUTS]);
+    applyGroundDetailSettings(u, { ...FULL, toneSoft: 0.08, patchMix: [0.08, 0.07], meadowCuts: [0.97, 0.8] });
+    expect([u.uGdToneSoft.value, ...u.uGdPatchMix.value.toArray(), ...u.uGdMeadowCuts.value.toArray()]).toEqual([0.08, 0.08, 0.07, 0.97, 0.8]);
     applyGroundDetailSettings(u, NO_GROUND_DETAIL);
     expect([u.uGdPatch.value, u.uGdTufts.value, u.uGdMeadowAmount.value, u.uGdSlopeSoil.value, u.uGdWaterline.value]).toEqual([0, 0, 0, 0, 0]);
     u.uGdSoil.value.setHex(0);

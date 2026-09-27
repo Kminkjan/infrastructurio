@@ -1,6 +1,6 @@
 import type { Texture } from "three";
 import type { ArtUniforms, TerrainChunkOptions } from "../art/materials";
-import { type GroundDetailSettings, NO_GROUND_DETAIL, applyGroundDetailSettings } from "../art/shaderChunks/groundDetail";
+import { DETAIL_MIX, type GroundDetailSettings, MEADOW_CUTS, NO_GROUND_DETAIL, applyGroundDetailSettings } from "../art/shaderChunks/groundDetail";
 import { NEUTRAL_RELIEF, type ReliefSettings, applyReliefSettings } from "../art/shaderChunks/relief";
 import { D11A_TERRAIN_COLOURS, type TerrainColourOptions } from "./terrainShading";
 
@@ -62,9 +62,12 @@ const CALM_COLOURS: TerrainColourOptions = {
 const CRISP_DETAIL: GroundDetailSettings = {
   patch: 1,
   patchCellM: 16,
+  toneSoft: 0,
+  patchMix: [DETAIL_MIX.light, DETAIL_MIX.dark],
   tufts: 0.35,
   meadow: 1,
   meadowM: [22, 34],
+  meadowCuts: MEADOW_CUTS,
   slopeSoil: 1,
   slopeDeg: [32, 17],
   waterline: 1,
@@ -72,9 +75,27 @@ const CRISP_DETAIL: GroundDetailSettings = {
 
 /** Gentle slopes lit about 5× as steep, levelling off below 45°. */
 const SMOOTH_RELIEF: ReliefSettings = { ...NEUTRAL_RELIEF, gain: 5, maxTan: 1 };
-/** Facets from Region zoom (2.5 ppm) in, gone below 1.5 ppm (the 10 m LOD starts at 2). */
-const FACET_RELIEF: ReliefSettings = { ...SMOOTH_RELIEF, facet: 2.5, facetPpm: [1.5, 2.5] };
-const FACET_DETAIL: GroundDetailSettings = { ...CRISP_DETAIL, patch: 0.7 };
+/**
+ * Look `b` as the owner chose it (2026-09-27, `3e8a8d3`): facets at weight 2.5 from Region zoom
+ * (2.5 ppm) in, gone below 1.5 ppm (the 10 m LOD starts at 2), and the tone patches at 70%.
+ * Kept for the record; the render pass iteration calmed `b` (below) after the owner found it
+ * "Facets too strong/noisy".
+ */
+export const FACET_RELIEF_V1: ReliefSettings = { ...SMOOTH_RELIEF, facet: 2.5, facetPpm: [1.5, 2.5] };
+export const FACET_DETAIL_V1: GroundDetailSettings = { ...CRISP_DETAIL, patch: 0.7 };
+/** Calmer facets: about a third of the old weight, still from Region zoom in. */
+const FACET_RELIEF: ReliefSettings = { ...SMOOTH_RELIEF, facet: 0.8, facetPpm: [1.5, 2.5] };
+/** Calmer detail: larger, softer, weaker tone patches; fewer, fainter and softer meadow flecks; fewer tufts. */
+const FACET_DETAIL: GroundDetailSettings = {
+  ...CRISP_DETAIL,
+  patch: 1,
+  patchCellM: 26,
+  toneSoft: 0.08,
+  patchMix: [0.08, 0.07],
+  tufts: 0.2,
+  meadow: 0.5,
+  meadowCuts: [0.97, 0.8],
+};
 
 export const TERRAIN_LOOKS: { readonly [K in TerrainLookId]: TerrainLook } = {
   d11a: {

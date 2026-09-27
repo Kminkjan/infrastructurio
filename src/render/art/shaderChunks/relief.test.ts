@@ -86,6 +86,9 @@ describe("relief: facets", () => {
     expect(facetWeight(2.5, 2, [1.5, 2.5])).toBeCloseTo(1.25, 12);
     expect(facetWeight(2.5, 6, [1.5, 2.5])).toBe(2.5);
     expect(facetWeight(0, 6, [1.5, 2.5])).toBe(0);
+    // Over an earthwork's lip the facets fade out, so the refined 1.25 m triangles never show as facets.
+    expect(facetWeight(2.5, 6, [1.5, 2.5], 1)).toBe(0);
+    expect(facetWeight(2.5, 6, [1.5, 2.5], 0.4)).toBeCloseTo(1.5, 12);
   });
 
   it("adds the facet's deviation from the smooth normal on top of the steepened smooth normal", () => {
@@ -127,12 +130,14 @@ describe("relief chunk", () => {
     for (const facets of [false, true]) {
       const material = new MeshLambertMaterial({ vertexColors: true });
       installChunks(material, [createReliefChunk(u, { facets })]);
-      expect(material.customProgramCacheKey()).toBe(facets ? "terrain-relief-v1-facets" : "terrain-relief-v1");
+      expect(material.customProgramCacheKey()).toBe(facets ? "terrain-relief-v2-facets" : "terrain-relief-v2");
       const shader = lambertSource();
       material.onBeforeCompile(shader as never, undefined as never);
       const normalAt = shader.fragmentShader.indexOf(NORMAL_ANCHOR);
       expect(shader.fragmentShader.indexOf("reliefScale", normalAt)).toBeGreaterThan(normalAt);
       expect(shader.fragmentShader.includes("#define RELIEF_FACETS")).toBe(facets);
+      // Facets fade out over the earthwork lip when the terrain carries the attribute.
+      expect(shader.fragmentShader).toContain("#ifdef TERRAIN_EARTHWORK\n  reliefFacetW *= 1.0 - earthworkLip();");
       expect(shader.fragmentShader).toContain("uReliefContour");
       expect(Object.keys(shader.uniforms)).toEqual(expect.arrayContaining(["uReliefGain", "uReliefMaxTan", "uReliefFacet", "uReliefPpm"]));
       material.dispose();
