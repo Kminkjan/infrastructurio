@@ -345,8 +345,13 @@ Recorded while implementing D3's core half on branch `codex/d3-planner`
   straight run, 48 or 72 curves, 2 shifts), not "about 100". A shift fixes only n + m, so
   it is offered first and last. Two-bend fits (into ports only) are curve + curve, with any
   two turns summing to the heading change, or two shifts to one side (two rows). For each
-  template pair the non-negative solutions lie on one line with period |det| ≤ 3, and the
-  length is affine along it, so the shortest comes in closed form.
+  template pair the non-negative solutions lie on one line whose integer points recur with a
+  period that divides |det| ≤ 3, and the length is affine along it, so the shortest sits at
+  one end of the feasible interval, found by scanning at most |det| values inward from each
+  end. (Amended after review, 2026-09-27: the first version took the period to be |det|
+  itself; with three secondary headings it is 1, so some 60° + 60° joins came out up to two
+  straights (17.3 m) longer than the shortest. A brute-force oracle over every turn pair,
+  [`planner.twoBend.test.ts`](../../src/core/track/planner.twoBend.test.ts), now checks it.)
 - **Choices this ADR left open** (defaults to test; the full list is in the
   [simulation model §8, "As built"](../simulation-model.md#8-planner)):
   - **Start heading d0:** the drag's own when set. At an existing buffer end, the nearer of
@@ -438,3 +443,7 @@ Recorded while implementing D3's core half on branch `codex/d3-planner`
 - 2026-09-27: D3 planner findings added (exact candidate counts, start-heading, snapping,
   selection and magnetism choices, two-bend fits, follow and performance measurements);
   status unchanged, still Proposed.
+- 2026-09-27: D3 planner findings amended after review of
+  [#82](https://github.com/Kminkjan/infrastructurio/pull/82) (the two-bend solve's period
+  divides |det| rather than equalling it, and the shortest fit is now checked against brute
+  force); status unchanged, still Proposed.
