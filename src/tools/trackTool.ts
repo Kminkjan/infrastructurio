@@ -14,7 +14,7 @@ import {
   stepOf,
 } from "../core/sim/api";
 import { buildTooltip, formatCounts, formatHeight, splitReason } from "./format";
-import { pickAtNode } from "./picks";
+import { nodesAt, pickAtNode } from "./picks";
 import { commandKey } from "./previewMemo";
 import type { GhostModel, Reduced, ScreenPoint, ToolCtx, ToolEffect, ToolEvent, ToolPick } from "./types";
 
@@ -40,7 +40,8 @@ import type { GhostModel, Reduced, ScreenPoint, ToolCtx, ToolEffect, ToolEvent, 
  * starts at that track's height above ground; chaining keeps the steps. A
  * plan that magnetism joined to an existing port takes the port's height,
  * and after it commits the chain ends (Idle): leaving a joined port would
- * need a turnout (D5).
+ * need a turnout (D5). A plan ending on an existing node within half a step
+ * of that node's height takes its height too (outside precision mode).
  */
 
 /** Movement beyond this many CSS px turns a press into a drag. */
@@ -356,7 +357,13 @@ function planFor(s: TrackToolState, anchor: Anchor, target: ToolPick, ctx: ToolC
   const wanted = (end: NodeRef, snapped: NodeRef | null): number => {
     if (snapped) return snapped.zMm;
     if (target.kind === "endpoint" && end.q === target.node.q && end.r === target.node.r) return target.node.zMm;
-    return groundOr(end.q, end.r) + lift;
+    const free = groundOr(end.q, end.r) + lift;
+    // Vertical magnetism (off in precision, like the planner's): ending on existing track within
+    // half a step of its height takes that height, so the plan meets the node instead of passing it.
+    if (!s.precision) {
+      for (const node of nodesAt(ctx.network, end.q, end.r)) if (Math.abs(node.zMm - free) * 2 <= stepMm) return node.zMm;
+    }
+    return free;
   };
   const first = wanted(target.node, null);
   const plan = ctx.planTrack(drag(first - from.zMm));

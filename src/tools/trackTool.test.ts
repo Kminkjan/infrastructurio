@@ -334,6 +334,25 @@ describe("track tool: height, precision and keyboard", () => {
     expect(t.state.heightSteps).toBe(1);
   });
 
+  it("takes an existing node's height when the plan ends on it within half a step", () => {
+    const t = session({ flat: true });
+    // A run on flat ground rising one step (0 → 1000 mm) over six pieces: (12, 12) sits near 333 mm.
+    t.down(10, 12);
+    t.move(16, 12);
+    t.send({ type: "height", delta: 1 });
+    t.up(16, 12);
+    t.send({ type: "escape" });
+    const node = t.sim.network().nodes.find((n) => n.q === 12 && n.r === 12)?.zMm ?? Number.NaN;
+    expect(Math.abs(node - 333)).toBeLessThanOrEqual(1);
+    // From the ground, a plan ending on that node: within half a 1000 mm step of 0, so it takes the node's height.
+    t.down(12, 8);
+    t.move(12, 12);
+    expect(t.state.plan?.end?.node).toMatchObject({ q: 12, r: 12, zMm: node });
+    // Precision turns it off: the end stays on the ground.
+    t.send({ type: "precision", held: true });
+    expect(t.state.plan?.end?.node.zMm).toBe(0);
+  });
+
   it("ignores height keys until a track is started", () => {
     const t = session();
     const fx = t.send({ type: "height", delta: 1 });

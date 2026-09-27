@@ -36,7 +36,8 @@ const CSS = /* css */ `
   left: 0;
   top: 0;
   z-index: 12;
-  max-width: 420px;
+  width: max-content;
+  max-width: min(460px, calc(100vw - 16px));
   padding: 6px 10px;
   pointer-events: none;
   transform: translate(
@@ -44,7 +45,7 @@ const CSS = /* css */ `
     min(calc(var(--hud-pointer-y, 0px) + 20px), calc(100vh - 100% - 72px))
   );
 }
-.hud-tooltip .line { white-space: nowrap; }
+.hud-tooltip .line { overflow-wrap: anywhere; }
 .hud-tooltip .counts { font-weight: 600; }
 .hud-tooltip .hint { opacity: 0.72; font-size: 12px; }
 .hud-tooltip .precision { font-weight: 600; }

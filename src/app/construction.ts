@@ -1,5 +1,5 @@
 import { Vector3 } from "three";
-import type { Command, Diff, NodeRef, Result, Sim, Terrain } from "../core/sim/api";
+import type { Command, Diff, Drag, NodeRef, Result, Sim, Terrain, TrackPlan } from "../core/sim/api";
 import { heightDmAt, toWorld } from "../core/sim/api";
 import type { CameraController } from "../render/camera/CameraController";
 import type { IsoCamera } from "../render/camera/IsoCamera";
@@ -60,6 +60,10 @@ export interface PreviewStats {
   readonly maxMs: number;
   readonly memoHits: number;
   readonly memoMisses: number;
+  /** `sim.planTrack` calls (every re-plan, not memoized), timed the same way. */
+  readonly planCalls: number;
+  readonly planP95Ms: number;
+  readonly planMaxMs: number;
 }
 
 const scratchWorld = new Vector3();
@@ -75,6 +79,9 @@ export class Construction {
   private readonly scratch = new Float64Array(PREVIEW_SAMPLES);
   private previewCalls = 0;
   private previewMax = 0;
+  private readonly planSamples = new RingBuffer(PREVIEW_SAMPLES);
+  private planCalls = 0;
+  private planMax = 0;
   private toastId = 0;
   private toastTimer: number | undefined;
   private tooltipAnchor: NodeRef | null = null;
@@ -110,8 +117,19 @@ export class Construction {
 
   previewStats(): PreviewStats {
     const n = this.samples.copyTo(this.scratch);
+    const previewP95 = p95(this.scratch, n);
+    const m = this.planSamples.copyTo(this.scratch);
     const memo = this.memo.stats();
-    return { calls: this.previewCalls, p95Ms: p95(this.scratch, n), maxMs: this.previewMax, memoHits: memo.hits, memoMisses: memo.misses };
+    return {
+      calls: this.previewCalls,
+      p95Ms: previewP95,
+      maxMs: this.previewMax,
+      memoHits: memo.hits,
+      memoMisses: memo.misses,
+      planCalls: this.planCalls,
+      planP95Ms: p95(this.scratch, m),
+      planMaxMs: this.planMax,
+    };
   }
 
   selectTool(tool: HudTool): void {
@@ -176,11 +194,21 @@ export class Construction {
     window.clearTimeout(this.toastTimer);
   }
 
+  private readonly timedPlan = (drag: Drag): TrackPlan => {
+    const t0 = this.d.now();
+    const plan = this.d.sim.planTrack(drag);
+    const dt = this.d.now() - t0;
+    this.planSamples.push(dt);
+    this.planCalls += 1;
+    this.planMax = Math.max(this.planMax, dt);
+    return plan;
+  };
+
   private ctx(): ToolCtx {
     const { sim } = this.d;
     return {
       network: sim.network(),
-      planTrack: sim.planTrack,
+      planTrack: this.timedPlan,
       preview: this.memo.preview,
       groundZmm: this.groundZmm,
       settings: this.settings,

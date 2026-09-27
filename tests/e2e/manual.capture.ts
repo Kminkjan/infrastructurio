@@ -78,28 +78,45 @@ test("D3 manual check captures", async ({ page }) => {
   const ahead = await nodeScreen(page, q + 15, r);
   await page.mouse.move(ahead.x, ahead.y, { steps: 10 });
   await shot(page, "07-ghost-valid-tooltip");
+  // A curve: the pointer off the run's line gives a one-bend fit.
+  const offLine = await nodeScreen(page, q + 22, r + 10);
+  await page.mouse.move(offLine.x, offLine.y, { steps: 10 });
+  await shot(page, "07b-ghost-curve");
+  await page.mouse.move(ahead.x, ahead.y, { steps: 10 });
   // Elevated: six steps up; drop lines and end-height tags.
   for (let i = 0; i < 6; i++) await page.keyboard.press("BracketRight");
   await shot(page, "08-ghost-elevated");
-  // Precision held: the planner's live label joins the tooltip.
-  await page.keyboard.down("Control");
-  await page.mouse.move(ahead.x + 2, ahead.y, { steps: 2 });
+  await lookAtNode(page, q + 13, r, 14);
+  const aheadClose = await nodeScreen(page, q + 15, r);
+  await page.mouse.move(aheadClose.x, aheadClose.y, { steps: 4 });
+  await shot(page, "08b-ghost-elevated-close");
+  await lookAtNode(page, q + 8, r, 6);
+  await page.mouse.move(ahead.x, ahead.y, { steps: 4 });
+  // Precision held (⌥ on macOS, Ctrl elsewhere): the planner's live label joins the tooltip.
+  const precisionKey = (await page.evaluate(() => /mac/i.test(navigator.platform))) ? "Alt" : "Control";
+  await page.keyboard.down(precisionKey);
+  await page.mouse.move(offLine.x, offLine.y, { steps: 6 });
   await shot(page, "09-precision-label");
-  await page.keyboard.up("Control");
+  await page.keyboard.up(precisionKey);
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
   await page.mouse.up();
   await page.keyboard.press("Escape");
+  await page.keyboard.press("1");
 
-  // Reused pieces (cyan): from a free node behind the run, across it.
-  const behind = await nodeScreen(page, q - 3, r);
-  await page.mouse.move(behind.x, behind.y);
+  // Reused pieces (cyan): over the run from its west end to its east end, then on beyond it.
+  const west = await nodeScreen(page, q, r);
+  await page.mouse.move(west.x, west.y);
   await page.mouse.down();
-  await page.mouse.move((await nodeScreen(page, q + 8, r)).x, (await nodeScreen(page, q + 8, r)).y, { steps: 10 });
+  await page.mouse.move(end.x, end.y, { steps: 10 });
   await shot(page, "10-ghost-reused");
+  const beyond = await nodeScreen(page, q + 14, r);
+  await page.mouse.move(beyond.x, beyond.y, { steps: 6 });
+  await shot(page, "10b-ghost-reused-and-new");
   await page.keyboard.press("Escape");
   await page.mouse.up();
   await page.keyboard.press("Escape");
+  await page.keyboard.press("1");
 
   // An invalid ghost (red, dashed): leaving the run mid-track northwards would need a turnout.
   await page.mouse.move(mid.x, mid.y);
@@ -109,6 +126,13 @@ test("D3 manual check captures", async ({ page }) => {
   await shot(page, "11-ghost-invalid-tooltip");
   await page.keyboard.press("Escape");
   await page.mouse.up();
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("1");
+  // The keyboard cursor: arrows from the pointer's node, the ring marks it.
+  await page.mouse.move(end.x, end.y);
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("ArrowUp");
+  await shot(page, "11b-keyboard-cursor");
   await page.keyboard.press("Escape");
   await stats(page, "after ghosts");
 
