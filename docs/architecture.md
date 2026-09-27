@@ -557,9 +557,9 @@ other tools are planned (R5).*
 - **Track tool.** Idle → Pressed → Dragging (> 4 px) or Anchored (click-click) → Commit →
   chain (stays anchored at the new end, leaving with its heading). Esc steps back one level:
   Dragging → Anchored, Pressed or Anchored → Idle, Idle → Select.
-  - A chained drag keeps that heading, so where no single bend reaches the pointer the
-    planner fits two bends in the one drag, up to 180°: a pointer behind the chain's end
-    gets a U-turn toward it (owner decision 2026-09-27;
+  - A chained drag keeps that heading, so where no single bend reaches the pointer's node
+    or one of its neighbours, the planner fits two bends in the one drag, up to 180°: a
+    pointer behind the chain's end gets a U-turn toward it (owner decisions 2026-09-27;
     [simulation model §8](simulation-model.md#8-planner)). The tool is unchanged: it sends
     the same `Drag` and shows the returned plan.
   - A start on an existing buffer end keeps its height and lets the planner choose between

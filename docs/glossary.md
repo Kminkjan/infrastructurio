@@ -353,9 +353,9 @@ Turns a drag into resolved pieces: n straights, then one curve or shift template
 straights. It solves a 2×2 integer system over about 100 candidates and chooses valid →
 largest radius under the user cap → shortest → smallest |turn| → left before right. A
 two-bend fit joins into existing ports, and, where no single bend reaches a free drag's
-end, two bends in one drag turn up to 180° (U-turns, hairpins, S-curves; owner decision
-2026-09-27). Commands carry the resolved pieces, so tuning the planner never breaks
-replays.
+end or a node next to it, two bends in one drag turn up to 180° (U-turns, hairpins,
+S-curves; owner decisions 2026-09-27). Commands carry the resolved pieces, so tuning the
+planner never breaks replays.
 
 ### Platform
 

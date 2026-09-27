@@ -778,6 +778,129 @@ decision below sets D3 planner behaviour and accepts no ADR.
     rule and τ are new heuristics;
   - timings on the gate hardware, or agreement across JavaScript engines.
 
+## Findings (2026-09-27, D3 one bend a node off)
+
+Recorded on branch `codex/d3-construction-tool` at `c74f36a`
+([#82](https://github.com/Kminkjan/infrastructurio/pull/82);
+[#67](https://github.com/Kminkjan/infrastructurio/issues/67)). Measurements are automated
+evidence, Vitest 4.1.10, Node 26.7.0 on macOS 26.6.2 (Apple M5 Pro); the e2e run is agent
+evidence (Playwright 1.63.0, Chrome 153). The status of this ADR stays Proposed: the owner
+decision below sets D3 planner behaviour and accepts no ADR.
+- **Owner decision (2026-09-27, as relayed to the implementing agent): "Prefer one bend, a
+  node off".** "Only use two bends when no single bend lands within ~1 node of the pointer;
+  smoother track, end sits up to ~5 m from the cursor." It takes the alternative that the
+  two-bend free-drag finding named under "Not established": where one bend missed the
+  pointer's node by a lattice step, two bends landed on it with a small kink.
+- **Design.** The rule follows the decision; the details are defaults to test.
+  - **Order:** one bend on the pointer's node N (unchanged) → one bend on a node of ring 1
+    → two bends on N → the existing fallbacks (behind the start the nearest U-turn end,
+    elsewhere the halfway ring search, then the nearest U-turn end).
+  - **Ring 1 is N's six neighbours, 5 m from N,** so the end lies under 7.64 m from the
+    pointer. The six nodes one secondary step (8.66 m) from N are left out: they would put
+    the end up to 11.5 m off, well past the owner's "about 5 m", and ring 1 alone resolved
+    every kink below.
+  - **Choice:** nearest to the pointer first. Ring 1 is a single ring, so the plan distance
+    decides; it is the float distance the snapping already uses, for choosing only, so the
+    plan stays integer and no trigonometry is added. The fits of every neighbour at exactly
+    that distance then go through the single-bend selection unchanged (valid → radius →
+    length → …). Distance comes before validity, so validity never moves the end to a
+    farther neighbour, as it never moves any target.
+  - **The halfway rule** of the ring search applies to ring 1 too (it also excludes the
+    start). It only bites for pointers within about 15 m of the start.
+  - **Precision** follows the same rule, with the neighbours' fits restricted to its radius
+    class and, when set, its end heading, exactly as at N. It fits naturally: one candidate
+    function serves both.
+  - **Unchanged:** every plan that one bend reaches exactly (the golden hash in
+    [`planner.test.ts`](../../src/core/track/planner.test.ts), 2,131 plans, passes as
+    recorded at `211526f`), `Drag` and `TrackPlan`, magnetism and port joins, the two-bend
+    rank and the fallbacks, and the tool.
+- **The kinks (automated).** The committed forward-cone sweep had 22 plans with two bends
+  on the pointer's node (an uncommitted probe at `c699393` listed them): 12 free drags and
+  6 with heading 1 were kinks (30° one way, then 60° back, at R 60 or R 90), and 4 at
+  ±60°, 110 m with headings 0 and 1 were 120° turns of two 60° bends. Each is now a single
+  bend on the nearest neighbour one bend reaches, 3.03–5.63 m from the pointer (median
+  3.78 m; the free drags at most 4.12 m; the 120° turns become 90° bends 5.00–5.63 m
+  off). The probe found these the same pieces the planner gave at `211526f`, before the
+  two-bend fallback.
+- **Follow, measured** (the committed forward-cone test, 425 pointers per start mode within
+  ±60° at 40–200 m; `--reporter=verbose`), before → after:
+
+  | Start heading | On the pointer's node | Median | p95 | Max | Two-bend plans (on the node) |
+  |---|---|---|---|---|---|
+  | 0 (fixed) | 81.6% → 81.2% | 1.98 → 2.00 m | 20.12 → 20.12 m | 30.41 → 30.41 m | 4 (2) → 2 (0) |
+  | 1 (fixed) | 78.6% → 76.7% | 2.00 → 2.00 m | 20.63 → 20.63 m | 30.06 → 30.06 m | 12 (8) → 4 (0) |
+  | free | 93.9% → 91.1% | 1.76 → 1.77 m | 3.02 → 3.40 m | 4.37 → 4.37 m | 12 (12) → 0 (0) |
+
+  - The after values equal those before the two-bend fallback (the previous finding's
+    "before" column): those pointers end where they did then.
+  - The two-bend plans left in the cone are 120° turns toward pointers inside the turning
+    circle (the ring search), unchanged.
+  - The "before" two-bend counts come from the probe; the committed test counts them since
+    this change.
+- **All around** (the committed measurement, 1,224 pointers per start mode, every 5° at
+  40–200 m), before → after; the "before" two-bend counts come from the probe:
+
+  | Start heading | On the pointer's node | Median | p95 | Max | Two-bend plans |
+  |---|---|---|---|---|---|
+  | 0 (fixed) | 47.8% → 47.3% | 6.49 → 6.49 m | 105.73 → 105.73 m | 121.24 → 121.24 m | 747 → 741 |
+  | 1 (fixed) | 46.7% → 45.8% | 5.31 → 5.63 m | 104.51 → 104.51 m | 120.07 → 120.07 m | 753 → 741 |
+  | free | 93.6% → 90.7% | 1.83 → 1.85 m | 3.02 → 3.40 m | 4.37 → 4.37 m | 36 → 0 |
+
+  All 595 pointers behind each fixed heading still end on a U-turn.
+- **Where two bends remain** (an uncommitted probe after the change). The sweep put
+  pointers every 1° within ±89° of the start heading, at 20–200 m every 2 m. It ran with
+  headings 0 and 1 and a free start under the default cap, headings 0 and 1 under cap 90,
+  heading 1 under cap 60, and a free start under cap 120. It found no plan that ends on the
+  pointer's node with two bends turning 90° or less. On a free drag, two bends now land on
+  the pointer's node only for turns beyond 90° (120°, 150°, U-turns). In precision mode
+  they also land there as an S-curve back onto the start heading, for one.
+- **Tests (automated):** 543 tests in 70 files (537 before).
+  - **New:**
+    - two drag-table cases: a free kink, now one bend a node off; and precision R 60
+      with end heading 60°, one bend a node off where two R 60 bends reached the node;
+    - the 22 kinks against a brute-force single-bend oracle: no single bend reaches the
+      pointer's node, two bends do, and the plan ends on the nearest neighbour one bend
+      reaches;
+    - a 120° turn and a precision S-curve whose ring 1 no single bend reaches: still two
+      bends on the node;
+    - an obstacle that turns every fit at the nearest neighbour into a kinked join: the
+      end stays there, although a single bend to another neighbour would be valid;
+    - determinism over 10 build orders.
+  - **Measurements:** the forward-cone test reports two-bend counts and asserts that none
+    lands on the pointer's node; the all-around test reports them.
+  - **Adjusted:** no assertion assumed exact landing, so none changed. Comments changed:
+    - the two-bend oracle's: it lays two-bend plans only where no single bend reaches the
+      node or its neighbours, still 182 of them;
+    - two generator counts: existing-track reuse went from 17 to 16 of 150 runs, and the
+      diorama probe from 7,486 to 7,511 nodes and from 187 to 186 curved plans.
+  - **E2e:** the 8 Playwright e2e pass unchanged (agent evidence).
+- **Performance, a dev measurement and not a gate.** Three alternating runs each of
+  [`sim/perf.test.ts`](../../src/core/sim/perf.test.ts), before → after, on one machine:
+  - `planTrack`, 184 fixed drags × 3 passes: median 0.106–0.107 → 0.089–0.101 ms, p95
+    0.466–0.525 → 0.504–0.575 ms, max 1.02–1.08 → 0.93–1.66 ms;
+  - `planTrack`, the two-bend-heavy case (348 drags × 3 passes): median 0.154–0.162 →
+    0.163–0.167 ms, p95 0.860–0.906 → 0.830–0.863 ms, max 1.93–2.27 → 1.38–1.90 ms; its
+    fits are unchanged (252 two-bend, 96 one-bend);
+  - `preview` of the planned pieces: medians 0.016–0.032 ms before and after, p95 at most
+    0.111 → 0.125 ms;
+  - the worst case the validation cap allows: median 1.86–2.04 → 1.83–2.03 ms, p95
+    2.63–3.39 → 2.80–3.20 ms.
+
+  This is within run-to-run noise. The ring-1 step costs at most six single-bend solves,
+  and where it succeeds it spares the two-bend solve. The gate numbers stay D12's (gate
+  B3).
+- **Not established:**
+  - whether the track feels smoother: that is the owner's to judge, and no feel check has
+    run on this build;
+  - the end sits up to 5.63 m from the pointer in the cone, a little past the owner's
+    "about 5 m"; ring 1's geometric bound is 7.64 m;
+  - at the edge of one bend's reach, a pointer that two 60° bends reached on its node now
+    gets a 90° bend a node off. A chained drag then leaves 30° short of the two-bend
+    plan's heading;
+  - distance before validity: when every fit at the nearest neighbour is invalid, the plan
+    shows it, although another neighbour, or two bends on the node, may be valid;
+  - timings on the gate hardware, or agreement across JavaScript engines.
+
 ## Revisit when
 
 - The D3 feel check finds construction unsatisfying for reasons that planner tuning, chained
@@ -823,3 +946,7 @@ decision below sets D3 planner behaviour and accepts no ADR.
   drag may turn up to 180° with two bends, the fallback and its snapping, the rank and why,
   follow and performance numbers before and after, open doubts); status unchanged, still
   Proposed.
+- 2026-09-27: D3 one-bend-a-node-off findings added (the relayed owner decision to prefer
+  one bend on a neighbour of the pointer's node over two bends on it, ring 1 and its order,
+  the kinks, follow and performance numbers before and after, open doubts); status
+  unchanged, still Proposed.
