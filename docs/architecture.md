@@ -54,14 +54,13 @@ exists. It is a design document, not evidence that any slice works.
 
 This is an agent reading of this branch on 2026-09-27. **On main** means the file shipped with
 the reset skeleton (PR 1, [#60](https://github.com/Kminkjan/infrastructurio/pull/60)).
-**D1**, **D2** and **D11a** name the slice that added the file; all three are merged to `main`
-(D1 through [#79](https://github.com/Kminkjan/infrastructurio/pull/79), D2 and D11a through
-[#81](https://github.com/Kminkjan/infrastructurio/pull/81)). **D3 core branch** means it exists
-on `codex/d3-planner` ([#67](https://github.com/Kminkjan/infrastructurio/issues/67),
-2026-09-27); **D3 render branch** means it exists on `codex/d3-construction-tool` (the render,
-tools and UI half of #67, 2026-09-27, with the D3 core branch merged in); neither is merged
-yet. Each label records that the file is present, not that its tests pass on a given commit:
-run `npm run check` for that. Everything else is planned and lands slice by slice.
+**D1**, **D2**, **D11a** and **D3** name the slice that added the file. D1, D2 and D11a are
+merged to `main` (D1 through [#79](https://github.com/Kminkjan/infrastructurio/pull/79), D2 and
+D11a through [#81](https://github.com/Kminkjan/infrastructurio/pull/81)); D3
+([#67](https://github.com/Kminkjan/infrastructurio/issues/67): the planner, track meshes,
+tools and HUD, 2026-09-27) arrives with [PR #82](https://github.com/Kminkjan/infrastructurio/pull/82).
+Each label records that the file is present, not that its tests pass on a given commit: run
+`npm run check` for that. Everything else is planned and lands slice by slice.
 
 | Part | Path | Status | Slice |
 |---|---|---|---|
@@ -69,28 +68,28 @@ run `npm run check` for that. Everything else is planned and lands slice by slic
 | Core compiler config | [tsconfig.core.json](../tsconfig.core.json) | **On main** | S0 |
 | Triangular lattice and its tests | [src/core/lattice.ts](../src/core/lattice.ts) | **On main** | S1 (D1) |
 | Sim ↔ world conversion and its tests | [src/render/coords.ts](../src/render/coords.ts) | **On main**; **D1** adds a non-allocating `worldToSim` target and the winding oracle (in `camera/isoMath.test.ts`) | R0 (D1) |
-| Palette | [src/render/art/palette.ts](../src/render/art/palette.ts) | **On main**: an 18-key subset of the art-direction palette. **D1**: 24 keys (adds meadow, deep water, foam and three UI tokens) plus `cssColor`. **D11a**: the full table (70 tokens) plus `forestFloor`, tweak-panel overrides in memory, and a scan rule against hex literals elsewhere. **D3 render branch**: `signalAmber`, the tooltip's middle grade band | full set in D11a |
-| Composition root | [src/app/](../src/app/) | **On main**: the skeleton smoke scene. **D1**: replaced by seeded terrain, water and lighting under the iso camera, controller, scheduler, renderer host and perf monitor; G toggles the lattice overlay (debug, until D3). **D3 render branch**: `main.ts` creates the sim and wires construction; `InputRouter` (the single owner of canvas and window input), `keymap` (pure key and wheel rules), `construction` (tool state, effect interpreter, the single command gateway, undo/redo with toast and flash, timed previews and plans), `hudTheme`; the lattice overlay follows the track tool (G is gone); the dev-only `__diorama` hook gains the Playwright projection functions. No sim step loop yet | R0–R1 (D1), R4 (D3) |
+| Palette | [src/render/art/palette.ts](../src/render/art/palette.ts) | **On main**: an 18-key subset of the art-direction palette. **D1**: 24 keys (adds meadow, deep water, foam and three UI tokens) plus `cssColor`. **D11a**: the full table (70 tokens) plus `forestFloor`, tweak-panel overrides in memory, and a scan rule against hex literals elsewhere. **D3**: `signalAmber`, the tooltip's middle grade band | full set in D11a |
+| Composition root | [src/app/](../src/app/) | **On main**: the skeleton smoke scene. **D1**: replaced by seeded terrain, water and lighting under the iso camera, controller, scheduler, renderer host and perf monitor; G toggles the lattice overlay (debug, until D3). **D3**: `main.ts` creates the sim and wires construction; `InputRouter` (the single owner of canvas and window input), `keymap` (pure key and wheel rules), `construction` (tool state, effect interpreter, the single command gateway, undo/redo with toast and flash, timed previews and plans), `hudTheme`; the lattice overlay follows the track tool (G is gone); the dev-only `__diorama` hook gains the Playwright projection functions. No sim step loop yet | R0–R1 (D1), R4 (D3) |
 | Core utilities, terrain | [src/core/util/](../src/core/util/), [src/core/terrain.ts](../src/core/terrain.ts) | **D1**: `int`, `hash`, `prng`, `heap`; seeded integer terrain with a golden hash | rest of S0, S3 (D1) |
-| Geometry, track model, planner | [src/core/geometry/](../src/core/geometry/), [src/core/track/](../src/core/track/) | **D2**: `templates`, `piece`, `sample`, `clearance`; `authored`, `validate` (the 11 D2-owned codes), `history`. **D3 core branch**: `planner`, the full planner behind `sim.planTrack` (one-bend, shift and two-bend fits, magnetism, precision, elevation; [simulation model §8](simulation-model.md#8-planner)) | S2–S3 (D2); S4 (D3) |
+| Geometry, track model, planner | [src/core/geometry/](../src/core/geometry/), [src/core/track/](../src/core/track/) | **D2**: `templates`, `piece`, `sample`, `clearance`; `authored`, `validate` (the 11 D2-owned codes), `history`. **D3**: `planner`, the full planner behind `sim.planTrack` (one-bend, shift and two-bend fits, magnetism, precision, elevation; [simulation model §8](simulation-model.md#8-planner)) | S2–S3 (D2); S4 (D3) |
 | Network, pathfinding | [src/core/network/](../src/core/network/) | **D2**: a partial `derive` (through and buffer nodes, sections split at buffers). Junctions, graph and pathfinding planned | S5–S6 (D2 partial) |
 | Trains, reservation, deadlock | `src/core/trains/`, `src/core/signals/` | Planned | S7–S9 (D8, D9) |
 | Operator and reasons | `src/core/services/` | Planned | S9–S10 (D9) |
-| Sim façade, remap, views, save | [src/core/sim/](../src/core/sim/) | **D2**: `world.ts` and the first slice of `api.ts` (`createSim`; `preview`, `execute` and `network()`; build, demolish, undo and redo), which also re-exports the lattice and terrain helpers. **D3 render branch**: additive re-exports of the scenario types, `resolvePiece` and `pieceFromKey` (the ghost draws unbuilt specs). `api.ts` grows from here; remap in S11a/b; views and save in S12 | S2–S3 (D2); (D10, D12) |
+| Sim façade, remap, views, save | [src/core/sim/](../src/core/sim/) | **D2**: `world.ts` and the first slice of `api.ts` (`createSim`; `preview`, `execute` and `network()`; build, demolish, undo and redo), which also re-exports the lattice and terrain helpers. **D3**: additive re-exports of the scenario types, `resolvePiece` and `pieceFromKey` (the ghost draws unbuilt specs). `api.ts` grows from here; remap in S11a/b; views and save in S12 | S2–S3 (D2); (D10, D12) |
 | Scenario | [src/core/scenarios/](../src/core/scenarios/) | **D11a**: `baltic-diorama.ts` builds the static scenery layout (towns with lots, church, windmill, farmsteads, strip fields, forest density and trees, dirt roads, telegraph poles, lamps, fences, haystacks) from the terrain and a seed, integer-only, with a golden hash; `placeNames.ts` is the Baltic name list. D1 terrain moved to generator version 2 in the same branch | D1, D11a |
-| Renderer host, scheduler, camera, perf monitor | [src/render/core/](../src/render/core/), [src/render/camera/](../src/render/camera/) | **D1**: `RendererHost`, `FrameScheduler`, `PerfMonitor` (F3); `isoMath`, `IsoCamera`, `CameraController`. Pure parts unit-tested. **D3 render branch**: `CameraController` attaches no listeners; `InputRouter` offers it each gesture first | R0 (D1) |
+| Renderer host, scheduler, camera, perf monitor | [src/render/core/](../src/render/core/), [src/render/camera/](../src/render/camera/) | **D1**: `RendererHost`, `FrameScheduler`, `PerfMonitor` (F3); `isoMath`, `IsoCamera`, `CameraController`. Pure parts unit-tested. **D3**: `CameraController` attaches no listeners; `InputRouter` offers it each gesture first | R0 (D1) |
 | Terrain, lighting, lattice shader | [src/render/terrain/](../src/render/terrain/), [src/render/art/](../src/render/art/) | **D1**: chunked lattice-triangle terrain (LOD0/LOD1), depth-tinted water, `lighting` with a fitted shadow map (`shadowFit`), lattice overlay (`shaderChunks/lattice`, `terrain/latticeMaterial`). Look not judged | R1 (D1) |
-| Track meshes | [src/render/track/](../src/render/track/) | **D3 render branch**: `trackGeometry` (ballast, sleepers and rails through `geometry/sample.ts`), `TrackBatch` (a `BatchedMesh` per layer, or 128 m chunk-merged meshes without multi-draw), `TrackView` (diffs by revision and piece key, 8 ms slices, far LOD), `ghostGeometry` and `GhostView` (the two-pass ghost, rejection highlight, undo/redo flash, drop lines and end-height tags), `SnapRing`. Turnout timbers, blades and earthworks planned | R2, R4 (D3) |
+| Track meshes | [src/render/track/](../src/render/track/) | **D3**: `trackGeometry` (ballast, sleepers and rails through `geometry/sample.ts`), `TrackBatch` (a `BatchedMesh` per layer, or 128 m chunk-merged meshes without multi-draw), `TrackView` (diffs by revision and piece key, 8 ms slices, far LOD), `ghostGeometry` and `GhostView` (the two-pass ghost, rejection highlight, undo/redo flash, drop lines and end-height tags), `SnapRing`. Turnout timbers, blades and earthworks planned | R2, R4 (D3) |
 | Scenery kit, labels | [src/render/scenery/](../src/render/scenery/), [src/render/labels/](../src/render/labels/) | **D11a**: instanced trees (3 species, 2 LODs), the building grammar (9 kinds) merged per chunk, instanced props, the terrain splat/field/AO textures, and CSS2D place names with a greedy declutter. Look not judged | R3 (D11a) → Look Gate A |
-| Art pipeline | [src/render/art/](../src/render/art/) | **D11a**: `AssetRegistry`, `materials` (six Lambert materials), shader chunks `grain`, `windSway`, `foliageTint`, `edgeFade` and `splat` composed with `lattice`, the CSS `vignette` and the dev `TweakPanel`; [camera/bookmarks.ts](../src/render/camera/bookmarks.ts) holds the Look Gate A views and the pitch A/B. **D3 render branch**: three track materials and the `trackStripe` chunk (the far-LOD ballast stripe) | R3 (D11a), R2 (D3) |
-| Tools | [src/tools/](../src/tools/) | **D3 render branch**: `types` (events, effects, ctx), `trackTool` (the track tool reducer), `previewMemo` (LRU of 16 keyed by revision + command key), `picks`, `format` (tooltip text); reducer unit tests. Signal, Station, Depot, Bridge, Tunnel and Demolish planned | R4 (D3); R5 (D4–D7) |
-| Picking | [src/render/picking/](../src/render/picking/) | Terrain node: **D1**, as [heightfieldRay.ts](../src/render/terrain/heightfieldRay.ts). **D3 render branch**: `trackPicker` (existing nodes within 14 px, centrelines within 10 px, measured on screen at track height, then the terrain node). Handles and the proxy `pickScene` planned | D1 (terrain node), R4 (D3), R5 (handles, proxies) |
+| Art pipeline | [src/render/art/](../src/render/art/) | **D11a**: `AssetRegistry`, `materials` (six Lambert materials), shader chunks `grain`, `windSway`, `foliageTint`, `edgeFade` and `splat` composed with `lattice`, the CSS `vignette` and the dev `TweakPanel`; [camera/bookmarks.ts](../src/render/camera/bookmarks.ts) holds the Look Gate A views and the pitch A/B. **D3**: three track materials and the `trackStripe` chunk (the far-LOD ballast stripe) | R3 (D11a), R2 (D3) |
+| Tools | [src/tools/](../src/tools/) | **D3**: `types` (events, effects, ctx), `trackTool` (the track tool reducer), `previewMemo` (LRU of 16 keyed by revision + command key), `picks`, `format` (tooltip text); reducer unit tests. Signal, Station, Depot, Bridge, Tunnel and Demolish planned | R4 (D3); R5 (D4–D7) |
+| Picking | [src/render/picking/](../src/render/picking/) | Terrain node: **D1**, as [heightfieldRay.ts](../src/render/terrain/heightfieldRay.ts). **D3**: `trackPicker` (existing nodes within 14 px, centrelines within 10 px, measured on screen at track height, then the terrain node). Handles and the proxy `pickScene` planned | D1 (terrain node), R4 (D3), R5 (handles, proxies) |
 | Overlays | `src/render/overlays/` | Planned | R5 (D7) |
 | Trains, steam, inspector | `src/render/trains/`, `src/ui/` | Planned | R6 (D8–D10) |
-| HUD | [src/ui/](../src/ui/) | **D3 render branch**: `store` (the HUD store) and `Hud` (construction tooltip, toast, aria-live status line, bottom toolbar with Track and undo/redo), mounted at `#hud`. Time controls, counters, inspector, entity list, notifications and overlay toggles planned | R4 (D3); R5–R6, D10 |
+| HUD | [src/ui/](../src/ui/) | **D3**: `store` (the HUD store) and `Hud` (construction tooltip, toast, aria-live status line, bottom toolbar with Track and undo/redo), mounted at `#hud`. Time controls, counters, inspector, entity list, notifications and overlay toggles planned | R4 (D3); R5–R6, D10 |
 | Quality presets, hardening, bench | `src/render/core/`, `bench/` | Planned | R7 (D11b, D12) → Look Gate B |
 | Replay harness | `tests/replay/`, `tests/fixtures/` | Planned | D12 |
-| Browser e2e | [tests/e2e/](../tests/e2e/), [playwright.config.ts](../playwright.config.ts) | **D3 render branch**: Playwright on its own Vite server (port 5232, system Chrome): drag-build and undo to empty, keyboard construction, a closed loop through ordinary drags, camera gestures still reaching the camera first; `*.capture.ts` screenshots for manual checks (`CAPTURE=1`). Agent evidence only | D3 |
+| Browser e2e | [tests/e2e/](../tests/e2e/), [playwright.config.ts](../playwright.config.ts) | **D3**: Playwright on its own Vite server (port 5232, system Chrome): drag-build and undo to empty, keyboard construction (precision included), the keyboard cursor keeping its target while the view follows it, the end-height tag and cursor tooltip following the camera, Enter after toolbar use, a closed loop through ordinary drags, camera gestures still reaching the camera first; `*.capture.ts` screenshots for manual checks (`CAPTURE=1`). Agent evidence only | D3 |
 
 ## Module layout
 
@@ -194,7 +193,7 @@ every push.
 (2026-09-26, merged); the rest planned, S4–S12. [`sim/api.ts`](../src/core/sim/api.ts) and
 [`sim/world.ts`](../src/core/sim/world.ts) implement `createSim({ terrain })`, `tick`
 (always 0 until the step lands), `preview`, `execute` and `network()` for `build-track`,
-`demolish` (pieces only), `undo` and `redo`. The **D3 core branch** (2026-09-27) adds
+`demolish` (pieces only), `undo` and `redo`. **D3** (2026-09-27, PR #82) adds
 `planTrack`. `loadSim`, `step`, `frame`, `inspect` and `save` arrive with their slices.*
 
 The names and shapes below come from the design. `Highlight`, `EntityRef` and the ID types
@@ -337,8 +336,8 @@ alpha = Math.min(acc / 100, 1)
 *Basis: ADR 0009 (Accepted) for the camera, coordinates and render-on-demand; ADR 0013
 (Proposed) for presets, materials and assets. Status: R0–R1 in D1 (2026-09-26, merged;
 host, scheduler, camera, perf monitor, terrain, lighting, lattice overlay; see the table
-above); R2 (track meshes) and the presentation half of R4 (ghost, snap ring, picking) on the
-D3 render branch (2026-09-27); R3 in D11a (merged); R5–R7 planned.*
+above); R2 (track meshes) and the presentation half of R4 (ghost, snap ring, picking) in D3
+(2026-09-27); R3 in D11a (merged); R5–R7 planned.*
 
 - **Renderer.** `THREE.WebGLRenderer` from three `0.185.1`, pinned exactly. WebGPU is out of
   M4.
@@ -520,7 +519,7 @@ a keyboard list did.
 
 ## Tools
 
-*Status: the track tool is implemented on the D3 render branch (2026-09-27, R4) in
+*Status: the track tool is implemented in D3 (2026-09-27, R4) in
 [`src/tools/`](../src/tools/), wired by `src/app` (`InputRouter`, `construction.ts`); the
 other tools are planned (R5).*
 
@@ -532,7 +531,9 @@ other tools are planned (R5).*
     - precision: Ctrl, or ⌥ on macOS;
     - height steps;
     - R to flip or rotate (planned with the Signal and Depot tools);
-    - the keyboard lattice cursor, with Enter to start and commit.
+    - the keyboard lattice cursor, with Enter to start and commit. Once the cursor places the
+      target, camera moves (its own keep-in-view pan included) never re-pick under the
+      resting mouse; a real pointer move takes the target back.
   - Tools never raycast or read the DOM.
 - **`ctx` is read-only:** the current `NetworkView`, `sim.planTrack`, the memoized preview, the
   terrain height at a node, and settings (height step, radius cap).
@@ -556,33 +557,44 @@ other tools are planned (R5).*
   chain (stays anchored at the new end, leaving with its heading). Esc steps back one level:
   Dragging → Anchored, Pressed or Anchored → Idle, Idle → Select.
   - A start on an existing buffer end keeps its height and lets the planner choose between
-    continuing the track and running back over it. After a plan that magnetism joined to a
-    port commits, the chain ends: leaving a joined port needs a turnout (D5).
+    continuing the track and running back over it. After a plan that joins an existing buffer
+    end commits (by magnetism, or a precision plan ending on it), the chain ends: leaving a
+    joined port needs a turnout (D5). A plan that reaches a buffer end along its own reused
+    track chains on outward. An undo or redo that removes the node a chain leaves from
+    returns the tool to Idle. A commit's "Built. Pieces: …" leads the announcement of the
+    re-plan that follows it.
   - **Height (tool defaults, open to the owner's feel check).** One step is 1 m. The end sits
     that many steps above the terrain at the end node (ground-following), so a drag across the
     land lays track on the ground; PgUp/PgDn, `]`/`[` and Shift+wheel move it. Anchoring on
     track starts at its height above ground, and chaining keeps the steps. A plan ending on an
     existing node within half a step of its height takes that height (not in precision).
   - **Precision** (held): magnetism off, the wheel steps the radius class (from 180 m) and Q/E
-    the end heading; the tooltip adds the planner's live label.
+    the end heading; the tooltip adds the planner's live label. Each activation starts with
+    precision off unless the modifier is held.
 - **Keys** (`src/app/keymap.ts`, tested): Ctrl/Cmd+Z undo; Ctrl/Cmd+Shift+Z or Ctrl+Y redo
   (case-insensitive, by `key`, in every tool); 1 Track; with Track active the arrows move the
   keyboard cursor (WASD still pans) and Enter starts and commits; Q/E rotate the camera unless
-  precision is held. Ctrl+Q is a browser shortcut on some platforms (quit on Linux): macOS
-  uses ⌥ for precision, and elsewhere Q/E with Ctrl may be taken by the browser.
+  precision is held. Enter, the arrows and the height keys also work with only the precision
+  modifier held. The height brackets match by character (`key`), so other layouts keep those
+  physical keys (German QWERTZ types "+" there); only under precision do the physical keys
+  count. A focused toolbar button keeps its own Enter unless the arrows moved the cursor
+  since it took focus, and toolbar buttons take no focus from a pointer click. Ctrl+Q is a
+  browser shortcut on some platforms (quit on Linux): macOS uses ⌥ for precision, and
+  elsewhere Q/E with Ctrl may be taken by the browser.
 - **Tool set.** Track, Signal, Station, Depot, Bridge, Tunnel and Demolish (keys 1–7).
   Select is the default no-tool state (Esc), not a toolbar button.
   - Bridge and Tunnel are the track tool with the structure forced; Track uses Auto.
   - Depot places a depot. No tool buys, assigns or dispatches trains.
 - **Testing.** Reducer unit tests replay scripted event sequences without a browser.
   Playwright (`npx playwright test`, [tests/e2e/](../tests/e2e/)) covers drag-build → undo to
-  empty, keyboard construction, a closed loop and the camera-first gesture routing (D3); its
-  runs are agent evidence.
+  empty, keyboard construction (with precision held), the keyboard cursor keeping its target
+  past the keep-in-view margin, overlays following the camera, Enter after toolbar use, a
+  closed loop and the camera-first gesture routing (D3); its runs are agent evidence.
 
 ## UI (HUD)
 
-*Basis: ADR 0009 (Accepted). Status: the construction part is implemented on the D3 render
-branch (2026-09-27): [`src/ui/store.ts`](../src/ui/store.ts) and
+*Basis: ADR 0009 (Accepted). Status: the construction part is implemented in D3
+(2026-09-27): [`src/ui/store.ts`](../src/ui/store.ts) and
 [`src/ui/Hud.tsx`](../src/ui/Hud.tsx), mounted at `#hud`: the construction tooltip (the three
 lines, "Can't build: <reason>" and the fix, the grade in green/amber/red bands), the toast,
 the aria-live status line and a bottom toolbar with Track and Undo/Redo only. Colours arrive as
