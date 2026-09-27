@@ -8,7 +8,10 @@ import { D11A_TERRAIN_COLOURS, type TerrainColourOptions } from "./terrainShadin
  * Terrain look variants for the owner's side-by-side comparison (2026-09-27,
  * after the owner found the ground "too blurry/flat"), chosen by URL like the
  * pitch A/B: `?terrain=d11a|a|b|c`. `d11a` is the look Look Gate A scored,
- * unchanged. The variants keep every palette colour and the lighting recipe;
+ * identical where no track is built: D11a's splat GLSL and bake exactly, plus
+ * the earthwork chunk, which acts only on earthworks (they are independent of
+ * the look; under `d11a` the splat's fields and roads are not faded on them).
+ * The variants keep every palette colour and the lighting recipe;
  * they change only how the ground is shaded and detailed, all without
  * post-processing and without per-frame work beyond one uniform (the zoom):
  *
@@ -41,6 +44,8 @@ export interface TerrainLook {
   readonly detail: GroundDetailSettings | undefined;
   /** Pixel-crisp splat edges. */
   readonly crispSplat: boolean;
+  /** The splat keeps the grass on earthworks (render pass iteration); false keeps D11a's splat GLSL exactly. */
+  readonly earthworkSplat: boolean;
   /** Anisotropic filtering of the splat and AO maps (1 = off, as in D11a). */
   readonly anisotropy: number;
 }
@@ -105,6 +110,7 @@ export const TERRAIN_LOOKS: { readonly [K in TerrainLookId]: TerrainLook } = {
     relief: undefined,
     detail: undefined,
     crispSplat: false,
+    earthworkSplat: false,
     anisotropy: 1,
   },
   a: {
@@ -114,6 +120,7 @@ export const TERRAIN_LOOKS: { readonly [K in TerrainLookId]: TerrainLook } = {
     relief: SMOOTH_RELIEF,
     detail: CRISP_DETAIL,
     crispSplat: true,
+    earthworkSplat: true,
     anisotropy: 8,
   },
   b: {
@@ -123,6 +130,7 @@ export const TERRAIN_LOOKS: { readonly [K in TerrainLookId]: TerrainLook } = {
     relief: FACET_RELIEF,
     detail: FACET_DETAIL,
     crispSplat: true,
+    earthworkSplat: true,
     anisotropy: 8,
   },
   c: {
@@ -132,6 +140,7 @@ export const TERRAIN_LOOKS: { readonly [K in TerrainLookId]: TerrainLook } = {
     relief: { ...FACET_RELIEF, contour: 0.08, contourM: 2.5, contourMajor: 4, contourFadePx: 4 },
     detail: FACET_DETAIL,
     crispSplat: true,
+    earthworkSplat: true,
     anisotropy: 8,
   },
 };
@@ -144,9 +153,9 @@ export function parseTerrainLook(value: string | null): TerrainLookId {
   return (TERRAIN_LOOK_IDS as readonly string[]).includes(value ?? "") ? (value as TerrainLookId) : DEFAULT_TERRAIN_LOOK;
 }
 
-/** Which terrain chunks a look installs (none beyond D11a's for `d11a`). */
+/** Which terrain chunks a look installs (for `d11a`, D11a's splat and the earthwork chunk only). */
 export function terrainChunkOptions(look: TerrainLook): TerrainChunkOptions {
-  return { crispSplat: look.crispSplat, detail: look.detail !== undefined, relief: look.relief !== undefined, facets: hasFacets(look) };
+  return { crispSplat: look.crispSplat, detail: look.detail !== undefined, earthworkSplat: look.earthworkSplat, relief: look.relief !== undefined, facets: hasFacets(look) };
 }
 
 /** Whether a look lights lattice triangles as facets. */

@@ -85,7 +85,7 @@ document.addEventListener("visibilitychange", () => scheduler.handleVisibilityCh
 
 const scene = new Scene();
 scene.background = new Color(palette.haze);
-// ?terrain=d11a|a|b|c: the terrain look variant (d11a is the look Look Gate A scored; see terrainLook.ts).
+// ?terrain=d11a|a|b|c: the terrain look variant (d11a is the look Look Gate A scored, where no track is built; see terrainLook.ts).
 const look = TERRAIN_LOOKS[params.terrain];
 const uniforms = createArtUniforms(terrainWorldBounds(terrain));
 applyTerrainLook(uniforms, look, terrain.waterLevelDm / 10);

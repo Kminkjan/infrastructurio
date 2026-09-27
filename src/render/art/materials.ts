@@ -72,10 +72,12 @@ export function setSwayEnabled(u: ArtUniforms, on: boolean): void {
   u.sway.uSwayAmplitude.value = on ? SWAY_AMPLITUDE_M : 0;
 }
 
-/** What a terrain look variant adds to the terrain material (nothing: D11a's chunks exactly). */
+/** What a terrain look variant adds to the terrain material (nothing: D11a's splat exactly, plus the earthwork colours). */
 export interface TerrainChunkOptions {
   readonly crispSplat?: boolean;
   readonly detail?: boolean;
+  /** The splat keeps the grass on earthworks (fades its surfaces and AO tint there); without it the splat is D11a's `terrain-splat-v2`. */
+  readonly earthworkSplat?: boolean;
   readonly relief?: boolean;
   /** Compile the relief chunk's facet path (lattice triangles lit as facets). */
   readonly facets?: boolean;
@@ -83,12 +85,14 @@ export interface TerrainChunkOptions {
 
 /**
  * Chunks after the lattice on the terrain material: splat (keeping the grass on
- * earthworks), then the earthwork colours right after it, then relief (its
- * contour hint darkens fields and roads too; its facets fade out on
- * earthworks), grain and edge fade.
+ * earthworks when asked), then the earthwork colours right after it, then
+ * relief (its contour hint darkens fields and roads too; its facets fade out
+ * on earthworks), grain and edge fade. Without options the splat is D11a's
+ * exactly, and the earthwork chunk acts only on earthwork vertices, so where no
+ * track is built the terrain renders as D11a's.
  */
 export function terrainChunks(u: ArtUniforms, options: TerrainChunkOptions = {}): ShaderChunk[] {
-  const splat = createSplatChunk(u.splat, { crisp: options.crispSplat === true, earthwork: true, ...(options.detail ? { detail: u.detail } : {}) });
+  const splat = createSplatChunk(u.splat, { crisp: options.crispSplat === true, earthwork: options.earthworkSplat === true, ...(options.detail ? { detail: u.detail } : {}) });
   const relief = options.relief ? [createReliefChunk(u.relief, { facets: options.facets === true })] : [];
   return [splat, createEarthworkChunk(u.earthwork), ...relief, createGrainChunk(u.grain), createEdgeFadeChunk(u.edge)];
 }
