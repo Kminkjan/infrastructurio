@@ -42,7 +42,7 @@ function hillPlan(): PieceInput[] {
 
 function passFor(terrain: ReturnType<typeof diorama>["terrain"], lod: 0 | 1, x: number, y: number, pieces: readonly EarthworkPiece[]): ChunkPass {
   const pass = new ChunkPass();
-  pass.run(terrain, lod, x, y, piecesTouching(pieces, ChunkPass.chunkBox(terrain, lod, x, y)));
+  pass.run(terrain, lod, x, y, piecesTouching(pieces, ChunkPass.chunkBox(terrain, lod, x, y), lod));
   return pass;
 }
 

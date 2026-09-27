@@ -78,6 +78,11 @@ export function encodeEarthworkPotential(p: number): number {
 export const REFINE = 4;
 /** Reach cap: beyond about 78 m of cut or fill the slope stops short (none on the diorama map). */
 export const MAX_REACH_M = 120;
+/**
+ * The LOD1 reach scans the relief this much wider: a 10 m LOD1 triangle interpolates corners up to one LOD1 cell
+ * past any plan box, which the LOD0 node scan (one LOD0 step of slack) does not see.
+ */
+export const LOD1_SCAN_MARGIN_M = 2 * LATTICE_SPACING_M;
 /** Only ground structure gets earthworks; bridges and tunnels are D4's. */
 const CONFORMED: ReadonlySet<Structure> = new Set(["ground"]);
 
@@ -92,8 +97,18 @@ export interface PieceInput {
   readonly structure?: Structure;
 }
 
-/** A piece prepared for the conform: its centreline, heights and how far its earthworks can reach. */
-export interface EarthworkPiece {
+/** How far a piece's earthworks can reach at one LOD, and its centreline's plan box grown by that. */
+export interface PieceReach {
+  /** Plan distance beyond which the piece cannot move the terrain. */
+  readonly reachM: number;
+  readonly minX: number;
+  readonly minY: number;
+  readonly maxX: number;
+  readonly maxY: number;
+}
+
+/** A piece prepared for the conform: its centreline, heights and how far its earthworks can reach (LOD0 here, LOD1 in `lod1`). */
+export interface EarthworkPiece extends PieceReach {
   readonly key: string;
   readonly prims: readonly RenderPrim[];
   readonly lengthM: number;
@@ -103,13 +118,13 @@ export interface EarthworkPiece {
   readonly primStartM: Float64Array;
   /** Arc prims' end points (sx, sy, ex, ey per prim; unused for lines). */
   readonly arcEnds: Float64Array;
-  /** Plan distance beyond which the piece cannot move the terrain. */
-  readonly reachM: number;
-  /** The centreline's plan box grown by the reach. */
-  readonly minX: number;
-  readonly minY: number;
-  readonly maxX: number;
-  readonly maxY: number;
+  /** The reach at LOD1 (at least the LOD0 reach): sized from the relief scan widened by LOD1_SCAN_MARGIN_M. */
+  readonly lod1: PieceReach;
+}
+
+/** The piece's reach at a LOD. */
+export function reachAt(p: EarthworkPiece, lod: TerrainLod): PieceReach {
+  return lod === 0 ? p : p.lod1;
 }
 
 export function conforms(piece: PieceInput): boolean {
@@ -118,9 +133,8 @@ export function conforms(piece: PieceInput): boolean {
 
 /**
  * Prepares a piece: its centreline index (prim lengths, arc ends and plan box,
- * all from `geometry/sample.ts`), and the reach from the natural relief around
- * it (found by growing the box until the relief inside it cannot reach
- * further).
+ * all from `geometry/sample.ts`), and its reach at each LOD from the natural
+ * relief around it (`convergedReach`).
  */
 export function earthworkPiece(terrain: Terrain, piece: PieceInput): EarthworkPiece {
   const c = centrelineIndex(piece);
@@ -129,17 +143,51 @@ export function earthworkPiece(terrain: Terrain, piece: PieceInput): EarthworkPi
   const z1M = piece.z1Mm / 1000 - BED_BELOW_TRACK_M;
   const bedMin = Math.min(z0M, z1M);
   const bedMax = Math.max(z0M, z1M);
-  // The daylight line lies where e(d) reaches the relief: d = W + b/2 + S·relief once the slope is straight;
-  // its smooth clamp reaches DAYLIGHT_ROUND_M of height further out, plus a metre of margin.
-  const reachFor = (relief: number) => FORMATION_HALF_WIDTH_M + CREST_ROUND_M / 2 + SIDE_SLOPE_RUN * (relief + DAYLIGHT_ROUND_M) + 1;
-  let reach = reachFor(2);
-  for (let pass = 0; pass < 8; pass++) {
-    const range = naturalRange(terrain, minX - reach, minY - reach, maxX + reach, maxY + reach);
-    const need = Math.min(MAX_REACH_M, reachFor(Math.max(0, range.max - bedMin, bedMax - range.min)));
-    if (need <= reach) break;
+  const reach = convergedReach(terrain, c, bedMin, bedMax, reachForRelief(2), 0);
+  // LOD1's fixed point lies at or past LOD0's (its scan is wider), so its search starts there.
+  const reach1 = convergedReach(terrain, c, bedMin, bedMax, reach, LOD1_SCAN_MARGIN_M);
+  return {
+    key: piece.key,
+    prims: c.prims,
+    lengthM: c.lengthM,
+    z0M,
+    z1M,
+    primStartM: c.primStartM,
+    arcEnds: c.arcEnds,
+    reachM: reach,
+    minX: minX - reach,
+    minY: minY - reach,
+    maxX: maxX + reach,
+    maxY: maxY + reach,
+    lod1: { reachM: reach1, minX: minX - reach1, minY: minY - reach1, maxX: maxX + reach1, maxY: maxY + reach1 },
+  };
+}
+
+/**
+ * The reach for a relief (m, the natural ground's largest height above or below the bed): the daylight line lies
+ * where e(d) reaches the relief, d = W + b/2 + S·relief once the slope is straight; its smooth clamp reaches
+ * DAYLIGHT_ROUND_M of height further out, plus a metre of margin.
+ */
+function reachForRelief(relief: number): number {
+  return FORMATION_HALF_WIDTH_M + CREST_ROUND_M / 2 + SIDE_SLOPE_RUN * (relief + DAYLIGHT_ROUND_M) + 1;
+}
+
+/**
+ * Grows the reach from `start` until the relief inside the centreline's box grown by it (and by `margin`) needs
+ * no more: a fixed point, so the daylight line and its smooth clamp end inside the reach and the drawn ground
+ * cannot step back to natural at it. (Round 1 stopped after 8 passes without rescanning the last growth, which on
+ * a long slope near 1 : 1.5 could leave a ledge; PR #83 review.) It ends: the reach only grows, is capped at
+ * MAX_REACH_M, and each value comes from a node height in a finite map.
+ */
+function convergedReach(t: Terrain, box: { minX: number; minY: number; maxX: number; maxY: number }, bedMin: number, bedMax: number, start: number, margin: number): number {
+  let reach = start;
+  for (;;) {
+    const grow = reach + margin;
+    const range = naturalRange(t, box.minX - grow, box.minY - grow, box.maxX + grow, box.maxY + grow);
+    const need = Math.min(MAX_REACH_M, reachForRelief(Math.max(0, range.max - bedMin, bedMax - range.min)));
+    if (need <= reach) return reach;
     reach = need;
   }
-  return { key: piece.key, prims: c.prims, lengthM: c.lengthM, z0M, z1M, primStartM: c.primStartM, arcEnds: c.arcEnds, reachM: reach, minX: minX - reach, minY: minY - reach, maxX: maxX + reach, maxY: maxY + reach };
 }
 
 /** Lowest and highest node height (m) inside a plan box, over the LOD0 nodes. */
@@ -195,17 +243,18 @@ export function smoothMin(a: number, b: number, k: number): number {
 
 /**
  * The analytic conformed height at plan (x, y) over natural height `natural`
- * (NaN off the map) for `pieces`. Used by tests and for single points; the
- * chunk pass evaluates the same rule on the sub-lattice.
+ * (NaN off the map) for `pieces`, with their reach at `lod`. Used by tests and
+ * for single points; the chunk pass evaluates the same rule on the sub-lattice.
  */
-export function conformedHeightM(pieces: readonly EarthworkPiece[], x: number, y: number, natural: number): number {
+export function conformedHeightM(pieces: readonly EarthworkPiece[], x: number, y: number, natural: number, lod: TerrainLod = 0): number {
   let u = Infinity;
   let l = -Infinity;
   const n = { d: 0, s: 0 };
   for (const p of pieces) {
-    if (x < p.minX || x > p.maxX || y < p.minY || y > p.maxY) continue;
+    const r = reachAt(p, lod);
+    if (x < r.minX || x > r.maxX || y < r.minY || y > r.maxY) continue;
     nearestOnPiece(p, x, y, n);
-    if (n.d >= p.reachM) continue;
+    if (n.d >= r.reachM) continue;
     const bed = bedAt(p, n.s);
     const rise = slopeRiseM(n.d);
     if (bed + rise < u) u = bed + rise;
@@ -612,21 +661,22 @@ export class ChunkPass {
     const k = REFINE;
     const sub = this.lat.spacingM / k;
     const rowM = sub * HALF_SQRT3;
-    const rsA = Math.max(this.rs0, Math.ceil(p.minY / rowM));
-    const rsB = Math.min(this.rs0 + this.height - 1, Math.floor(p.maxY / rowM));
+    const r = reachAt(p, this.lat.lod);
+    const rsA = Math.max(this.rs0, Math.ceil(r.minY / rowM));
+    const rsB = Math.min(this.rs0 + this.height - 1, Math.floor(r.maxY / rowM));
     let evaluated = 0;
     for (let rs = rsA; rs <= rsB; rs++) {
       const parity = rs & 1;
       const y = sub * rs * HALF_SQRT3;
-      const csA = Math.max(this.cs0, Math.ceil(p.minX / sub - parity / 2));
-      const csB = Math.min(this.cs0 + this.width - 1, Math.floor(p.maxX / sub - parity / 2));
+      const csA = Math.max(this.cs0, Math.ceil(r.minX / sub - parity / 2));
+      const csB = Math.min(this.cs0 + this.width - 1, Math.floor(r.maxX / sub - parity / 2));
       const rowBase = (rs - this.rs0) * this.width - this.cs0;
       for (let cs = csA; cs <= csB; cs++) {
         const x = sub * (cs + parity / 2);
         // The hot loop calls `sample.ts` directly (the `nearestOnPiece` wrapper measured ~5% of a rebuild here).
         const n = nearestOnCentreline(p, x, y, this.near);
         evaluated += 1;
-        if (n.d >= p.reachM) continue;
+        if (n.d >= r.reachM) continue;
         const bed = bedAt(p, n.s);
         const rise = slopeRiseM(n.d);
         const g = rowBase + cs;
@@ -905,10 +955,13 @@ export function chunksTouching(t: Pick<Terrain, "columns" | "rows">, lod: Terrai
   }
 }
 
-/** Pieces whose reach box meets a plan box. */
-export function piecesTouching(pieces: Iterable<EarthworkPiece>, box: { minX: number; minY: number; maxX: number; maxY: number }): EarthworkPiece[] {
+/** Pieces whose reach box at `lod` meets a plan box. */
+export function piecesTouching(pieces: Iterable<EarthworkPiece>, box: { minX: number; minY: number; maxX: number; maxY: number }, lod: TerrainLod = 0): EarthworkPiece[] {
   const out: EarthworkPiece[] = [];
-  for (const p of pieces) if (!(p.maxX < box.minX || p.minX > box.maxX || p.maxY < box.minY || p.minY > box.maxY)) out.push(p);
+  for (const p of pieces) {
+    const r = reachAt(p, lod);
+    if (!(r.maxX < box.minX || r.minX > box.maxX || r.maxY < box.minY || r.minY > box.maxY)) out.push(p);
+  }
   return out;
 }
 
@@ -921,11 +974,11 @@ export function conformTerrain(terrain: Terrain, network: { readonly pieces: rea
   const field = new DrawnHeightfield(terrain, lod);
   const pieces = network.pieces.filter(conforms).map((p) => earthworkPiece(terrain, p));
   const chunks = new Set<string>();
-  for (const p of pieces) chunksTouching(terrain, lod, p, (x, y) => chunks.add(`${x},${y}`));
+  for (const p of pieces) chunksTouching(terrain, lod, reachAt(p, lod), (x, y) => chunks.add(`${x},${y}`));
   for (const key of chunks) {
     const [x, y] = key.split(",").map(Number) as [number, number];
     const box = ChunkPass.chunkBox(terrain, lod, x, y);
-    if (!pass.run(terrain, lod, x, y, piecesTouching(pieces, box))) continue;
+    if (!pass.run(terrain, lod, x, y, piecesTouching(pieces, box, lod))) continue;
     field.setChunk(pass);
   }
   return field;

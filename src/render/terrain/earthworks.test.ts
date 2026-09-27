@@ -278,6 +278,57 @@ describe("earthworks conform (the rule)", () => {
     expect(earthworkPiece(flat, straight(20, 40, 0, 12_000)).reachM).toBeCloseTo(reachFor(8), 9);
   });
 
+  it("grows the reach until it converges, so a long slope near 1 : 1.5 leaves no ledge at the reach", () => {
+    // Review finding (PR #83): the reach loop stopped after 8 passes without rescanning its last growth. Here a 32°
+    // slope rises across a run on row 32; its daylight line lies about 72 m out, past where those 8 passes stopped.
+    const s = 0.63;
+    const slope = makeTerrain(80, 64, (_q, _r, _col, row) => 1000 + s * (row - 32) * 25 * Math.sqrt(3));
+    const piece = earthworkPiece(slope, straight(24, 32, 0, 100_000));
+    const field = new DrawnHeightfield(slope, 0);
+    const x = 5 * (24 + 16) + 2.5;
+    const y0 = 32 * 2.5 * Math.sqrt(3);
+    // Across the run (uphill cut, downhill fill), the drawn departure C − N changes smoothly out to beyond the reach:
+    // no jump between samples a centimetre apart.
+    let worst = 0;
+    for (const side of [1, -1]) {
+      let previous = 0;
+      for (let d = 0; d <= piece.reachM + 1; d += 0.01) {
+        const y = y0 + side * d;
+        const n = field.naturalAtM(x, y);
+        const departure = conformedHeightM([piece], x, y, n) - n;
+        if (d > 0) worst = Math.max(worst, Math.abs(departure - previous));
+        previous = departure;
+      }
+    }
+    expect(worst).toBeLessThan(0.05);
+  });
+
+  it("sizes the LOD1 reach from a scan one LOD1 cell wider, so a rise its 10 m triangles see leaves no ledge", () => {
+    // Review finding (PR #83): LOD1 interpolates 10 m triangles whose corners can lie past the scanned box. A 10 m
+    // rise from x = 220 m (column 44) is beyond the LOD0 scan of a straight at x = 200–205 m but inside one of its LOD1
+    // triangles, so the LOD1 surface climbs within the LOD0 reach.
+    const wall = makeTerrain(80, 40, (_q, _r, col) => (col >= 44 ? 300 : 200));
+    const piece = earthworkPiece(wall, straight(30, 20, 0, 20_000));
+    const lod1 = new DrawnHeightfield(wall, 1);
+    const y0 = 20 * 2.5 * Math.sqrt(3);
+    // Along the run and past its east end, the LOD1 departure changes smoothly: no jump between samples 1 cm apart.
+    let worst = 0;
+    let deepest = 0;
+    for (const dy of [0, 2, 4]) {
+      let previous = 0;
+      for (let x = 202.5; x <= 240; x += 0.01) {
+        const n = lod1.naturalAtM(x, y0 + dy);
+        const departure = conformedHeightM([piece], x, y0 + dy, n, 1) - n;
+        if (x > 202.5) worst = Math.max(worst, Math.abs(departure - previous));
+        deepest = Math.min(deepest, departure);
+        previous = departure;
+      }
+    }
+    expect(worst).toBeLessThan(0.05);
+    // The cut toward the rise is real (deeper than a metre), not skipped.
+    expect(deepest).toBeLessThan(-1);
+  });
+
   it("returns nothing for a chunk beyond the grid", () => {
     const tiny: Terrain = makeTerrain(2, 2, () => 200);
     expect(new ChunkPass().run(tiny, 1, 0, 0, [])).toBe(false);

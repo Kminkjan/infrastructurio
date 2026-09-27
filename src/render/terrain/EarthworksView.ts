@@ -213,13 +213,14 @@ export class EarthworksView {
     this.queue.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   }
 
-  private enqueueBox(box: { minX: number; minY: number; maxX: number; maxY: number }): void {
+  /** Queues the chunks (and their scenery) a piece's reach meets, at each LOD's reach. */
+  private enqueueBox(piece: EarthworkPiece): void {
     const t = this.options.terrain;
-    chunksTouching(t, 0, box, (x, y) => {
+    chunksTouching(t, 0, piece, (x, y) => {
       this.enqueue(`${STEP_LOD0}:${x}:${y}`);
       if (this.scenery) this.enqueue(`${STEP_SCENERY}:${x}:${y}`);
     });
-    chunksTouching(t, 1, box, (x, y) => this.enqueue(`${STEP_LOD1}:${x}:${y}`));
+    chunksTouching(t, 1, piece.lod1, (x, y) => this.enqueue(`${STEP_LOD1}:${x}:${y}`));
   }
 
   private enqueue(key: string): void {
@@ -240,7 +241,7 @@ export class EarthworksView {
       return;
     }
     const lod: TerrainLod = step === STEP_LOD0 ? 0 : 1;
-    const near = piecesTouching(this.pieces.values(), ChunkPass.chunkBox(terrain, lod, x, y));
+    const near = piecesTouching(this.pieces.values(), ChunkPass.chunkBox(terrain, lod, x, y), lod);
     const pass = this.pass;
     this.rebuild.chunks += 1;
     if (!pass.run(terrain, lod, x, y, near)) return;

@@ -99,9 +99,9 @@ describe("earthworks and terrain bake output (a byte pin)", () => {
     earthworks.sync(network);
     expect(earthworks.busy).toBe(false);
 
-    const byName: Record<string, ArrayBufferView[]> = { position: [], normal: [], color: [], [EARTHWORK_ATTRIBUTE]: [], index: [] };
     const counts = chunkCounts(terrain);
-    for (const lod of [0, 1] as const) {
+    const chunkHashes = (lod: 0 | 1) => {
+      const byName: Record<string, ArrayBufferView[]> = { position: [], normal: [], color: [], [EARTHWORK_ATTRIBUTE]: [], index: [] };
       for (let y = 0; y < counts.y; y++) {
         for (let x = 0; x < counts.x; x++) {
           const g = view.chunkMesh(x, y, lod)?.geometry as BufferGeometry | undefined;
@@ -111,7 +111,8 @@ describe("earthworks and terrain bake output (a byte pin)", () => {
           if (index) byName.index?.push(index as Uint16Array);
         }
       }
-    }
+      return [fnv(byName.position ?? []), fnv(byName.normal ?? []), fnv(byName.color ?? []), fnv(byName[EARTHWORK_ATTRIBUTE] ?? []), fnv(byName.index ?? [])].join(" ");
+    };
 
     const pieces = network.pieces.filter(conforms).map((p) => earthworkPiece(terrain, p));
     const reach = new Float64Array(pieces.length * 6);
@@ -147,11 +148,9 @@ describe("earthworks and terrain bake output (a byte pin)", () => {
       withEarthworks: stats.chunksWithEarthworks,
       cleared: stats.clearedScenery,
       maxCutFill: [stats.maxCutM, stats.maxFillM],
-      position: fnv(byName.position ?? []),
-      normal: fnv(byName.normal ?? []),
-      color: fnv(byName.color ?? []),
-      earthwork: fnv(byName[EARTHWORK_ATTRIBUTE] ?? []),
-      index: fnv(byName.index ?? []),
+      // Per LOD: position, normal, colour, earthwork attribute and index hashes over every chunk.
+      lod0: chunkHashes(0),
+      lod1: chunkHashes(1),
       heightfield0: fnv(fieldArrays(earthworks.heightfield)),
       heightfield1: fnv(fieldArrays(earthworks.heightfieldLod1)),
       reach: fnv([reach]),
@@ -168,11 +167,9 @@ describe("earthworks and terrain bake output (a byte pin)", () => {
       withEarthworks: 36,
       cleared: 255,
       maxCutFill: [4.316668701171871, 6.461734008789062],
-      position: "a939f741",
-      normal: "36344b5b",
-      color: "2ff0882a",
-      earthwork: "3ddc0bdb",
-      index: "79b4f871",
+      // LOD0 as recorded at 81663f8; LOD1's earthwork attribute since the PR #83 review's converged LOD1 reach.
+      lod0: "ae0326d8 f61ad335 68f93f83 e6a82db5 172c603b",
+      lod1: "de4c69ec 0b3769cb f7cf5dc0 3132497b 3d8f5a3b",
       heightfield0: "46021029",
       heightfield1: "9278cb59",
       reach: "9951e90e",
