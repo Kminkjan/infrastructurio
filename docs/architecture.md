@@ -52,43 +52,39 @@ exists. It is a design document, not evidence that any slice works.
 
 ## What exists and what is planned
 
-This is an agent reading of the branch on 2026-09-26. **On main** means the file shipped with
+This is an agent reading of this branch on 2026-09-27. **On main** means the file shipped with
 the reset skeleton (PR 1, [#60](https://github.com/Kminkjan/infrastructurio/pull/60)).
-**D1 branch** means it exists on `codex/d1-lattice-terrain`
-([#65](https://github.com/Kminkjan/infrastructurio/issues/65)) and is not merged yet.
-**D2 branch** means it exists on `codex/d2-track-model`
-([#66](https://github.com/Kminkjan/infrastructurio/issues/66)) and is not merged yet. Each
-records that the file is present, not that its tests pass on a given commit: run
-`npm run check` for that. **D11a branch** means it exists on `codex/d11a-lookdev`
-([#75](https://github.com/Kminkjan/infrastructurio/issues/75)), not merged yet. **D3 core
-branch** means it exists on `codex/d3-planner`
-([#67](https://github.com/Kminkjan/infrastructurio/issues/67), 2026-09-27), not merged yet.
-**D3 render branch** means it exists on `codex/d3-construction-tool` (the render, tools and
-UI half of #67, 2026-09-27, with the D3 core branch merged in), not merged yet. Everything
-else is planned and lands slice by slice.
+**D1**, **D2** and **D11a** name the slice that added the file; all three are merged to `main`
+(D1 through [#79](https://github.com/Kminkjan/infrastructurio/pull/79), D2 and D11a through
+[#81](https://github.com/Kminkjan/infrastructurio/pull/81)). **D3 core branch** means it exists
+on `codex/d3-planner` ([#67](https://github.com/Kminkjan/infrastructurio/issues/67),
+2026-09-27); **D3 render branch** means it exists on `codex/d3-construction-tool` (the render,
+tools and UI half of #67, 2026-09-27, with the D3 core branch merged in); neither is merged
+yet. Each label records that the file is present, not that its tests pass on a given commit:
+run `npm run check` for that. Everything else is planned and lands slice by slice.
 
 | Part | Path | Status | Slice |
 |---|---|---|---|
 | Boundary test with a negative self-check | [tests/architecture.test.ts](../tests/architecture.test.ts) | **On main** | S0 |
 | Core compiler config | [tsconfig.core.json](../tsconfig.core.json) | **On main** | S0 |
 | Triangular lattice and its tests | [src/core/lattice.ts](../src/core/lattice.ts) | **On main** | S1 (D1) |
-| Sim ↔ world conversion and its tests | [src/render/coords.ts](../src/render/coords.ts) | **On main**; **D1 branch** adds a non-allocating `worldToSim` target and the winding oracle (in `camera/isoMath.test.ts`) | R0 (D1) |
-| Palette | [src/render/art/palette.ts](../src/render/art/palette.ts) | **On main**: an 18-key subset of the art-direction palette. **D1 branch**: 24 keys (adds meadow, deep water, foam and three UI tokens) plus `cssColor`. **D11a branch**: the full table (70 tokens) plus `forestFloor`, tweak-panel overrides in memory, and a scan rule against hex literals elsewhere. **D3 render branch**: `signalAmber`, the tooltip's middle grade band | full set in D11a |
-| Composition root | [src/app/](../src/app/) | **On main**: the skeleton smoke scene. **D1 branch**: replaced by seeded terrain, water and lighting under the iso camera, controller, scheduler, renderer host and perf monitor; G toggles the lattice overlay (debug, until D3). **D3 render branch**: `main.ts` creates the sim and wires construction; `InputRouter` (the single owner of canvas and window input), `keymap` (pure key and wheel rules), `construction` (tool state, effect interpreter, the single command gateway, undo/redo with toast and flash, timed previews and plans), `hudTheme`; the lattice overlay follows the track tool (G is gone); the dev-only `__diorama` hook gains the Playwright projection functions. No sim step loop yet | R0–R1 (D1), R4 (D3) |
-| Core utilities, terrain | [src/core/util/](../src/core/util/), [src/core/terrain.ts](../src/core/terrain.ts) | **D1 branch**: `int`, `hash`, `prng`, `heap`; seeded integer terrain with a golden hash | rest of S0, S3 (D1) |
-| Geometry, track model, planner | [src/core/geometry/](../src/core/geometry/), [src/core/track/](../src/core/track/) | **D2 branch**: `templates`, `piece`, `sample`, `clearance`; `authored`, `validate` (the 11 D2-owned codes), `history`. **D3 core branch**: `planner`, the full planner behind `sim.planTrack` (one-bend, shift and two-bend fits, magnetism, precision, elevation; [simulation model §8](simulation-model.md#8-planner)) | S2–S3 (D2); S4 (D3) |
-| Network, pathfinding | [src/core/network/](../src/core/network/) | **D2 branch**: a partial `derive` (through and buffer nodes, sections split at buffers). Junctions, graph and pathfinding planned | S5–S6 (D2 partial) |
+| Sim ↔ world conversion and its tests | [src/render/coords.ts](../src/render/coords.ts) | **On main**; **D1** adds a non-allocating `worldToSim` target and the winding oracle (in `camera/isoMath.test.ts`) | R0 (D1) |
+| Palette | [src/render/art/palette.ts](../src/render/art/palette.ts) | **On main**: an 18-key subset of the art-direction palette. **D1**: 24 keys (adds meadow, deep water, foam and three UI tokens) plus `cssColor`. **D11a**: the full table (70 tokens) plus `forestFloor`, tweak-panel overrides in memory, and a scan rule against hex literals elsewhere. **D3 render branch**: `signalAmber`, the tooltip's middle grade band | full set in D11a |
+| Composition root | [src/app/](../src/app/) | **On main**: the skeleton smoke scene. **D1**: replaced by seeded terrain, water and lighting under the iso camera, controller, scheduler, renderer host and perf monitor; G toggles the lattice overlay (debug, until D3). **D3 render branch**: `main.ts` creates the sim and wires construction; `InputRouter` (the single owner of canvas and window input), `keymap` (pure key and wheel rules), `construction` (tool state, effect interpreter, the single command gateway, undo/redo with toast and flash, timed previews and plans), `hudTheme`; the lattice overlay follows the track tool (G is gone); the dev-only `__diorama` hook gains the Playwright projection functions. No sim step loop yet | R0–R1 (D1), R4 (D3) |
+| Core utilities, terrain | [src/core/util/](../src/core/util/), [src/core/terrain.ts](../src/core/terrain.ts) | **D1**: `int`, `hash`, `prng`, `heap`; seeded integer terrain with a golden hash | rest of S0, S3 (D1) |
+| Geometry, track model, planner | [src/core/geometry/](../src/core/geometry/), [src/core/track/](../src/core/track/) | **D2**: `templates`, `piece`, `sample`, `clearance`; `authored`, `validate` (the 11 D2-owned codes), `history`. **D3 core branch**: `planner`, the full planner behind `sim.planTrack` (one-bend, shift and two-bend fits, magnetism, precision, elevation; [simulation model §8](simulation-model.md#8-planner)) | S2–S3 (D2); S4 (D3) |
+| Network, pathfinding | [src/core/network/](../src/core/network/) | **D2**: a partial `derive` (through and buffer nodes, sections split at buffers). Junctions, graph and pathfinding planned | S5–S6 (D2 partial) |
 | Trains, reservation, deadlock | `src/core/trains/`, `src/core/signals/` | Planned | S7–S9 (D8, D9) |
 | Operator and reasons | `src/core/services/` | Planned | S9–S10 (D9) |
-| Sim façade, remap, views, save | [src/core/sim/](../src/core/sim/) | **D2 branch**: `world.ts` and the first slice of `api.ts` (`createSim`; `preview`, `execute` and `network()`; build, demolish, undo and redo), which also re-exports the lattice and terrain helpers. **D3 render branch**: additive re-exports of the scenario types, `resolvePiece` and `pieceFromKey` (the ghost draws unbuilt specs). `api.ts` grows from here; remap in S11a/b; views and save in S12 | S2–S3 (D2); (D10, D12) |
-| Scenario | [src/core/scenarios/](../src/core/scenarios/) | **D11a branch**: `baltic-diorama.ts` builds the static scenery layout (towns with lots, church, windmill, farmsteads, strip fields, forest density and trees, dirt roads, telegraph poles, lamps, fences, haystacks) from the terrain and a seed, integer-only, with a golden hash; `placeNames.ts` is the Baltic name list. D1 terrain moved to generator version 2 in the same branch | D1, D11a |
-| Renderer host, scheduler, camera, perf monitor | [src/render/core/](../src/render/core/), [src/render/camera/](../src/render/camera/) | **D1 branch**: `RendererHost`, `FrameScheduler`, `PerfMonitor` (F3); `isoMath`, `IsoCamera`, `CameraController`. Pure parts unit-tested. **D3 render branch**: `CameraController` attaches no listeners; `InputRouter` offers it each gesture first | R0 (D1) |
-| Terrain, lighting, lattice shader | [src/render/terrain/](../src/render/terrain/), [src/render/art/](../src/render/art/) | **D1 branch**: chunked lattice-triangle terrain (LOD0/LOD1), depth-tinted water, `lighting` with a fitted shadow map (`shadowFit`), lattice overlay (`shaderChunks/lattice`, `terrain/latticeMaterial`). Look not judged | R1 (D1) |
+| Sim façade, remap, views, save | [src/core/sim/](../src/core/sim/) | **D2**: `world.ts` and the first slice of `api.ts` (`createSim`; `preview`, `execute` and `network()`; build, demolish, undo and redo), which also re-exports the lattice and terrain helpers. **D3 render branch**: additive re-exports of the scenario types, `resolvePiece` and `pieceFromKey` (the ghost draws unbuilt specs). `api.ts` grows from here; remap in S11a/b; views and save in S12 | S2–S3 (D2); (D10, D12) |
+| Scenario | [src/core/scenarios/](../src/core/scenarios/) | **D11a**: `baltic-diorama.ts` builds the static scenery layout (towns with lots, church, windmill, farmsteads, strip fields, forest density and trees, dirt roads, telegraph poles, lamps, fences, haystacks) from the terrain and a seed, integer-only, with a golden hash; `placeNames.ts` is the Baltic name list. D1 terrain moved to generator version 2 in the same branch | D1, D11a |
+| Renderer host, scheduler, camera, perf monitor | [src/render/core/](../src/render/core/), [src/render/camera/](../src/render/camera/) | **D1**: `RendererHost`, `FrameScheduler`, `PerfMonitor` (F3); `isoMath`, `IsoCamera`, `CameraController`. Pure parts unit-tested. **D3 render branch**: `CameraController` attaches no listeners; `InputRouter` offers it each gesture first | R0 (D1) |
+| Terrain, lighting, lattice shader | [src/render/terrain/](../src/render/terrain/), [src/render/art/](../src/render/art/) | **D1**: chunked lattice-triangle terrain (LOD0/LOD1), depth-tinted water, `lighting` with a fitted shadow map (`shadowFit`), lattice overlay (`shaderChunks/lattice`, `terrain/latticeMaterial`). Look not judged | R1 (D1) |
 | Track meshes | [src/render/track/](../src/render/track/) | **D3 render branch**: `trackGeometry` (ballast, sleepers and rails through `geometry/sample.ts`), `TrackBatch` (a `BatchedMesh` per layer, or 128 m chunk-merged meshes without multi-draw), `TrackView` (diffs by revision and piece key, 8 ms slices, far LOD), `ghostGeometry` and `GhostView` (the two-pass ghost, rejection highlight, undo/redo flash, drop lines and end-height tags), `SnapRing`. Turnout timbers, blades and earthworks planned | R2, R4 (D3) |
-| Scenery kit, labels | [src/render/scenery/](../src/render/scenery/), [src/render/labels/](../src/render/labels/) | **D11a branch**: instanced trees (3 species, 2 LODs), the building grammar (9 kinds) merged per chunk, instanced props, the terrain splat/field/AO textures, and CSS2D place names with a greedy declutter. Look not judged | R3 (D11a) → Look Gate A |
-| Art pipeline | [src/render/art/](../src/render/art/) | **D11a branch**: `AssetRegistry`, `materials` (six Lambert materials), shader chunks `grain`, `windSway`, `foliageTint`, `edgeFade` and `splat` composed with `lattice`, the CSS `vignette` and the dev `TweakPanel`; [camera/bookmarks.ts](../src/render/camera/bookmarks.ts) holds the Look Gate A views and the pitch A/B. **D3 render branch**: three track materials and the `trackStripe` chunk (the far-LOD ballast stripe) | R3 (D11a), R2 (D3) |
+| Scenery kit, labels | [src/render/scenery/](../src/render/scenery/), [src/render/labels/](../src/render/labels/) | **D11a**: instanced trees (3 species, 2 LODs), the building grammar (9 kinds) merged per chunk, instanced props, the terrain splat/field/AO textures, and CSS2D place names with a greedy declutter. Look not judged | R3 (D11a) → Look Gate A |
+| Art pipeline | [src/render/art/](../src/render/art/) | **D11a**: `AssetRegistry`, `materials` (six Lambert materials), shader chunks `grain`, `windSway`, `foliageTint`, `edgeFade` and `splat` composed with `lattice`, the CSS `vignette` and the dev `TweakPanel`; [camera/bookmarks.ts](../src/render/camera/bookmarks.ts) holds the Look Gate A views and the pitch A/B. **D3 render branch**: three track materials and the `trackStripe` chunk (the far-LOD ballast stripe) | R3 (D11a), R2 (D3) |
 | Tools | [src/tools/](../src/tools/) | **D3 render branch**: `types` (events, effects, ctx), `trackTool` (the track tool reducer), `previewMemo` (LRU of 16 keyed by revision + command key), `picks`, `format` (tooltip text); reducer unit tests. Signal, Station, Depot, Bridge, Tunnel and Demolish planned | R4 (D3); R5 (D4–D7) |
-| Picking | [src/render/picking/](../src/render/picking/) | Terrain node: **D1 branch**, as [heightfieldRay.ts](../src/render/terrain/heightfieldRay.ts). **D3 render branch**: `trackPicker` (existing nodes within 14 px, centrelines within 10 px, measured on screen at track height, then the terrain node). Handles and the proxy `pickScene` planned | D1 (terrain node), R4 (D3), R5 (handles, proxies) |
+| Picking | [src/render/picking/](../src/render/picking/) | Terrain node: **D1**, as [heightfieldRay.ts](../src/render/terrain/heightfieldRay.ts). **D3 render branch**: `trackPicker` (existing nodes within 14 px, centrelines within 10 px, measured on screen at track height, then the terrain node). Handles and the proxy `pickScene` planned | D1 (terrain node), R4 (D3), R5 (handles, proxies) |
 | Overlays | `src/render/overlays/` | Planned | R5 (D7) |
 | Trains, steam, inspector | `src/render/trains/`, `src/ui/` | Planned | R6 (D8–D10) |
 | HUD | [src/ui/](../src/ui/) | **D3 render branch**: `store` (the HUD store) and `Hud` (construction tooltip, toast, aria-live status line, bottom toolbar with Track and undo/redo), mounted at `#hud`. Time controls, counters, inspector, entity list, notifications and overlay toggles planned | R4 (D3); R5–R6, D10 |
@@ -194,8 +190,8 @@ every push.
 
 ## Core API
 
-*Basis: ADR 0002 (Accepted), ADR 0012 (Proposed). Status: first slice on the **D2 branch**
-(2026-09-26); the rest planned, S4–S12. [`sim/api.ts`](../src/core/sim/api.ts) and
+*Basis: ADR 0002 (Accepted), ADR 0012 (Proposed). Status: first slice in D2
+(2026-09-26, merged); the rest planned, S4–S12. [`sim/api.ts`](../src/core/sim/api.ts) and
 [`sim/world.ts`](../src/core/sim/world.ts) implement `createSim({ terrain })`, `tick`
 (always 0 until the step lands), `preview`, `execute` and `network()` for `build-track`,
 `demolish` (pieces only), `undo` and `redo`. The **D3 core branch** (2026-09-27) adds
@@ -339,10 +335,10 @@ alpha = Math.min(acc / 100, 1)
 ## Renderer
 
 *Basis: ADR 0009 (Accepted) for the camera, coordinates and render-on-demand; ADR 0013
-(Proposed) for presets, materials and assets. Status: R0–R1 on the D1 branch (2026-09-26;
+(Proposed) for presets, materials and assets. Status: R0–R1 in D1 (2026-09-26, merged;
 host, scheduler, camera, perf monitor, terrain, lighting, lattice overlay; see the table
 above); R2 (track meshes) and the presentation half of R4 (ghost, snap ring, picking) on the
-D3 render branch (2026-09-27); R3 on the D11a branch; R5–R7 planned.*
+D3 render branch (2026-09-27); R3 in D11a (merged); R5–R7 planned.*
 
 - **Renderer.** `THREE.WebGLRenderer` from three `0.185.1`, pinned exactly. WebGPU is out of
   M4.
@@ -414,7 +410,7 @@ D3 render branch (2026-09-27); R3 on the D11a branch; R5–R7 planned.*
   - the determinant is +1;
   - the frame is right-handed: mapped east × mapped north = up, and sim up maps to world up;
   - the matrix and the function agree and round-trip.
-- **D1 branch tests:**
+- **D1 tests:**
   - the winding oracle: the projected (origin, east, north) triangle is counter-clockwise on
     screen for all 6 yaws ([isoMath.test.ts](../src/render/camera/isoMath.test.ts));
   - a generator test that checks every terrain and water triangle's winding against its

@@ -282,9 +282,9 @@ one row. Shifts build crossovers and passing loops.
 
 ## 7. Terrain (implemented)
 
-**Status 2026-09-26 (automated, D1 branch `codex/d1-lattice-terrain`; version 2 on the D11a
-branch `codex/d11a-lookdev`):** [`terrain.ts`](../src/core/terrain.ts) and its tests (23 on
-the D11a branch) are in place, with the golden hash `d2ee8189` for seed `"baltic-diorama"`
+**Status 2026-09-26 (automated, D1; version 2 from D11a; both
+merged to `main`):** [`terrain.ts`](../src/core/terrain.ts) and its tests (23 since
+D11a) are in place, with the golden hash `d2ee8189` for seed `"baltic-diorama"`
 at 400 × 346 nodes (generator version 2; version 1 was `9a922d9c`). Findings:
 [ADR 0010](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d1-terrain)
 and its [version 2 note](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d11a-terrain-generator-version-2).
