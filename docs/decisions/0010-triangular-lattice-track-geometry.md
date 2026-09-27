@@ -330,6 +330,83 @@ on macOS (Apple M5 Pro); the status of this ADR stays Proposed.
   and vertical clearance (D4), turnouts and diamonds (D5), any behaviour under traffic (D10), or
   that clearance decisions at exact thresholds match across JavaScript engines.
 
+## Findings (2026-09-27, D3 planner)
+
+Recorded while implementing D3's core half on branch `codex/d3-planner`
+([#67](https://github.com/Kminkjan/infrastructurio/issues/67);
+[`src/core/track/planner.ts`](../../src/core/track/planner.ts) and
+[`planner.test.ts`](../../src/core/track/planner.test.ts)). Automated evidence only, Vitest
+4.1.10, Node 26.7.0 on macOS (Apple M5 Pro); the status of this ADR stays Proposed.
+- **Decision 7 needed no template change.** The planner reads the D2 template table as it
+  is. Every solve is exact integer arithmetic on axial offsets, and a plan is the
+  `PieceSpec[]` that `build-track` carries. The contract types from commit `0dd6e90`
+  (`Drag`, `TrackPlan`, `PlanFit`, `PlanPointMm`) are unchanged.
+- **Candidates, exact:** 51 per primary start heading and 75 per secondary one (one
+  straight run, 48 or 72 curves, 2 shifts), not "about 100". A shift fixes only n + m, so
+  it is offered first and last. Two-bend fits (into ports only) are curve + curve, with any
+  two turns summing to the heading change, or two shifts to one side (two rows). For each
+  template pair the non-negative solutions lie on one line with period |det| ≤ 3, and the
+  length is affine along it, so the shortest comes in closed form.
+- **Choices this ADR left open** (defaults to test; the full list is in the
+  [simulation model §8, "As built"](../simulation-model.md#8-planner)):
+  - **Start heading d0:** the drag's own when set. At an existing buffer end, the nearer of
+    continuing and retracing: forcing the continuation made dragging back over existing
+    track (reuse) impossible. Otherwise the heading nearest the drag direction.
+  - **Target:** the pointer's nearest node when some candidate reaches it, so the plan
+    ends under the snap ring. Otherwise the nearest reachable node, by an exact ring search
+    of up to 12 rings (about 52 m). Otherwise an empty plan with a note.
+  - **Selection:** validity is checked lazily, on at most 8 candidates in rank order, with
+    structure `auto`. "Fewer bends" comes before "largest radius"; that changes nothing
+    for single-bend pools and ranks two-bend fits last. Ties then go to the earlier bend,
+    then a canonical signature. Shifts keep their fixed 82.3 m or 95 m radius and ignore
+    the cap.
+  - **Magnetism:** tries buffer ends within 3 hex nodes of the pointer's node, nearest
+    first. It skips `from` and any port that no one- or two-bend fit reaches. The end takes
+    the port's height and must arrive on the port's heading.
+- **Validity never moves the target.** Hopping to a valid node elsewhere would pull the
+  end away from the pointer and hide the reason. Instead the plan follows the pointer and
+  `preview` explains. Example (a unit test): an S-bend 12 rows over needs at least
+  32 q-steps. With 30 left, magnetism skips the port, the free plan ends on the port's node
+  at 30°, and preview rejects it as `kinked-join`.
+- **Follow, measured** (not the feel). Pointers were within ±60° of the start heading at
+  40–200 m, 425 per start mode (`planner.test.ts`, `--reporter=verbose`):
+
+  | Start heading | End on the pointer's node | Median | p95 | Max |
+  |---|---|---|---|---|
+  | 0 (fixed) | 81.2% | 2.00 m | 20.12 m | 30.41 m |
+  | 1 (fixed) | 76.7% | 2.00 m | 20.63 m | 30.06 m |
+  | free | 91.1% | 1.77 m | 3.40 m | 4.37 m |
+
+  With a fixed heading, the misses lie inside the 60 m minimum-radius turning circle,
+  which one bend cannot reach. As the pointer crosses into reach, the end can jump more
+  than 10 m: an uncommitted probe stepping the pointer 1 m at a time found 36 such jumps
+  among 1,468 end moves (heading 0).
+- **Selection in practice** (an uncommitted probe over every target within ±60 nodes for
+  free ends and ±30 nodes for ports). For free ends, radius, length and bend placement
+  decided between the top two candidates. For ports, bends, radius, length, placement and
+  the signature decided (the signature: two variants swapped at equal length). |turn| and
+  left before right never decided the top two, so a direct comparator test holds them.
+- **Performance, a dev measurement and not a gate.** One run of
+  [`sim/perf.test.ts`](../../src/core/sim/perf.test.ts) with `--reporter=verbose`, over
+  4,900 existing pieces on the default map:
+  - `planTrack`, 184 fixed drags × 3 passes: median 0.086 ms, p95 0.450 ms, max 1.193 ms
+    (n = 552);
+  - `preview` of the planned pieces: median 0.030 ms, p95 0.105 ms, max 0.647 ms
+    (n = 528);
+  - the worst case the validation cap allows (every candidate validated, at most 8, of a
+    plan over 100 pieces rejected by clearance): median 1.755 ms, p95 2.395 ms, max
+    2.731 ms (n = 40).
+
+  Magnetism scans every node of the track index on each call (about 5,000 at the piece
+  cap), with no cache. The gate numbers are D12's (preview p95 ≤ 4 ms, gate B3).
+- **Not established:**
+  - that dragging feels right (the owner's D3 feel check, human only);
+  - the ghost, tool and tooltip integration (the render half);
+  - how D4's grade and terrain rules change which candidates are valid (today "valid"
+    covers D2's rules, and `auto` resolves to ground);
+  - joining at turnouts (D5);
+  - timings on the gate hardware, or agreement across JavaScript engines.
+
 ## Revisit when
 
 - The D3 feel check finds construction unsatisfying for reasons that planner tuning, chained
@@ -358,3 +435,6 @@ on macOS (Apple M5 Pro); the status of this ADR stays Proposed.
   clearance names the closest partner, the ±10 km node-height bound, the command-shape
   contract, the performance numbers marked as an uncommitted probe) and decision 6 and the
   open-point line pointed at the mm finding; status unchanged, still Proposed.
+- 2026-09-27: D3 planner findings added (exact candidate counts, start-heading, snapping,
+  selection and magnetism choices, two-bend fits, follow and performance measurements);
+  status unchanged, still Proposed.

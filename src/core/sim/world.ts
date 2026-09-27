@@ -150,7 +150,7 @@ export function createWorld(terrain: Terrain, init?: WorldInit): World {
     return view;
   }
 
-  return Object.freeze({ terrain, run, plan: (drag: Drag) => planTrack({ authored }, drag), network });
+  return Object.freeze({ terrain, run, plan: (drag: Drag) => planTrack({ terrain, authored, index }, drag), network });
 }
 
 /** Throws a TypeError naming the fault when a command breaks the shape contract (see `Command`). */

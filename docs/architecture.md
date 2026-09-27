@@ -60,8 +60,10 @@ the reset skeleton (PR 1, [#60](https://github.com/Kminkjan/infrastructurio/pull
 ([#66](https://github.com/Kminkjan/infrastructurio/issues/66)) and is not merged yet. Each
 records that the file is present, not that its tests pass on a given commit: run
 `npm run check` for that. **D11a branch** means it exists on `codex/d11a-lookdev`
-([#75](https://github.com/Kminkjan/infrastructurio/issues/75)), not merged yet. Everything
-else is planned and lands slice by slice.
+([#75](https://github.com/Kminkjan/infrastructurio/issues/75)), not merged yet. **D3 core
+branch** means it exists on `codex/d3-planner`
+([#67](https://github.com/Kminkjan/infrastructurio/issues/67), 2026-09-27), not merged yet.
+Everything else is planned and lands slice by slice.
 
 | Part | Path | Status | Slice |
 |---|---|---|---|
@@ -72,7 +74,7 @@ else is planned and lands slice by slice.
 | Palette | [src/render/art/palette.ts](../src/render/art/palette.ts) | **On main**: an 18-key subset of the art-direction palette. **D1 branch**: 24 keys (adds meadow, deep water, foam and three UI tokens) plus `cssColor`. **D11a branch**: the full table (70 tokens) plus `forestFloor`, tweak-panel overrides in memory, and a scan rule against hex literals elsewhere | full set in D11a |
 | Composition root | [src/app/main.ts](../src/app/main.ts) | **On main**: the skeleton smoke scene. **D1 branch**: replaced by seeded terrain, water and lighting under the iso camera, controller, scheduler, renderer host and perf monitor; G toggles the lattice overlay (debug, until D3). No sim loop yet | R0–R1 (D1) |
 | Core utilities, terrain | [src/core/util/](../src/core/util/), [src/core/terrain.ts](../src/core/terrain.ts) | **D1 branch**: `int`, `hash`, `prng`, `heap`; seeded integer terrain with a golden hash | rest of S0, S3 (D1) |
-| Geometry, track model, planner | [src/core/geometry/](../src/core/geometry/), [src/core/track/](../src/core/track/) | **D2 branch**: `templates`, `piece`, `sample`, `clearance`; `authored`, `validate` (the 11 D2-owned codes), `history`. Planner planned | S2–S3 (D2); S4 (D3) |
+| Geometry, track model, planner | [src/core/geometry/](../src/core/geometry/), [src/core/track/](../src/core/track/) | **D2 branch**: `templates`, `piece`, `sample`, `clearance`; `authored`, `validate` (the 11 D2-owned codes), `history`. **D3 core branch**: `planner`, the full planner behind `sim.planTrack` (one-bend, shift and two-bend fits, magnetism, precision, elevation; [simulation model §8](simulation-model.md#8-planner)) | S2–S3 (D2); S4 (D3) |
 | Network, pathfinding | [src/core/network/](../src/core/network/) | **D2 branch**: a partial `derive` (through and buffer nodes, sections split at buffers). Junctions, graph and pathfinding planned | S5–S6 (D2 partial) |
 | Trains, reservation, deadlock | `src/core/trains/`, `src/core/signals/` | Planned | S7–S9 (D8, D9) |
 | Operator and reasons | `src/core/services/` | Planned | S9–S10 (D9) |
@@ -193,14 +195,16 @@ every push.
 (2026-09-26); the rest planned, S4–S12. [`sim/api.ts`](../src/core/sim/api.ts) and
 [`sim/world.ts`](../src/core/sim/world.ts) implement `createSim({ terrain })`, `tick`
 (always 0 until the step lands), `preview`, `execute` and `network()` for `build-track`,
-`demolish` (pieces only), `undo` and `redo`. `loadSim`, `planTrack`, `step`, `frame`,
-`inspect` and `save` arrive with their slices.*
+`demolish` (pieces only), `undo` and `redo`. The **D3 core branch** (2026-09-27) adds
+`planTrack`. `loadSim`, `step`, `frame`, `inspect` and `save` arrive with their slices.*
 
-The names and shapes below come from the design. `Drag`, `Highlight`, `EntityRef` and the ID
-types are indicative; S5 and S12 pin them down. D2 pinned `PieceSpec`, `PieceKey`, `NodeRef`
+The names and shapes below come from the design. `Highlight`, `EntityRef` and the ID types
+are indicative; S5 and S12 pin them down. D2 pinned `PieceSpec`, `PieceKey`, `NodeRef`
 (`{ q, r, zMm }`) and `Diff` (`{ added, removed }` of `{ key, structure }` records) in
-`sim/api.ts`. A command's shape (its `type`, a build's `structure`, the `pieces` arrays) is a
-programmer contract that throws a `TypeError`; its contents are player-reachable and are
+`sim/api.ts`. D3 pinned `Drag`, `TrackPlan`, `PlanFit` and `PlanPointMm` in
+[`track/planner.ts`](../src/core/track/planner.ts), exported through `sim/api.ts`. A
+command's shape (its `type`, a build's `structure`, the `pieces` arrays) is a programmer
+contract that throws a `TypeError`; its contents are player-reachable and are
 rejected with a reason, never thrown.
 
 ```ts

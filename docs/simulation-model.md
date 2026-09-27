@@ -8,7 +8,9 @@ terrain (§1, §7), all guarded by the boundary test in
 [`tests/architecture.test.ts`](../tests/architecture.test.ts). From D2 (2026-09-26, branch
 `codex/d2-track-model`): templates, pieces and keys (§5, §6), the validator for the D2-owned
 codes, clearance and history (§9, §14), a first `derive` (§10) and the first `Sim` commands
-(§2). Everything else here is planned. Its numbers come from the owner-approved M4 plan (2026-09-26) and are proposed in
+(§2). From D3's core half (2026-09-27, branch `codex/d3-planner`): the planner (§8).
+Everything else here is planned. Its numbers come from the owner-approved M4 plan
+(2026-09-26) and are proposed in
 ADRs [0010](decisions/0010-triangular-lattice-track-geometry.md),
 [0011](decisions/0011-signalling-and-reservation.md),
 [0012](decisions/0012-tick-units-determinism.md) and
@@ -52,7 +54,7 @@ Module paths are relative to `src/core/`. Tracking keys D1–D13 come from
 | Static diorama scenery | `scenarios/` | — | D11a | **Implemented** in D11a: seeded, integer-only layout for the lookdev spike (no sim behaviour), 21 test cases with a golden hash |
 | Pieces and templates | `geometry/templates.ts`, `piece.ts`, `sample.ts` | S2 | D2 | **Implemented** in D2: 12 straights, 720 oriented curves, 24 shifts; closure and reachability tested ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d2-track-model)) |
 | Authored state, validation, clearance, history | `track/`, `geometry/clearance.ts` | S3 | D2, D4 | **Implemented** in D2 for the 11 D2-owned codes; grade and terrain/structure rules (D4) are ordered placeholders that pass |
-| Planner | `track/planner.ts` | S4 | D3 | Planned |
+| Planner | `track/planner.ts` | S4 | D3 | **Implemented** in D3's core half (2026-09-27, branch `codex/d3-planner`): one-bend, shift and two-bend fits, magnetism, precision, elevation; 40 test cases (§8) |
 | Derived network, entity commands | `network/derive.ts`, `graph.ts` | S5 | D2, D5–D7 | **Partial**: D2's `derive` (through and buffer nodes, sections split at buffers); junctions and entities planned |
 | Pathfinding | `network/pathfind.ts` | S6 | D8 | Planned |
 | Trains and movement | `trains/` | S7 | D8 | Planned |
@@ -324,6 +326,15 @@ and its [version 2 note](decisions/0010-triangular-lattice-track-geometry.md#fin
 `planTrack(drag)` is pure. It turns drag input into a `TrackPlan`: resolved `PieceSpec[]`,
 new/reused counts and a label. `build-track` then carries those pieces.
 
+**Status 2026-09-27 (automated, D3 core branch `codex/d3-planner`):** implemented in
+[`track/planner.ts`](../src/core/track/planner.ts), with 40 test cases in
+[`planner.test.ts`](../src/core/track/planner.test.ts) (a 23-case drag table, ranking and
+elevation tests, seeded properties) and a planner measurement in
+[`sim/perf.test.ts`](../src/core/sim/perf.test.ts). The choices this section left open are
+under "As built" below; numbers and limits are in the
+[ADR 0010 D3 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-d3-planner).
+Whether dragging feels right is not established: that is the owner's D3 feel check.
+
 - **Single bend.** A drag becomes n straights + one curve or shift template + m straights.
   - For each of about 100 candidate templates on the start heading d0, the planner solves
     Δ = n·step(d0) + T + m·step(d1) as a 2×2 integer system for n, m ≥ 0.
@@ -349,6 +360,34 @@ new/reused counts and a label. `build-track` then carries those pieces.
   - a live label such as "R 120 m · 35 km/h · 1.2%".
 
   It stays on the lattice. Off-lattice geometry and clothoids are deferred beyond M4.
+- **As built (D3, 2026-09-27).** Defaults to test, not owner decisions:
+  - **Candidates:** 51 on a primary d0 and 75 on a secondary one (one straight run, 48 or
+    72 curves, 2 shifts), not "about 100". A shift fixes only n + m, so it is offered
+    first (n = 0) and last (m = 0).
+  - **Start heading d0:** `drag.fromHeading` when set. At an existing buffer end, whichever
+    of continuing and retracing the track is nearer the drag direction. Otherwise the
+    heading nearest the drag direction, ties to the lower index.
+  - **Target node:** the pointer's nearest node when a candidate reaches it. Otherwise the
+    nearest reachable node, by an exact ring search of up to 12 rings (about 52 m).
+    Otherwise an empty plan with a `note`. Validity never moves the target, so an
+    unbuildable drag still shows where it would go.
+  - **Selection:** "fewer bends" comes before "largest radius", which changes nothing for
+    single-bend pools. Remaining ties go to the earlier bend, then a canonical signature.
+    Shifts keep their fixed radius and ignore the cap. Validity is checked lazily with
+    structure `auto`, on at most 8 candidates in rank order; when none is valid, the
+    top-ranked plan is returned for `preview` to explain.
+  - **Ports and magnetism:** a port is an existing buffer end. Magnetism tries those within
+    3 hex nodes of the pointer's node, nearest first. It skips `from` and any port that no
+    fit reaches, and the end takes the port's height. Two-bend fits are curve + curve (any
+    two turns summing to the heading change), or two shifts to one side (two rows).
+    Without magnetism, a drag whose end node is a buffer end joins it the same way, unless
+    precision fixes the end heading.
+  - **Precision:** curves only of the chosen radius class. An end heading keeps only
+    single-bend fits that end on it.
+  - **Elevation:** largest remainder over the per-piece rises, weighted by piece length,
+    ties to the earlier piece. A descent mirrors the climb.
+  - **Malformed drags:** a non-integer start, non-finite pointer, or invalid heading or
+    radius throws a `TypeError`. It is a programmer error, like a malformed command.
 
 ## 9. Validation
 
@@ -788,7 +827,7 @@ The safety soak in the gates counts 0 double-held sections, 0 signals passed at 
 | S1 | lattice | D1 (**implemented**) |
 | S2 | templates, piece, sample | D2 (**implemented** 2026-09-26) |
 | S3 | terrain, authored, validate, clearance, history | D1 (terrain **implemented**), D2 (**implemented** for D2's codes, 2026-09-26), D4 |
-| S4 | planner, paired with a Three.js ghost spike to judge feel | D3 |
+| S4 | planner, paired with a Three.js ghost spike to judge feel | D3 (planner **implemented** in the core half, 2026-09-27; the ghost is the render half) |
 | S5 | derive, graph, signal/platform/depot commands | D2 (first `derive`: through and buffer nodes), D5–D7 |
 | S6 | pathfind | D8 |
 | S7 | trains, one on a fixed route | D8 |
