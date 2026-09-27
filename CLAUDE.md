@@ -36,11 +36,11 @@ around 1900 in web + TypeScript + Three.js 2.5D. Owner direction of 2026-09-26 (
 
 | Path | Contract | Guide |
 |---|---|---|
-| `src/core/` | Deterministic, DOM-free simulation; public surface `sim/api.ts` (planned). Exists: `lattice.ts`, `terrain.ts`, `util/` (D1) | [src/core/CLAUDE.md](src/core/CLAUDE.md) |
-| `src/render/` | Imperative Three.js; reads snapshots only. Exists: `coords.ts`, `camera/`, `core/`, `terrain/`, `art/` (D1) | [src/render/CLAUDE.md](src/render/CLAUDE.md) |
+| `src/core/` | Deterministic, DOM-free simulation; public surface `sim/api.ts` (first slice in D2). Exists: `lattice.ts`, `terrain.ts`, `util/` (D1); `geometry/`, `track/`, `network/derive.ts`, `sim/` (D2); `scenarios/` (D11a) | [src/core/CLAUDE.md](src/core/CLAUDE.md) |
+| `src/render/` | Imperative Three.js; reads snapshots only. Exists: `coords.ts`, `camera/`, `core/`, `terrain/`, `art/` (D1); `scenery/`, `labels/` (D11a) | [src/render/CLAUDE.md](src/render/CLAUDE.md) |
 | `src/tools/` | Pure tool reducers `(state, event, ctx) → [state, effects]` (planned) | below |
 | `src/ui/` | React 19 HUD only, fed via `useSyncExternalStore`, never in the frame loop; palette UI colours, aria-live status, reduced motion honoured (planned) | — |
-| `index.html` → `src/app/main.ts` | Wiring, fixed-step host loop, input → commands. Today: seeded terrain under the iso camera (D1); no sim loop yet | below |
+| `index.html` → `src/app/main.ts` | Wiring, fixed-step host loop, input → commands. Today: seeded terrain under the iso camera (D1), plus the static diorama, labels and lookdev bookmarks on the D11a branch; no sim loop yet | below |
 | `tests/` | `architecture.test.ts` (source-scan boundaries, negative self-check); `replay/`, `fixtures/` planned | core guide |
 | `docs/` | Plans, ADRs, dated evidence, archive pointers | [docs/CLAUDE.md](docs/CLAUDE.md) |
 
@@ -57,8 +57,10 @@ around 1900 in web + TypeScript + Three.js 2.5D. Owner direction of 2026-09-26 (
 ## Units
 
 - **Sim space:** right-handed ENU (x east, y north, z up). **Core state is integer:** lengths
-  mm, node elevation dm, time ms (1 tick = 100 ms, 10 Hz), speed mm/s, acceleration mm/s²,
-  grade ‰. Suffix names with the unit (`lengthMm`, `z0Dm`, `speedLimitMms`, `simMs`).
+  mm, node elevation mm (terrain stays Int16 dm, converted at its boundary; a default since
+  2026-09-26, [ADR 0010 D2 finding](docs/decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d2-track-model)),
+  time ms (1 tick = 100 ms, 10 Hz), speed mm/s, acceleration mm/s², grade ‰. Suffix names
+  with the unit (`lengthMm`, `z0Mm`, `speedLimitMms`, `simMs`).
 - **Lattice** (`src/core/lattice.ts`): triangular, a = 5 m, axial (q, r), 12 headings at 30°
   counter-clockwise from +x (even 5 m primary, odd 8.66 m secondary); node = (q, r, z).
 - **Three.js world:** Y-up metres; sim (x, y, z) → (x, z, −y), only via

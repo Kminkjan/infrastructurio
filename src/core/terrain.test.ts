@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { axial, toWorld } from "./lattice";
 import {
   DEFAULT_TERRAIN_SIZE,
+  OCTAVE_ROTATIONS,
   TERRAIN_GENERATOR_VERSION,
   type Terrain,
   generateTerrain,
@@ -9,19 +10,21 @@ import {
   isWaterAt,
   nodeOfOffset,
   offsetOfNode,
+  rotateMm,
+  softFloor,
   terrainBoundsM,
   terrainHash,
 } from "./terrain";
 
 const GOLDEN_SEED = "baltic-diorama";
 /**
- * Recorded 2026-09-26 from generator version 1 at the default size, and
- * re-recorded the same day when the shore ramp landed (version 1 had not
- * shipped). Once a version ships, a change here means every save of it loads
- * different ground: bump TERRAIN_GENERATOR_VERSION and re-record
+ * Recorded 2026-09-26 from generator version 2 at the default size (version 1
+ * was `9a922d9c`; D11a rotated the octave grids and replaced the land clamp
+ * with a soft floor). Once a version ships, a change here means every save of
+ * it loads different ground: bump TERRAIN_GENERATOR_VERSION and re-record
  * deliberately, never casually.
  */
-const GOLDEN_HASH = "9a922d9c";
+const GOLDEN_HASH = "d2ee8189";
 
 const golden = generateTerrain({ seed: GOLDEN_SEED, ...DEFAULT_TERRAIN_SIZE });
 const others = ["river-town", "seed-2", "x"].map((seed) => generateTerrain({ seed, ...DEFAULT_TERRAIN_SIZE }));
@@ -193,6 +196,26 @@ describe("terrain generation", () => {
     }
   });
 
+  it("keeps relief on dry land: under 1% of it is flat across all six neighbours", () => {
+    // Version 1 clamped land at 10.5 m and left 9.9% of the golden map exactly
+    // flat there; the soft floor keeps it rolling (0.2–0.9% over 300 seeds).
+    for (const t of all) {
+      let dry = 0;
+      let flat = 0;
+      for (let row = 1; row < t.rows - 1; row++) {
+        for (let col = 1; col < t.columns - 1; col++) {
+          const index = row * t.columns + col;
+          if (t.water[index] === 1) continue;
+          dry += 1;
+          const h = t.heightsDm[index];
+          const node = nodeOfOffset(col, row);
+          if (NEIGHBOURS.every((step) => heightDmAt(t, axial(node.q + step.q, node.r + step.r)) === h)) flat += 1;
+        }
+      }
+      expect(flat / dry).toBeLessThan(0.01);
+    }
+  });
+
   it("generates the default size in under a second", () => {
     const start = performance.now();
     generateTerrain({ seed: "timing", ...DEFAULT_TERRAIN_SIZE });
@@ -229,6 +252,46 @@ describe("terrain generation", () => {
     expect(() => generateTerrain({ seed: "s", columns: 1, rows: 10 })).toThrow(RangeError);
     expect(() => generateTerrain({ seed: "s", columns: 10, rows: 10.5 })).toThrow(RangeError);
     expect(() => generateTerrain({ seed: "s", columns: 5000, rows: 10 })).toThrow(RangeError);
+  });
+});
+
+describe("terrain noise building blocks", () => {
+  it("soft-floors the coarse relief continuously and monotonically, never below the floor", () => {
+    // Identity on high ground.
+    for (let n = 172; n < 600; n++) expect(softFloor(n)).toBe(n);
+    // Below, it never steps more than the input did (slope ≤ 1), never rises, and stays above the floor.
+    let previous = softFloor(172);
+    for (let n = 171; n > -2000; n--) {
+      const h = softFloor(n);
+      expect(previous - h).toBeGreaterThanOrEqual(0);
+      expect(previous - h).toBeLessThanOrEqual(1);
+      expect(h).toBeGreaterThanOrEqual(127);
+      previous = h;
+    }
+    // Where version 1's clamp flattened everything below 10.5 m, relief survives (compressed).
+    expect(softFloor(105) - softFloor(0)).toBeGreaterThanOrEqual(5);
+    expect(softFloor(150) - softFloor(105)).toBeGreaterThanOrEqual(10);
+  });
+
+  it("rotates the octave grids exactly, by angles clear of the lattice and of each other", () => {
+    const degrees = OCTAVE_ROTATIONS.map(({ a, b, c }) => {
+      expect(a * a + b * b).toBe(c * c);
+      return (Math.atan2(b, a) * 180) / Math.PI;
+    });
+    for (const d of degrees) {
+      // A square grid repeats every 90° and the lattice every 30°.
+      const offLattice = d % 30;
+      expect(Math.min(offLattice, 30 - offLattice)).toBeGreaterThan(10);
+    }
+    for (let i = 0; i < degrees.length; i++) {
+      for (let j = i + 1; j < degrees.length; j++) {
+        const apart = Math.abs((degrees[i] ?? 0) - (degrees[j] ?? 0)) % 90;
+        expect(Math.min(apart, 90 - apart)).toBeGreaterThan(20);
+      }
+    }
+    const r = OCTAVE_ROTATIONS[0] ?? { a: 1, b: 0, c: 1 };
+    const { u, v } = rotateMm(r, r.c * 1000, 0);
+    expect([u, v]).toEqual([r.a * 1000, r.b * 1000]);
   });
 });
 

@@ -1,5 +1,6 @@
 import { Color, MeshLambertMaterial, Vector2 } from "three";
 import { palette } from "../art/palette";
+import type { ShaderChunk } from "../art/shaderChunks/chunk";
 import { type LatticeUniforms, installLatticeChunk } from "../art/shaderChunks/lattice";
 
 export { latticeFamilyDistancesM } from "../art/shaderChunks/lattice";
@@ -35,7 +36,14 @@ export class LatticeOverlay {
   private fadeFrom = 0;
   private fadeStartMs: number | undefined;
 
-  constructor(private readonly reducedMotion: () => boolean) {
+  /**
+   * `extra` chunks follow the lattice on each material (D11a: splat, grain and
+   * edge fade on the terrain; grain and edge fade on the water).
+   */
+  constructor(
+    private readonly reducedMotion: () => boolean,
+    extra: { readonly terrain?: readonly ShaderChunk[]; readonly water?: readonly ShaderChunk[] } = {},
+  ) {
     this.uniforms = {
       uBuildMode: { value: 0 },
       uCursor: { value: new Vector2(NO_CURSOR, NO_CURSOR) },
@@ -50,9 +58,9 @@ export class LatticeOverlay {
     };
     this.material = new MeshLambertMaterial({ vertexColors: true });
     this.waterMaterial = new MeshLambertMaterial({ vertexColors: true });
-    // Same uniforms and program: the two materials differ only in the meshes they draw.
-    installLatticeChunk(this.material, this.uniforms);
-    installLatticeChunk(this.waterMaterial, this.uniforms);
+    // Same lattice uniforms on both; with no extra chunks they also share a program.
+    installLatticeChunk(this.material, this.uniforms, extra.terrain);
+    installLatticeChunk(this.waterMaterial, this.uniforms, extra.water);
   }
 
   get buildMode(): boolean {

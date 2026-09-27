@@ -5,8 +5,10 @@ simulation core (`src/core`). **Implemented:** the lattice
 ([`src/core/lattice.ts`](../src/core/lattice.ts), 9 test cases in
 [`lattice.test.ts`](../src/core/lattice.test.ts)) and, from D1, the integer utilities and
 terrain (§1, §7), all guarded by the boundary test in
-[`tests/architecture.test.ts`](../tests/architecture.test.ts). Everything else here is
-planned. Its numbers come from the owner-approved M4 plan (2026-09-26) and are proposed in
+[`tests/architecture.test.ts`](../tests/architecture.test.ts). From D2 (2026-09-26, branch
+`codex/d2-track-model`): templates, pieces and keys (§5, §6), the validator for the D2-owned
+codes, clearance and history (§9, §14), a first `derive` (§10) and the first `Sim` commands
+(§2). Everything else here is planned. Its numbers come from the owner-approved M4 plan (2026-09-26) and are proposed in
 ADRs [0010](decisions/0010-triangular-lattice-track-geometry.md),
 [0011](decisions/0011-signalling-and-reservation.md),
 [0012](decisions/0012-tick-units-determinism.md) and
@@ -46,11 +48,12 @@ Module paths are relative to `src/core/`. Tracking keys D1–D13 come from
 |---|---|---|---|---|
 | Lattice | `lattice.ts` | S1 | D1 | **Implemented**, 9 test cases (map bounds live with terrain) |
 | Integer helpers, PRNG, heap, hash | `util/` | S0 | D1 | **Implemented** in D1, 36 test cases |
-| Terrain | `terrain.ts` | S3 | D1 | **Implemented** in D1, 20 test cases, golden hash (§7) |
-| Pieces and templates | `geometry/templates.ts`, `piece.ts`, `sample.ts` | S2 | D2 | Planned |
-| Authored state, validation, clearance, history | `track/`, `geometry/clearance.ts` | S3 | D2, D4 | Planned |
+| Terrain | `terrain.ts` | S3 | D1 | **Implemented** in D1, 20 test cases, golden hash (§7); generator version 2 in D11a, 23 test cases |
+| Static diorama scenery | `scenarios/` | — | D11a | **Implemented** in D11a: seeded, integer-only layout for the lookdev spike (no sim behaviour), 21 test cases with a golden hash |
+| Pieces and templates | `geometry/templates.ts`, `piece.ts`, `sample.ts` | S2 | D2 | **Implemented** in D2: 12 straights, 720 oriented curves, 24 shifts; closure and reachability tested ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d2-track-model)) |
+| Authored state, validation, clearance, history | `track/`, `geometry/clearance.ts` | S3 | D2, D4 | **Implemented** in D2 for the 11 D2-owned codes; grade and terrain/structure rules (D4) are ordered placeholders that pass |
 | Planner | `track/planner.ts` | S4 | D3 | Planned |
-| Derived network, entity commands | `network/derive.ts`, `graph.ts` | S5 | D5–D7 | Planned |
+| Derived network, entity commands | `network/derive.ts`, `graph.ts` | S5 | D2, D5–D7 | **Partial**: D2's `derive` (through and buffer nodes, sections split at buffers); junctions and entities planned |
 | Pathfinding | `network/pathfind.ts` | S6 | D8 | Planned |
 | Trains and movement | `trains/` | S7 | D8 | Planned |
 | Reservation | `signals/reservation.ts` | S8 | D7, D8 | Planned |
@@ -91,7 +94,7 @@ Result  = {ok: true, networkRev, diff, counts{new, reused}}
 | Speed | integer mm/s | 60 km/h = 16,666 mm/s |
 | Acceleration | integer mm/s² | Braking 600 planned, 900 capability |
 | Time | tick = 100 ms (10 Hz) | Durations in ticks; path costs in integer ms |
-| Elevation | integer dm per node | Terrain stored as Int16 dm |
+| Elevation | integer mm per node | Terrain stored as Int16 dm, converted at its boundary (open point 2, settled as a default 2026-09-26) |
 | Grade | ‰ | Maximum 35‰ |
 | Direction | heading index 0–11 | 30° each, counter-clockwise from +x |
 
@@ -199,8 +202,11 @@ A curve is a short straight lead-in, then a circular arc of radius R turning ±3
     for 60°, and 2 for 90°. Variants differ in lead-in/lead-out lengths.
   - That gives about 120 base templates (2 start-heading parities × left/right × 6 radii ×
     variants), × 6 rotations ≈ 720 oriented templates.
-  - A design-pass check found every node in the reachable cone reachable. S2 turns that
-    check into a repository test; until then it is not repository evidence.
+  - A design-pass check found every node in the reachable cone reachable. D2 turned that
+    check into a repository test
+    ([`templates.test.ts`](../src/core/geometry/templates.test.ts): 12,164 cone nodes, each
+    reached exactly once; see the
+    [ADR 0010 D2 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d2-track-model)).
 
 ### Shift
 
@@ -262,38 +268,44 @@ one row. Shifts build crossovers and passing loops.
     key, and are scoped to one revision.
   - Stations and trains come from monotonic allocators that never roll back. Undoing a
     platform and redoing it yields a new station ID, and so a new name.
-- **Elevation.** z is integer dm per node, and node identity is (q, r, z). Tracks crossing
+- **Elevation.** z is integer mm per node (open point 2, settled as a default on
+  2026-09-26), and node identity is (q, r, z). Tracks crossing
   at different heights over the same (q, r) are different nodes and never connect.
 - **Grade.** The grade of a piece is |z1 − z0| over its length. The integer check is
-  |Δz_dm| × 100,000 ≤ 35 × lengthMm. The 35‰ maximum lets a train always restart (§12).
-  With dm resolution a 5 m straight can only hold 0, 20‰ or 40‰ (see
-  [open point 2](#19-open-points-2026-09-26)).
+  |Δz_mm| × 1,000 ≤ 35 × lengthMm; a piece stores its grade as that exact rational. The 35‰
+  maximum lets a train always restart (§12). In mm a 5 m straight reaches 35‰ exactly
+  (175 mm); dm allowed only 0, 20‰ or 40‰ (see [open point 2](#19-open-points-2026-09-26)).
 - **Structure.** ground, bridge or tunnel is a piece property. The command may force it or
   pass `auto` (§9, rule 4).
 
 ## 7. Terrain (implemented)
 
-**Status 2026-09-26 (automated, D1 branch `codex/d1-lattice-terrain`):**
-[`terrain.ts`](../src/core/terrain.ts) and its 20 tests are in place, with the golden hash
-`9a922d9c` for seed `"baltic-diorama"` at 400 × 346 nodes (generator version 1). Findings:
-[ADR 0010](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d1-terrain).
+**Status 2026-09-26 (automated, D1 branch `codex/d1-lattice-terrain`; version 2 on the D11a
+branch `codex/d11a-lookdev`):** [`terrain.ts`](../src/core/terrain.ts) and its tests (23 on
+the D11a branch) are in place, with the golden hash `d2ee8189` for seed `"baltic-diorama"`
+at 400 × 346 nodes (generator version 2; version 1 was `9a922d9c`). Findings:
+[ADR 0010](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d1-terrain)
+and its [version 2 note](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d11a-terrain-generator-version-2).
 - **Layout.** One Int16 dm height per node in offset rows (row = r, col = q + ⌊r/2⌋), so
   the map is a rectangle from the south-west origin: even rows at x = 5·col m, odd rows
   2.5 m further east. `nodeOfOffset`, `offsetOfNode`, `heightDmAt`, `isWaterAt`,
   `terrainHash` and `terrainBoundsM` read it.
-- **As built.** 200 dm base plus three value-noise octaves (420, 150 and 55 m cells); a
+- **As built.** 200 dm base plus three value-noise octaves (420, 150 and 55 m cells, each
+  grid rotated by an exact Pythagorean-triple angle and offset by the seed, version 2); a
   river 32 m wide and 1.8 m deep crossing west → east at about 46% of the map height, and a
   lake of 130 m radius, 2.5 m deep. Both beds rise to a shore shelf just above the water
   through a 10 m smoothstep ramp centred on the channel edge, so the waterline follows the
   curve rather than the lattice, then smoothstep banks rise to the natural terrain. Dry land
-  is clamped to ≥ water level + 0.5 m (water level 10 m). River and lake positions scale
+  stays ≥ water level + 0.5 m (water level 10 m): version 2 passes the coarse octaves through
+  a C¹ rational soft floor and adds the finest octave back after it, where version 1
+  clamped. River and lake positions scale
   with the map, so heights depend on `{seed, columns, rows, generatorVersion}`, not on the
   seed alone; the river and lake invariants hold from about 300 × 260 nodes up, and smaller
   maps leave the lake out rather than merge it into the river.
-- **Flat plateaus.** The clamp leaves 9.9% of the golden map exactly flat at 10.5 m. Over
-  300 seeds the share has a median of 11.5% and a 90th percentile of 21.1%, and the worst
-  seed reaches 46.9%. M4 uses only the golden seed; whether the flats read as meadow is for
-  the owner's look gate.
+- **Flat plateaus (version 1) and their fix (version 2).** Version 1's clamp left 9.9% of the
+  golden map exactly flat at 10.5 m (300-seed median 11.5%, worst 46.9%). Version 2 leaves
+  0.21% at 10.5 m, and 0.28% of dry nodes with all six neighbours level (300-seed median
+  0.31%, worst 0.86%). Whether the lowland now reads well is for the owner's look gate.
 - **Generation.** Terrain is static and seeded. Heights come from integer hash value-noise
   evaluated at lattice nodes, stored as Int16 dm (±3,276.7 m), about 0.28 MB for the
   default map. A water mask adds a river and a lake. Noise corners are a pure hash of
@@ -326,7 +338,7 @@ new/reused counts and a label. `build-track` then carries those pieces.
   fixed. The planner then fits two bends with straights between them, to join the port.
 - **Magnetism.** The drag snaps to existing endpoints and ports within 3 nodes.
 - **Elevation.** The height change is spread over the nodes in proportion to cumulative
-  length, using largest-remainder rounding to integer dm. The start z comes from the
+  length, using largest-remainder rounding to integer mm. The start z comes from the
   snapped node; the end z comes from the height keys.
 - **Counter.** Keys already present count as reused, the rest as new. An all-reused drag is
   a no-op: `execute` changes nothing and records no history entry.
@@ -353,7 +365,7 @@ tracks.
 
 | Rule | Code | Rejected when | Message suggests |
 |---|---|---|---|
-| 1 Structural | `out-of-bounds` | a node or piece lies outside the map | keep the track inside the map |
+| 1 Structural | `out-of-bounds` | a node or piece lies outside the map; also (D2) a malformed node or a node height beyond ±10 km | keep the track inside the map |
 | | `limit-reached` | above 5,000 pieces, 512 signals, 32 stations or 8 depots | demolish unused items |
 | | `unknown-target` | the command names a piece, node, signal, platform or depot that does not exist | refresh the target |
 | 2 Geometry | `radius-too-tight` | radius below 60 m, or not a radius class | use R ≥ 60 m |
@@ -410,7 +422,7 @@ tracks.
 - **Pure and order-independent.** Pieces are sorted by key before any ID is assigned.
 - **Cached per `networkRev`.** Each successful `execute` bumps the revision.
 - **Contents.**
-  - Pieces carry key, kind, structure, `lengthMm`, `z0Dm`/`z1Dm`, `speedLimitMms` and
+  - Pieces carry key, kind, structure, `lengthMm`, `z0Mm`/`z1Mm`, `speedLimitMms` and
     render primitives (lines and arcs).
   - Sections carry `blockId` and `conflictGroup`.
   - Also: junctions, signals, platforms, stations, depots.
@@ -774,10 +786,10 @@ The safety soak in the gates counts 0 double-held sections, 0 signals passed at 
 |---|---|---|
 | S0 | skeleton, boundary test, `util/` | skeleton, D1 (`util/` **implemented** in D1, 2026-09-26) |
 | S1 | lattice | D1 (**implemented**) |
-| S2 | templates, piece, sample | D2 |
-| S3 | terrain, authored, validate, clearance, history | D1, D2, D4 |
+| S2 | templates, piece, sample | D2 (**implemented** 2026-09-26) |
+| S3 | terrain, authored, validate, clearance, history | D1 (terrain **implemented**), D2 (**implemented** for D2's codes, 2026-09-26), D4 |
 | S4 | planner, paired with a Three.js ghost spike to judge feel | D3 |
-| S5 | derive, graph, signal/platform/depot commands | D5–D7 |
+| S5 | derive, graph, signal/platform/depot commands | D2 (first `derive`: through and buffer nodes), D5–D7 |
 | S6 | pathfind | D8 |
 | S7 | trains, one on a fixed route | D8 |
 | S8 | reservation, multi-train | D7, D8 |
@@ -808,6 +820,10 @@ decide them.
    - Recommend storing node z in integer mm, keeping terrain in Int16 dm:
      35‰ × 5,000 mm = 175 mm, exact.
    - Decide in ADR 0010 before S2.
+   - **Settled as a default (2026-09-26):** node z is integer mm, per the
+     [#66](https://github.com/Kminkjan/infrastructurio/issues/66) amendment and the
+     [ADR 0010 D2 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d2-track-model).
+     ADR 0010 stays Proposed, so this is a default to test, not an owner decision.
 3. **Downhill braking.**
    - On a 35‰ descent, the planned 600 mm/s² needs 600 + 343 − 20 = 923 mm/s² of brake,
      above the 900 capability. Net deceleration would be only 577.

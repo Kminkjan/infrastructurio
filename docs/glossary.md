@@ -11,8 +11,9 @@ term listed here is not evidence that it is built, measured or accepted.
 - **Player role.** No term here gives the player lines, timetables, dispatch or fleet
   purchase. Where a word sounds like a player control (line, train count, depot choice), it
   names something the simulation derives.
-- **Units.** The core uses integer mm, mm/s and mm/s², and integer dm for elevation.
-  Entries quote metres and km/h for readability.
+- **Units.** The core uses integer mm, mm/s and mm/s², and integer mm for node elevation
+  (terrain stays Int16 dm; see [Elevation](#elevation)). Entries quote metres and km/h for
+  readability.
 - **Road-era terms** are not redefined here. They live at tag `legacy-m0-m4`, in the
   [archived glossary](https://github.com/Kminkjan/infrastructurio/blob/legacy-m0-m4/docs/glossary.md)
   (see the [archive README](archive/README.md)), and carry no meaning on main unless an
@@ -185,9 +186,12 @@ place, bunker-first, with a 30 s dwell.
 
 ### Elevation
 
-Integer decimetres per node (z). Node identity is (q, r, z), so tracks at different
-heights never share a node. Terrain heights are Int16 dm at lattice nodes. The planner
-spreads elevation along a drag by length with largest-remainder rounding.
+Integer millimetres per node (z, `zMm`). Node identity is (q, r, z), so tracks at
+different heights never share a node. Terrain heights are Int16 dm at lattice nodes and
+convert at the terrain boundary. Millimetres are a default since 2026-09-26: dm could not
+hold 35‰ on a 5 m straight, while mm gives exactly 175 mm
+([ADR 0010 D2 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d2-track-model)).
+The planner spreads elevation along a drag by length with largest-remainder rounding.
 
 ### End of authority (EOA)
 

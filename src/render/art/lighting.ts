@@ -1,7 +1,7 @@
 import { DirectionalLight, HemisphereLight, type Scene } from "three";
 import type { IsoView } from "../camera/isoMath";
 import { palette } from "./palette";
-import { type WorldBox, createShadowFit, fitShadowFrustum, sunDirection } from "./shadowFit";
+import { SUN_ELEVATION_RAD, type WorldBox, createShadowFit, fitShadowFrustum, sunDirection } from "./shadowFit";
 
 /**
  * Scene lighting (art direction "Light"): a sky/ground hemisphere fill and one
@@ -21,6 +21,8 @@ export const SHADOW_NORMAL_BIAS = 0.03;
 export class SceneLighting {
   readonly hemisphere: HemisphereLight;
   readonly sun: DirectionalLight;
+  /** Sun elevation; only the lookdev tweak panel moves it off 42°. */
+  sunElevationRad = SUN_ELEVATION_RAD;
   private readonly fit = createShadowFit();
   private readonly sunDir = { x: 0, y: 1, z: 0 };
   private readonly heights = { minM: 0, maxM: 0 };
@@ -46,7 +48,7 @@ export class SceneLighting {
    * refits the shadow camera to the footprint of `view` over the terrain box.
    */
   update(view: IsoView, terrain: WorldBox): void {
-    sunDirection(view.yaw, this.sunDir);
+    sunDirection(view.yaw, this.sunDir, this.sunElevationRad);
     this.heights.minM = terrain.minY;
     this.heights.maxM = terrain.maxY;
     const fit = fitShadowFrustum(view, this.heights, this.sunDir, this.mapSize, terrain, this.fit);
@@ -60,6 +62,13 @@ export class SceneLighting {
     camera.near = fit.near;
     camera.far = fit.far;
     camera.updateProjectionMatrix();
+  }
+
+  /** Re-reads the light colours from the palette (after a tweak-panel override). */
+  syncColors(): void {
+    this.hemisphere.color.setHex(palette.sky);
+    this.hemisphere.groundColor.setHex(palette.groundBounce);
+    this.sun.color.setHex(palette.sun);
   }
 
   dispose(): void {

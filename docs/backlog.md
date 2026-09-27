@@ -248,7 +248,10 @@ render work.
 *Model and commands*
 - [ ] Canonical keys `S:q,r,z0:d:z1`, `C:q,r,z0:d:turn:R:variant:z1` and
   `H:q,r,z0:d:side:z1`, normalised so the smaller end comes first.
-  - Node identity is (q, r, z), with z in integer dm.
+  - Node identity is (q, r, z), with z in integer dm. *Superseded by the 2026-09-26
+    amendment on [#66](https://github.com/Kminkjan/infrastructurio/issues/66): z is integer
+    mm, keys carry z in mm, and terrain stays Int16 dm
+    ([ADR 0010 D2 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d2-track-model)).*
   - Structure (ground, bridge or tunnel) is a piece property.
 - [ ] `createSim(scenario)` supports `build-track{pieces, structure}`, `demolish{pieces}`,
   `undo` and `redo` through `preview` and `execute`. The result is
@@ -289,7 +292,8 @@ render work.
 - This item is core-lane exclusive (`src/core/track`). Add template and key findings to
   ADR 0010.
 - Settle node-z resolution (dm vs mm) before S2; see
-  [simulation model open point 2](simulation-model.md#19-open-points-2026-09-26).
+  [simulation model open point 2](simulation-model.md#19-open-points-2026-09-26). *Settled
+  as a default on 2026-09-26: integer mm (the #66 amendment).*
 
 ## D3 — Track construction tool
 

@@ -1,4 +1,5 @@
 import type { Color, IUniform, Material, Vector2 } from "three";
+import { type ShaderChunk, inject, installChunks } from "./chunk";
 
 /**
  * The construction lattice overlay as an isolated `onBeforeCompile` chunk
@@ -113,23 +114,28 @@ if (uBuildMode > 0.0) {
 const CACHE_KEY = "lattice-overlay-v1";
 
 /**
- * Patches a Lambert material to draw the lattice. The uniform objects are
- * shared, so changing `uniforms.x.value` updates every program. Throws if
- * three's shader no longer has the anchor chunks, so an upgrade fails loudly
- * instead of silently dropping the overlay.
+ * The lattice as a composable chunk. The uniform objects are shared, so
+ * changing `uniforms.x.value` updates every program that uses them.
  */
-export function installLatticeChunk(material: Material, uniforms: LatticeUniforms): void {
-  material.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, uniforms);
-    shader.vertexShader = inject(shader.vertexShader, "#include <common>", VERTEX_PARS, "after");
-    shader.vertexShader = inject(shader.vertexShader, "#include <project_vertex>", VERTEX_MAIN, "after");
-    shader.fragmentShader = inject(shader.fragmentShader, "#include <common>", FRAGMENT_PARS, "after");
-    shader.fragmentShader = inject(shader.fragmentShader, "#include <opaque_fragment>", FRAGMENT_MAIN, "before");
+export function createLatticeChunk(uniforms: LatticeUniforms): ShaderChunk {
+  return {
+    key: CACHE_KEY,
+    patch(shader) {
+      Object.assign(shader.uniforms, uniforms);
+      shader.vertexShader = inject(shader.vertexShader, "#include <common>", VERTEX_PARS, "after");
+      shader.vertexShader = inject(shader.vertexShader, "#include <project_vertex>", VERTEX_MAIN, "after");
+      shader.fragmentShader = inject(shader.fragmentShader, "#include <common>", FRAGMENT_PARS, "after");
+      shader.fragmentShader = inject(shader.fragmentShader, "#include <opaque_fragment>", FRAGMENT_MAIN, "before");
+    },
   };
-  material.customProgramCacheKey = () => CACHE_KEY;
 }
 
-function inject(source: string, anchor: string, code: string, where: "before" | "after"): string {
-  if (!source.includes(anchor)) throw new Error(`lattice chunk: shader has no "${anchor}"`);
-  return source.replace(anchor, where === "after" ? `${anchor}\n${code}` : `${code}\n${anchor}`);
+/**
+ * Patches a Lambert material to draw the lattice, alone or followed by
+ * `extra` chunks (grain, splat, edge fade). Throws at compile time if three's
+ * shader no longer has the anchor chunks, so an upgrade fails loudly instead
+ * of silently dropping the overlay.
+ */
+export function installLatticeChunk(material: Material, uniforms: LatticeUniforms, extra: readonly ShaderChunk[] = []): void {
+  installChunks(material, [createLatticeChunk(uniforms), ...extra]);
 }

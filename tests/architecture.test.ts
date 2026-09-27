@@ -6,7 +6,9 @@ import { describe, expect, it } from "vitest";
  * - src/core is deterministic and DOM-free: no imports outside src/core, no
  *   three/react, no wall-clock, randomness, DOM or console APIs;
  * - trigonometry and friends only in the whitelisted geometry modules;
- * - src/tools has no three or DOM; src/render never imports src/ui.
+ * - src/tools has no three or DOM; src/render never imports src/ui;
+ * - no hex colour literal in src/render, src/ui or src/app outside
+ *   render/art/palette.ts, the single colour source (art direction "Palette").
  * A negative self-check proves each scanner actually fires.
  */
 
@@ -85,6 +87,15 @@ function layerViolations(path: string, raw: string): string[] {
   return problems;
 }
 
+const COLOUR_SOURCE = "/src/render/art/palette.ts";
+
+/** 0xRRGGBB, #RRGGBB or #RGB; longer hex (hash constants like 0x85ebca6b) never matches. */
+function colourViolations(path: string, raw: string): string[] {
+  if (!/^\/src\/(?:render|ui|app)\//.test(path) || path === COLOUR_SOURCE) return [];
+  const literals = stripComments(raw).match(/\b0x[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b/g) ?? [];
+  return literals.map((literal) => `hex colour literal ${literal} outside palette.ts`);
+}
+
 describe("architecture boundaries", () => {
   it("finds source files to scan", () => {
     expect(Object.keys(sources).some((p) => p.startsWith("/src/core/"))).toBe(true);
@@ -101,6 +112,13 @@ describe("architecture boundaries", () => {
     const failures = Object.entries(sources)
       .filter(([path]) => !isTest(path))
       .flatMap(([path, code]) => layerViolations(path, code).map((v) => `${path}: ${v}`));
+    expect(failures).toEqual([]);
+  });
+
+  it("keeps every colour literal in palette.ts", () => {
+    const failures = Object.entries(sources)
+      .filter(([path]) => !isTest(path))
+      .flatMap(([path, code]) => colourViolations(path, code).map((v) => `${path}: ${v}`));
     expect(failures).toEqual([]);
   });
 
@@ -121,5 +139,11 @@ describe("architecture boundaries", () => {
     expect(layerViolations("/src/render/hud.ts", 'import { Hud } from "../ui/Hud";')).not.toEqual([]);
     expect(coreViolations("/src/core/a.ts", '// Math.random() in a comment\nimport { b } from "./b";')).toEqual([]);
     expect(coreViolations("/src/core/track/a.ts", 'import { c } from "../lattice";')).toEqual([]);
+    expect(colourViolations("/src/render/scenery/x.ts", "const c = 0xc0643f;")).toHaveLength(1);
+    expect(colourViolations("/src/ui/Hud.tsx", 'const s = { color: "#fff", border: "1px solid #d8ccb4" };')).toHaveLength(2);
+    expect(colourViolations("/src/app/main.ts", "const n = 0x6d2b79f5; // 0xc0643f in a comment")).toEqual([]);
+    expect(colourViolations(COLOUR_SOURCE, "grass: 0x8fa66b,")).toEqual([]);
+    expect(colourViolations("/src/core/a.ts", "const salt = 0x464f52;")).toEqual([]);
+    expect(colourViolations("/src/render/a.ts", 'document.querySelector("#world");')).toEqual([]);
   });
 });

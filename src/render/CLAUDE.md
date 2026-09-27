@@ -1,7 +1,9 @@
 # src/render — imperative Three.js presentation
 
 Status 2026-09-26: `coords.ts`, `camera/`, `core/`, `terrain/` and `art/` (+ tests) exist
-(D1: slices R0–R1); `src/app/main.ts` wires them. ADR 0009 (**Accepted**, owner, 2026-09-26)
+(D1: slices R0–R1); the D11a branch adds `scenery/`, `labels/`, `camera/bookmarks.ts` and the
+art pipeline (`AssetRegistry`, `materials`, shader chunks, vignette, tweak panel) for the
+static diorama (R3, Look Gate A not yet held); `src/app/main.ts` wires them. ADR 0009 (**Accepted**, owner, 2026-09-26)
 fixes the renderer, camera, coordinate convention, render-on-demand and React outside the
 frame loop; ADR 0013 (art pipeline) is Proposed. `three` is pinned at 0.185.1 (r185).
 Targets: [art direction](../../docs/art-direction.md), [architecture](../../docs/architecture.md).
@@ -30,7 +32,8 @@ The critical rules below stand alone; repo-wide rules are in the root [CLAUDE.md
   three (x, z, −y), determinant +1 (tested). Never swap axes inline or use a negative scale;
   the legacy harness's (x, z, y) swap mirrored the scene.
 - **`art/palette.ts` holds only colours and is the only colour source:** no colour literals
-  elsewhere in `src/render` or `src/ui`. Add a colour there under its group, and update
+  elsewhere in `src/render`, `src/ui` or `src/app` (enforced by `tests/architecture.test.ts`
+  since D11a). Add a colour there under its group, and update
   [art direction](../../docs/art-direction.md) in the same PR. `index.html`'s first-paint
   background `#dcdccb` duplicates `palette.haze`: keep them equal.
 - **Camera constants** follow ADR 0009: one pitch constant (true isometric 35.264°, so the

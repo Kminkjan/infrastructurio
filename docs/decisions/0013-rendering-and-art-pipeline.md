@@ -197,6 +197,75 @@ single constant); which glTF assets, if any, arrive before M5. WebGPU is out of 
   recorded "deferred, not passed".
 - Accepting this ADR is not passing any look or performance gate.
 
+## Findings (2026-09-26, D11a lookdev spike)
+
+Recorded while implementing D11a on branch `codex/d11a-lookdev`
+([#75](https://github.com/Kminkjan/infrastructurio/issues/75)). Automated tests (Vitest in Node)
+and an **agent** browser run (headless Chrome through Playwright on an Apple M5 Pro, ANGLE
+Metal, 1280 × 720 at DPR 1). The status of this ADR stays **Proposed**, and nothing here is a
+look verdict: Look Gate A is the owner's.
+- **Decision 1 held, with the `coupler` anchor split into `coupler_f`/`coupler_r` and a
+  `sail_hub` anchor and `sails` slot added.** [`AssetRegistry.get(kind, variant, lod)`](../../src/render/art/AssetRegistry.ts)
+  returns geometry per material slot (`walls`, `roof`, `trim`, `glass`, `metal`, `foliage`,
+  `sails`), anchors (`smoke`, `bogie_front`, `bogie_rear`, `coupler_f`, `coupler_r`, `door`,
+  plus `sail_hub` for the windmill's pivot), a footprint and a triangle budget. Trees, the
+  building grammar and props register procedural providers. A building lot's footprint and
+  seed pack into one integer variant (`buildingVariant`), so a later glTF provider can read
+  the footprint back.
+- **Budgets met with room** (committed tests: 8 seeds per footprint; the ranges below come
+  from a one-off agent probe over 200 seeds per footprint, not committed): trees 68/72/70
+  triangles at LOD0 (spruce/pine/birch) and 26/24/28 at LOD1; townhouse 126–332, wooden
+  house 163–173, warehouse 158–328, station 396, engine shed 252, water tower 125, post
+  windmill 112, farmstead 182, and the hero church 528 (budget 1,500). Every generated triangle faces away
+  from the inside of its part (tested), so `FrontSide` holds everywhere. Because the builder
+  winds each triangle away from the inside point its caller gives, that test alone could not
+  catch a wrong inside point; two oracles that never read it back it up: convex parts (box,
+  prism, cone, blob) face away from their own vertex centroid, and every roof-slot triangle
+  faces up except recorded bottom-cap soffits (the water tower's cone base).
+- **Materials: six, not a dozen.** Materials are split by shader-chunk combination, never by
+  slot or colour, as art direction asks: terrain, water, foliage, built (walls, roofs, trim,
+  metal and sails share one combination), glass and props. Merging slots that share a
+  material keeps a town to two draws per 256 m chunk. Track (D3), steam and vehicles bring the
+  count toward the dozen this ADR estimates. Roofs, trees and props are flat-shaded; the
+  terrain stays smooth.
+- **Chunks compose.** grain (±6% luminance, world-anchored), windSway (height² sway, off
+  under reduced motion), foliageTint (vertex alpha masks crown from trunk; the instance colour
+  tints crowns only), edgeFade and a terrain splat chunk install through one helper that joins
+  their keys into `customProgramCacheKey`; the D1 lattice chunk now composes with them. Each
+  has a pure TypeScript mirror under test.
+- **Edge fade has to undo tone mapping.** The background clear colour is not tone mapped but
+  lit fragments are: `NeutralToneMapping` takes 0.04 off every linear channel of the haze,
+  about 5/255 darker in sRGB (calculated), which would leave a seam where the fade meets the
+  background. The fade therefore targets the haze run backwards through the tone map (exact
+  below its compression start; a test round-trips it at exposures 0.8–1.2), recomputed when
+  the tweak panel changes exposure. Not established: that no seam shows on every display.
+- **Data textures as planned, one resolution off.** The splat map is RGBA8 at 1 m per texel
+  (1,998 × 1,494 on the default map) with a categorical RG8 field map read by `texelFetch`
+  for crop and furrow heading. The AO tint map is R8 at 1,024², which on a 2.0 × 1.5 km map is
+  about 1.95 × 1.46 m per texel, not the "about 1 m" of the D11a contract; 1 m would need
+  2,048 × 1,536. Painting all three took 59 ms (Node, one run).
+- **Draw calls (agent, `renderer.info.render.calls`, one frame each, not a gate result):**
+  63 at the Close town bookmark, 64 for the same view at the 30° pitch, 70 at the Default
+  start view (forest by the river), 80 in the mid band and 109 at Region. At Far the first
+  build drew 229 (bookmark 4) and 240 at the 0.75 ppm minimum, 116 of them tree meshes (one
+  per 256 m chunk × species, where chunk culling saves nothing because the whole map is in
+  view). Below 2 ppm the trees now switch to one whole-map LOD1 mesh per species (their own
+  copy of the instance data, about 1.5 MB at the 20,000-tree cap) and cast no shadows: a
+  fresh run drew 121 at bookmark 4 (60 main, 61 shadow) and 127 at 0.75 ppm, with the other
+  views unchanged. Programs: 11–13. These are development readings on one machine; only the
+  D13 bench runs count against gate B, and track, trains and signals (D3, D8) add to them.
+- **Ambient animation** (tree sway and windmill sails) keeps the scheduler's `ambient` reason
+  on at 30 fps (58–60 frames in 2 s over two agent runs). With
+  `prefers-reduced-motion: reduce` the reason is off, the sway amplitude is 0, and an idle
+  page drew 0 frames in 2 s (agent).
+- **Bundle:** one 648.7 kB chunk, 176.6 kB gzip (`npm run build`); fonts are separate
+  files (EB Garamond Medium, latin 23 kB and latin-ext 65 kB woff2).
+- **Deferred:** chimney smoke (the smoke anchors are collected in world space, but no puffs
+  are drawn); shore foam; shadows for swaying trees use the unswayed depth material.
+- **Observation for the owner, not changed here:** with the D1 sun (left of and toward the
+  camera), cast shadows fall to the right and slightly up the screen, while art direction
+  says they fall toward the lower right. Which one is intended is a Look Gate A question.
+
 ## Revisit when
 
 - Look Gate A scores low on mood, cohesion or originality in a way parameters cannot fix
@@ -211,3 +280,6 @@ single constant); which glTF assets, if any, arrive before M5. WebGPU is out of 
 ## History
 
 - 2026-09-26: Proposed in the rail-first reset PR that adds ADRs 0009–0014 ([#61](https://github.com/Kminkjan/infrastructurio/pull/61)); owner decision pending.
+- 2026-09-26: D11a lookdev findings added (asset registry, budgets, six materials, composed
+  chunks, tone-mapped edge fade, data textures, agent draw calls); status unchanged, still
+  Proposed.

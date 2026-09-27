@@ -74,8 +74,8 @@ alpha = min(acc / 100, 1)
 | Length, position | integer mm | piece lengths computed once, in `geometry/templates.ts` |
 | Speed | integer mm/s | vmax 16,666 mm/s (60 km/h) |
 | Acceleration | integer mm/s² | planned braking 600, capability 900 |
-| Elevation | integer dm per node; terrain `Int16` dm | node identity is (q, r, z) |
-| Grade | integer ‰ | maximum 35‰ |
+| Elevation | integer mm per node; terrain `Int16` dm | node identity is (q, r, z). Default dated 2026-09-26: was integer dm, changed by the [#66](https://github.com/Kminkjan/infrastructurio/issues/66) amendment and recorded in the [ADR 0010 D2 finding](0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d2-track-model), because dm could not hold 35‰ on a 5 m straight (35‰ × 5,000 mm = 175 mm) |
+| Grade | integer ‰ | maximum 35‰. D2 stores a piece's grade as the exact rational (Δz·1000 / `lengthMm`) ‰, so the rule compares integers |
 | Lattice position, heading | integer axial (q, r); heading 0–11 in 30° steps | no angle floats in state |
 | Identifiers | monotonic integers | allocators never roll back, not even on undo |
 
@@ -254,3 +254,7 @@ descents (open point 3), both settled in D8.
 ## History
 
 - 2026-09-26: Proposed in the rail-first reset PR that adds ADRs 0009–0014 ([#61](https://github.com/Kminkjan/infrastructurio/pull/61)); owner decision pending.
+- 2026-09-26: §2 Elevation row changed from integer dm to integer mm per node, as a default
+  to test, per the [#66](https://github.com/Kminkjan/infrastructurio/issues/66) amendment and
+  the [ADR 0010 D2 finding](0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d2-track-model),
+  and the Grade row notes D2's exact-rational storage; status unchanged, still Proposed.

@@ -13,7 +13,8 @@ import { createPrng } from "./util/prng";
  * odd rows half a step east.
  *
  * Generation is integer-only once each node's position is in millimetres:
- * hash value-noise, fixed-point smoothstep, integer distances via `isqrt`.
+ * hash value-noise on rotated grids (exact Pythagorean-triple rotations),
+ * fixed-point smoothstep, a rational soft floor, integer distances via `isqrt`.
  * No transcendentals and no float accumulation, so the same
  * {seed, columns, rows, generatorVersion} gives bit-identical heights on every
  * engine. River and lake positions scale with the map, so a save must carry
@@ -29,7 +30,13 @@ import { createPrng } from "./util/prng";
  * edge.
  */
 
-export const TERRAIN_GENERATOR_VERSION = 1;
+/**
+ * Version 2 (D11a, 2026-09-26): each octave's grid is rotated and offset, so
+ * the octaves no longer share axis-aligned cell edges (version 1 banded along
+ * x and y at Far zoom), and the hard land clamp became a soft floor, so
+ * lowland keeps relief instead of lying perfectly flat at 10.5 m.
+ */
+export const TERRAIN_GENERATOR_VERSION = 2;
 /** 400 × 346 nodes ≈ 1997.5 m × 1494 m. */
 export const DEFAULT_TERRAIN_SIZE = { columns: 400, rows: 346 } as const;
 
@@ -75,12 +82,48 @@ const LAKE_BED_DM = WATER_LEVEL_DM - 25;
 const SHELF_RAMP_MM = 10_000;
 const SHELF_RAMP_HALF_MM = divFloor(SHELF_RAMP_MM, 2);
 
-/** Value-noise octaves, coarse to fine. */
-const OCTAVES: readonly { readonly cellMm: number; readonly amplitudeDm: number }[] = [
-  { cellMm: 420_000, amplitudeDm: 170 },
-  { cellMm: 150_000, amplitudeDm: 60 },
-  { cellMm: 55_000, amplitudeDm: 22 },
+/**
+ * A grid rotation (cos, sin) = (a/c, b/c) from a Pythagorean triple
+ * a² + b² = c², so rotating integer mm stays exact up to one floor and never
+ * needs trigonometry. A square grid repeats every 90° and the lattice every
+ * 30°, so what matters is the angle modulo 30°: each is about 15° from both.
+ */
+export interface GridRotation {
+  readonly a: number;
+  readonly b: number;
+  readonly c: number;
+}
+
+interface Octave {
+  readonly cellMm: number;
+  readonly amplitudeDm: number;
+  readonly rotation: GridRotation;
+}
+
+/**
+ * Value-noise octaves, coarse to fine. The rotations (16.3°, 43.6°, 75.8°)
+ * are about 30° apart modulo 90°, so no two octaves share cell edges and none
+ * lines up with the lattice or the screen at any rest yaw.
+ */
+const OCTAVES: readonly Octave[] = [
+  { cellMm: 420_000, amplitudeDm: 170, rotation: { a: 24, b: 7, c: 25 } },
+  { cellMm: 150_000, amplitudeDm: 60, rotation: { a: 21, b: 20, c: 29 } },
+  { cellMm: 55_000, amplitudeDm: 22, rotation: { a: 16, b: 63, c: 65 } },
 ];
+/** The octaves' grid rotations, coarse to fine (exported for tests). */
+export const OCTAVE_ROTATIONS: readonly GridRotation[] = OCTAVES.map((o) => o.rotation);
+/** The finest octave is added after the soft floor, so lowland keeps its small-scale relief. */
+const DETAIL_OCTAVE = OCTAVES.length - 1;
+/** Salts the per-octave grid offsets apart from the corner values in hash32. */
+const OFFSET_SALT = 0x4f464653;
+/**
+ * The soft floor for the coarse octaves: at least the detail octave's full
+ * amplitude above LAND_FLOOR_DM, so adding the detail octave back can never
+ * reach below it (sampleNoise is bounded by ±amplitudeDm exactly).
+ */
+const SOFT_FLOOR_DM = LAND_FLOOR_DM + 22;
+/** Above this the coarse height is untouched; below it the soft floor eases in. */
+const SOFT_KNEE_DM = SOFT_FLOOR_DM + 45;
 /** Noise corner values span −NOISE_RANGE..NOISE_RANGE. */
 const NOISE_RANGE = 1000;
 
@@ -161,6 +204,19 @@ export function terrainHash(t: Terrain): string {
   return hex32(fnv1a32Bytes(t.water, fnv1a32Bytes(heightBytes, fnv1a32(params))));
 }
 
+/**
+ * A node's plan position in integer mm (x east, y north), exactly as
+ * generation computes it: x = 2500·(2·col + row parity), y = round(row · 4330.127…).
+ */
+export function nodePositionMm(col: number, row: number): { xMm: number; yMm: number } {
+  return { xMm: HALF_STEP_MM * (2 * col + (row - 2 * divFloor(row, 2))), yMm: rowYMm(row) };
+}
+
+/** The map's extent in integer mm from the south-west node: the eastmost odd-row node and the last row. */
+export function terrainExtentMm(t: Pick<Terrain, "columns" | "rows">): { widthMm: number; heightMm: number } {
+  return { widthMm: HALF_STEP_MM * (2 * (t.columns - 1) + 1), heightMm: rowYMm(t.rows - 1) };
+}
+
 /** Extent of the map's nodes in sim metres (x east, y north), origin south-west. */
 export function terrainBoundsM(t: Terrain): { minX: number; maxX: number; minY: number; maxY: number } {
   const eastmost = toWorld(nodeOfOffset(t.columns - 1, t.rows > 1 ? 1 : 0));
@@ -181,6 +237,8 @@ export function generateTerrain(params: TerrainParams): Terrain {
   const widthMm = HALF_STEP_MM * (2 * (columns - 1) + 1);
   const heightMm = rowYMm(rows - 1);
   const octaves = OCTAVES.map((o, i) => buildNoiseGrid(o, i, seedHash, widthMm, heightMm));
+  const detail = octaves[DETAIL_OCTAVE];
+  if (detail === undefined) throw new Error("terrain needs a detail octave");
   const river = buildRiver(seedHash, columns, heightMm);
   const lake = placeLake(seed, river, widthMm, heightMm);
 
@@ -199,9 +257,13 @@ export function generateTerrain(params: TerrainParams): Terrain {
       const sample = 2 * col + parity;
       const xMm = HALF_STEP_MM * sample;
 
-      let natural = BASE_HEIGHT_DM;
-      for (const grid of octaves) natural += sampleNoise(grid, xMm, yMm);
-      if (natural < LAND_FLOOR_DM) natural = LAND_FLOOR_DM;
+      let coarse = BASE_HEIGHT_DM;
+      for (let o = 0; o < DETAIL_OCTAVE; o++) {
+        const grid = octaves[o];
+        if (grid !== undefined) coarse += sampleNoise(grid, xMm, yMm);
+      }
+      // softFloor ≥ SOFT_FLOOR_DM and the detail octave ≥ −22 dm, so natural ≥ LAND_FLOOR_DM.
+      const natural = softFloor(coarse) + sampleNoise(detail, xMm, yMm);
 
       let h = natural;
       if (nearRiverBand) {
@@ -243,6 +305,25 @@ function rowYMm(row: number): number {
   return Math.round(row * ROW_PITCH_MM);
 }
 
+/**
+ * A C¹ soft floor for the coarse relief: the identity above SOFT_KNEE_DM, and
+ * below it F + k²/(k + (K − n)) with k = K − F, which meets the identity with
+ * value and slope 1 at the knee and eases toward F from above as n falls. It
+ * is rational, so it stays integer with one floor. Version 1 clamped instead
+ * and left about 10% of the golden map exactly flat at 10.5 m.
+ */
+export function softFloor(n: number): number {
+  if (n >= SOFT_KNEE_DM) return n;
+  const k = SOFT_KNEE_DM - SOFT_FLOOR_DM;
+  return SOFT_FLOOR_DM + divFloor(k * k, k + (SOFT_KNEE_DM - n));
+}
+
+/** Rotates integer mm (x, y) by a Pythagorean-triple rotation; exact up to one floor per axis. */
+export function rotateMm(rotation: GridRotation, x: number, y: number): { u: number; v: number } {
+  const { a, b, c } = rotation;
+  return { u: divFloor(a * x - b * y, c), v: divFloor(b * x + a * y, c) };
+}
+
 /** Smoothstep of t ∈ [0, ONE] in ONE-scaled fixed point; t²·(3·ONE − 2t) ≤ 2^30. */
 function smooth(t: number): number {
   return divFloor(t * t * (3 * ONE - 2 * t), ONE * ONE);
@@ -256,42 +337,73 @@ function cornerValue(hash: number): number {
 interface NoiseGrid {
   readonly cellMm: number;
   readonly amplitudeDm: number;
+  readonly rotation: GridRotation;
+  /** Seeded grid offset in rotated mm, in [0, cellMm). */
+  readonly offsetU: number;
+  readonly offsetV: number;
+  /** Absolute cell index of the table's first column and row. */
+  readonly cellU0: number;
+  readonly cellV0: number;
   readonly width: number;
   readonly values: Int16Array;
 }
 
 /**
- * Precomputes one octave's corner values over the map, so the per-node loop
- * interpolates from a table instead of hashing four corners per node.
+ * Precomputes one octave's corner values over the map's rotated bounding box,
+ * so the per-node loop interpolates from a table instead of hashing four
+ * corners per node. Corners hash their absolute cell index, so a feature's
+ * value does not depend on where the table starts.
  */
 function buildNoiseGrid(
-  { cellMm, amplitudeDm }: { readonly cellMm: number; readonly amplitudeDm: number },
+  { cellMm, amplitudeDm, rotation }: Octave,
   octave: number,
   seedHash: number,
   widthMm: number,
   heightMm: number,
 ): NoiseGrid {
-  const width = divFloor(widthMm, cellMm) + 2;
-  const height = divFloor(heightMm, cellMm) + 2;
+  const offsetU = hash32(octave, 0, OFFSET_SALT, seedHash) % cellMm;
+  const offsetV = hash32(octave, 1, OFFSET_SALT, seedHash) % cellMm;
+  let minU = Number.MAX_SAFE_INTEGER;
+  let maxU = Number.MIN_SAFE_INTEGER;
+  let minV = Number.MAX_SAFE_INTEGER;
+  let maxV = Number.MIN_SAFE_INTEGER;
+  // The rotation is linear, so the map's rotated extremes are at its corners.
+  for (const [x, y] of [[0, 0], [widthMm, 0], [0, heightMm], [widthMm, heightMm]] as const) {
+    const { u, v } = rotateMm(rotation, x, y);
+    minU = Math.min(minU, u + offsetU);
+    maxU = Math.max(maxU, u + offsetU);
+    minV = Math.min(minV, v + offsetV);
+    maxV = Math.max(maxV, v + offsetV);
+  }
+  const cellU0 = divFloor(minU, cellMm);
+  const cellV0 = divFloor(minV, cellMm);
+  const width = divFloor(maxU, cellMm) - cellU0 + 2;
+  const height = divFloor(maxV, cellMm) - cellV0 + 2;
   const values = new Int16Array(width * height);
   for (let cy = 0; cy < height; cy++) {
-    for (let cx = 0; cx < width; cx++) values[cy * width + cx] = cornerValue(hash32(cx, cy, octave, seedHash));
+    for (let cx = 0; cx < width; cx++) {
+      values[cy * width + cx] = cornerValue(hash32(cellU0 + cx, cellV0 + cy, octave, seedHash));
+    }
   }
-  return { cellMm, amplitudeDm, width, values };
+  return { cellMm, amplitudeDm, rotation, offsetU, offsetV, cellU0, cellV0, width, values };
 }
 
 /**
- * Bilinear value noise with smoothstep weights, scaled to ±amplitudeDm.
- * The weighted sum is kept at full precision (|sum| ≤ 1000·2^20) and divided
- * once, so there is a single floor per octave.
+ * Bilinear value noise with smoothstep weights, scaled to ±amplitudeDm, on
+ * the octave's rotated and offset grid. The weighted sum is kept at full
+ * precision (|sum| ≤ 1000·2^20) and divided once, so there is a single floor
+ * per octave.
  */
 function sampleNoise(grid: NoiseGrid, xMm: number, yMm: number): number {
-  const { cellMm, amplitudeDm, width, values } = grid;
-  const cx = divFloor(xMm, cellMm);
-  const cy = divFloor(yMm, cellMm);
-  const sx = smooth(divFloor((xMm - cx * cellMm) * ONE, cellMm));
-  const sy = smooth(divFloor((yMm - cy * cellMm) * ONE, cellMm));
-  const i = cy * width + cx;
+  const { cellMm, amplitudeDm, width, values, rotation } = grid;
+  const { a, b, c } = rotation;
+  const u = divFloor(a * xMm - b * yMm, c) + grid.offsetU;
+  const v = divFloor(b * xMm + a * yMm, c) + grid.offsetV;
+  const cu = divFloor(u, cellMm);
+  const cv = divFloor(v, cellMm);
+  const sx = smooth(divFloor((u - cu * cellMm) * ONE, cellMm));
+  const sy = smooth(divFloor((v - cv * cellMm) * ONE, cellMm));
+  const i = (cv - grid.cellV0) * width + (cu - grid.cellU0);
   const v00 = values[i] ?? 0;
   const v10 = values[i + 1] ?? 0;
   const v01 = values[i + width] ?? 0;
