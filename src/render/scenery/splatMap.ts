@@ -1,4 +1,4 @@
-import type { DioramaScenery, SplatPath } from "../../core/scenarios/baltic-diorama";
+import type { DioramaScenery, SplatPath } from "../../core/sim/api";
 
 /**
  * Paints the terrain's data textures from a scenery layout (art direction

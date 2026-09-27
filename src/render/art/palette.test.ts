@@ -23,7 +23,7 @@ describe("palette", () => {
       loco: 0x2f3b33, brass: 0xb08d57, bufferRed: 0x9c3b30, coachMaroon: 0x6e3434, coachGreen: 0x3f5b4a, creamPanel: 0xe6dcc3, wagonGrey: 0x6f6a62,
       haze: 0xdcdccb, steam: 0xf4f2ec, steamEnd: 0xcfcac0, smoke: 0xb9b4aa,
       sky: 0xd6e4ec, groundBounce: 0x6b6a4e, sun: 0xffe8c2, latticeLine: 0xf2f0e6,
-      uiParchment: 0xf3ede0, uiBorder: 0xd8ccb4, uiInk: 0x3b3a36, signalRed: 0xc8453a, signalGreen: 0x5e9c5a,
+      uiParchment: 0xf3ede0, uiBorder: 0xd8ccb4, uiInk: 0x3b3a36, signalRed: 0xc8453a, signalGreen: 0x5e9c5a, signalAmber: 0xd9a13b,
       ghostValid: 0xffffff, ghostInvalid: 0xe0584c, ghostReused: 0x7fd1e8, snap: 0x8fd694,
       block1: 0xf2c94c, block2: 0x4fc3d9, block3: 0xd65db1, block4: 0xf08a4b, block5: 0x8c7ae6, block6: 0xf4f4f4,
     };

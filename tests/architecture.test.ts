@@ -6,7 +6,11 @@ import { describe, expect, it } from "vitest";
  * - src/core is deterministic and DOM-free: no imports outside src/core, no
  *   three/react, no wall-clock, randomness, DOM or console APIs;
  * - trigonometry and friends only in the whitelisted geometry modules;
- * - src/tools has no three or DOM; src/render never imports src/ui;
+ * - src/tools has no three, DOM, clock or randomness (reducers are pure);
+ *   src/render never imports src/ui, and src/ui never three or src/render;
+ * - src/render, src/tools and src/ui reach the core only through
+ *   core/sim/api.ts and the pure core/geometry/sample.ts (src/app, the
+ *   composition root, may import the core directly);
  * - no hex colour literal in src/render, src/ui or src/app outside
  *   render/art/palette.ts, the single colour source (art direction "Palette").
  * A negative self-check proves each scanner actually fires.
@@ -82,8 +86,35 @@ function layerViolations(path: string, raw: string): string[] {
       if (target.startsWith("/src/render/") || target.startsWith("/src/ui/") || target === "react") problems.push(`tools import ${spec}`);
     }
     if (path.startsWith("/src/render/") && target.startsWith("/src/ui/")) problems.push(`render imports ui ${spec}`);
+    if (path.startsWith("/src/ui/") && (target === "three" || target.startsWith("three/") || target.startsWith("/src/render/"))) {
+      problems.push(`ui imports ${spec}`);
+    }
   }
-  if (path.startsWith("/src/tools/") && /\b(?:window|document)\b/.test(code)) problems.push("tools touch the DOM");
+  if (path.startsWith("/src/tools/")) {
+    // Reducers are pure: the same state, event and ctx always give the same result.
+    const impure: [RegExp, string][] = [
+      [/\b(?:window|document|navigator|globalThis|localStorage|sessionStorage)\b/, "tools touch the DOM"],
+      [/\b(?:HTMLElement|Element|Event|KeyboardEvent|PointerEvent|MouseEvent|WheelEvent)\b/, "tools use DOM types"],
+      [/\bMath\.random\b|\bDate\b|\bperformance\s*\./, "tools read a clock or randomness"],
+      [/\b(?:setTimeout|setInterval|requestAnimationFrame|queueMicrotask)\b/, "tools schedule work"],
+    ];
+    for (const [re, name] of impure) if (re.test(code)) problems.push(name);
+  }
+  return problems;
+}
+
+/** The only core modules the edges (render, tools, ui) may import. */
+const CORE_GATEWAYS = new Set(["/src/core/sim/api", "/src/core/geometry/sample"]);
+
+/** Render, tools and ui reach the core only through `sim/api.ts` and `geometry/sample.ts`. */
+function coreGatewayViolations(path: string, raw: string): string[] {
+  if (!/^\/src\/(?:render|tools|ui)\//.test(path)) return [];
+  const problems: string[] = [];
+  for (const spec of importSpecifiers(stripComments(raw))) {
+    if (!spec.startsWith(".")) continue;
+    const target = resolveRelative(path, spec).replace(/\.(?:ts|tsx|js)$/, "");
+    if (target.startsWith("/src/core/") && !CORE_GATEWAYS.has(target)) problems.push(`imports core outside sim/api.ts and geometry/sample.ts "${spec}"`);
+  }
   return problems;
 }
 
@@ -108,10 +139,17 @@ describe("architecture boundaries", () => {
     expect(failures).toEqual([]);
   });
 
-  it("keeps tools free of three/DOM and render free of ui imports", () => {
+  it("keeps tools free of three/DOM, render free of ui, and ui free of three/render", () => {
     const failures = Object.entries(sources)
       .filter(([path]) => !isTest(path))
       .flatMap(([path, code]) => layerViolations(path, code).map((v) => `${path}: ${v}`));
+    expect(failures).toEqual([]);
+  });
+
+  it("keeps render, tools and ui on the core's public surface", () => {
+    const failures = Object.entries(sources)
+      .filter(([path]) => !isTest(path))
+      .flatMap(([path, code]) => coreGatewayViolations(path, code).map((v) => `${path}: ${v}`));
     expect(failures).toEqual([]);
   });
 
@@ -136,9 +174,24 @@ describe("architecture boundaries", () => {
     expect(found.length).toBe(7);
     expect(coreViolations("/src/core/geometry/sample.ts", "const s = Math.sin(1);")).toEqual([]);
     expect(layerViolations("/src/tools/track.ts", 'import * as T from "three";')).not.toEqual([]);
+    expect(
+      layerViolations(
+        "/src/tools/track.ts",
+        ["document.title;", "(e: KeyboardEvent) => e;", "const t = performance.now();", "setTimeout(f, 1);"].join("\n"),
+      ),
+    ).toEqual(["tools touch the DOM", "tools use DOM types", "tools read a clock or randomness", "tools schedule work"]);
+    expect(layerViolations("/src/tools/track.ts", 'import type { ToolEvent } from "./types";\nconst d = Math.hypot(1, 2);')).toEqual([]);
     expect(layerViolations("/src/render/hud.ts", 'import { Hud } from "../ui/Hud";')).not.toEqual([]);
+    expect(layerViolations("/src/ui/Hud.tsx", 'import { palette } from "../render/art/palette";\nimport { Color } from "three";')).toHaveLength(2);
+    expect(layerViolations("/src/ui/Hud.tsx", 'import { useSyncExternalStore } from "react";\nimport type { HudStore } from "./store";')).toEqual([]);
     expect(coreViolations("/src/core/a.ts", '// Math.random() in a comment\nimport { b } from "./b";')).toEqual([]);
     expect(coreViolations("/src/core/track/a.ts", 'import { c } from "../lattice";')).toEqual([]);
+    expect(coreGatewayViolations("/src/render/terrain/x.ts", 'import { toWorld } from "../../core/lattice";')).toHaveLength(1);
+    expect(coreGatewayViolations("/src/tools/track.ts", 'import type { AuthoredState } from "../core/track/authored";')).toHaveLength(1);
+    expect(coreGatewayViolations("/src/ui/Hud.tsx", 'import { x } from "../core/scenarios/baltic-diorama.ts";')).toHaveLength(1);
+    expect(coreGatewayViolations("/src/render/track/x.ts", 'import { toWorld } from "../../core/sim/api";\nimport { samplePiece } from "../../core/geometry/sample";')).toEqual([]);
+    expect(coreGatewayViolations("/src/render/core/x.ts", 'import { FrameScheduler } from "./FrameScheduler";')).toEqual([]);
+    expect(coreGatewayViolations("/src/app/main.ts", 'import { generateTerrain } from "../core/terrain";')).toEqual([]);
     expect(colourViolations("/src/render/scenery/x.ts", "const c = 0xc0643f;")).toHaveLength(1);
     expect(colourViolations("/src/ui/Hud.tsx", 'const s = { color: "#fff", border: "1px solid #d8ccb4" };')).toHaveLength(2);
     expect(colourViolations("/src/app/main.ts", "const n = 0x6d2b79f5; // 0xc0643f in a comment")).toEqual([]);

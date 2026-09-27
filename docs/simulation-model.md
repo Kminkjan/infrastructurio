@@ -5,10 +5,13 @@ simulation core (`src/core`). **Implemented:** the lattice
 ([`src/core/lattice.ts`](../src/core/lattice.ts), 9 test cases in
 [`lattice.test.ts`](../src/core/lattice.test.ts)) and, from D1, the integer utilities and
 terrain (§1, §7), all guarded by the boundary test in
-[`tests/architecture.test.ts`](../tests/architecture.test.ts). From D2 (2026-09-26, branch
-`codex/d2-track-model`): templates, pieces and keys (§5, §6), the validator for the D2-owned
-codes, clearance and history (§9, §14), a first `derive` (§10) and the first `Sim` commands
-(§2). Everything else here is planned. Its numbers come from the owner-approved M4 plan (2026-09-26) and are proposed in
+[`tests/architecture.test.ts`](../tests/architecture.test.ts). From D2 (2026-09-26, merged to
+`main`): templates, pieces and keys (§5, §6), the validator for the D2-owned codes, clearance
+and history (§9, §14), a first `derive` (§10) and the first `Sim` commands (§2). From D3
+(2026-09-27, arriving with [PR #82](https://github.com/Kminkjan/infrastructurio/pull/82)): the
+planner (§8).
+Everything else here is planned. Its numbers come from the owner-approved M4 plan
+(2026-09-26) and are proposed in
 ADRs [0010](decisions/0010-triangular-lattice-track-geometry.md),
 [0011](decisions/0011-signalling-and-reservation.md),
 [0012](decisions/0012-tick-units-determinism.md) and
@@ -52,7 +55,7 @@ Module paths are relative to `src/core/`. Tracking keys D1–D13 come from
 | Static diorama scenery | `scenarios/` | — | D11a | **Implemented** in D11a: seeded, integer-only layout for the lookdev spike (no sim behaviour), 21 test cases with a golden hash |
 | Pieces and templates | `geometry/templates.ts`, `piece.ts`, `sample.ts` | S2 | D2 | **Implemented** in D2: 12 straights, 720 oriented curves, 24 shifts; closure and reachability tested ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d2-track-model)) |
 | Authored state, validation, clearance, history | `track/`, `geometry/clearance.ts` | S3 | D2, D4 | **Implemented** in D2 for the 11 D2-owned codes; grade and terrain/structure rules (D4) are ordered placeholders that pass |
-| Planner | `track/planner.ts` | S4 | D3 | Planned |
+| Planner | `track/planner.ts` | S4 | D3 | **Implemented** in D3 (2026-09-27, PR #82): one-bend, shift and two-bend fits (into ports, and as the fallback for free drags), magnetism, precision, elevation (pinned to existing node heights); 80 test cases in three files (§8) |
 | Derived network, entity commands | `network/derive.ts`, `graph.ts` | S5 | D2, D5–D7 | **Partial**: D2's `derive` (through and buffer nodes, sections split at buffers); junctions and entities planned |
 | Pathfinding | `network/pathfind.ts` | S6 | D8 | Planned |
 | Trains and movement | `trains/` | S7 | D8 | Planned |
@@ -280,9 +283,9 @@ one row. Shifts build crossovers and passing loops.
 
 ## 7. Terrain (implemented)
 
-**Status 2026-09-26 (automated, D1 branch `codex/d1-lattice-terrain`; version 2 on the D11a
-branch `codex/d11a-lookdev`):** [`terrain.ts`](../src/core/terrain.ts) and its tests (23 on
-the D11a branch) are in place, with the golden hash `d2ee8189` for seed `"baltic-diorama"`
+**Status 2026-09-26 (automated, D1; version 2 from D11a; both
+merged to `main`):** [`terrain.ts`](../src/core/terrain.ts) and its tests (23 since
+D11a) are in place, with the golden hash `d2ee8189` for seed `"baltic-diorama"`
 at 400 × 346 nodes (generator version 2; version 1 was `9a922d9c`). Findings:
 [ADR 0010](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d1-terrain)
 and its [version 2 note](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d11a-terrain-generator-version-2).
@@ -324,6 +327,24 @@ and its [version 2 note](decisions/0010-triangular-lattice-track-geometry.md#fin
 `planTrack(drag)` is pure. It turns drag input into a `TrackPlan`: resolved `PieceSpec[]`,
 new/reused counts and a label. `build-track` then carries those pieces.
 
+**Status 2026-09-27 (automated, D3, PR #82):** implemented in
+[`track/planner.ts`](../src/core/track/planner.ts), with 73 test cases in
+[`planner.test.ts`](../src/core/track/planner.test.ts) (a 35-case drag table, ranking,
+elevation, height-pinning and ground-following tests, a golden hash of the one-bend plans,
+seeded properties, follow measurements, a probe on the diorama map and one-bend-a-node-off
+tests against a brute-force single-bend oracle), a brute-force
+two-bend oracle in [`planner.twoBend.test.ts`](../src/core/track/planner.twoBend.test.ts),
+oracles for the free-drag two-bend fallback in
+[`planner.twoBendFree.test.ts`](../src/core/track/planner.twoBendFree.test.ts), and planner
+measurements in [`sim/perf.test.ts`](../src/core/sim/perf.test.ts). The choices this section
+left open are under "As built" below; numbers and limits are in the
+[ADR 0010 D3 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-d3-planner)
+and, for two bends in one drag, the
+[D3 two-bend finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-d3-two-bend-free-drags)
+and the
+[D3 one-bend-a-node-off finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-d3-one-bend-a-node-off).
+Whether dragging feels right is not established: that is the owner's D3 feel check.
+
 - **Single bend.** A drag becomes n straights + one curve or shift template + m straights.
   - For each of about 100 candidate templates on the start heading d0, the planner solves
     Δ = n·step(d0) + T + m·step(d1) as a 2×2 integer system for n, m ≥ 0.
@@ -336,10 +357,27 @@ new/reused counts and a label. `build-track` then carries those pieces.
   |turn| → left before right. This makes the choice fully deterministic.
 - **Two-bend fit.** When the drag ends on an existing port, position and heading are both
   fixed. The planner then fits two bends with straights between them, to join the port.
+- **Two bends in one drag** (owner decision, 2026-09-27, after the D3 feel check). When no
+  single bend reaches a free drag's target, the planner fits two bends in the same drag,
+  with the end heading free: straights + curve + straights + curve + straights, turning up
+  to 180° in all (hairpins, U-turns, S-curves). A single bend still wins wherever one
+  reaches, with the selection unchanged. Target, rank and precision rules are under
+  "As built".
+- **One bend a node off** (owner decision, 2026-09-27, "prefer one bend, a node off"):
+  two bends only when no single bend lands on the target or one of its six neighbours. A
+  single bend to a neighbour is smoother than two bends onto the target (which were
+  mostly a small kink); the end then sits up to about 5 m from the pointer.
 - **Magnetism.** The drag snaps to existing endpoints and ports within 3 nodes.
-- **Elevation.** The height change is spread over the nodes in proportion to cumulative
-  length, using largest-remainder rounding to integer mm. The start z comes from the
-  snapped node; the end z comes from the height keys.
+- **Elevation: track follows the ground** (owner decision, 2026-09-27, for D3; D4 revisits
+  it with the 35‰ rule and earthworks). Each node sits on the ground (the terrain, or the
+  water surface over a lower bed) plus an offset. The offset, not the absolute height, is
+  spread over the nodes in proportion to cumulative length, using largest-remainder
+  rounding to integer mm, between the heights of existing nodes the drag passes ("As built"
+  below). The start z comes from the snapped node; the end z comes from the height keys,
+  as steps above the ground at the end node. With no height steps a drag lies on the
+  ground at every node. Until 2026-09-27 the absolute height change was spread instead,
+  so hills between the ends swallowed the track
+  ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-d3-ground-following)).
 - **Counter.** Keys already present count as reused, the rest as new. An all-reused drag is
   a no-op: `execute` changes nothing and records no history entry.
 - **Precision mode** (Ctrl, or ⌥ on macOS):
@@ -349,6 +387,82 @@ new/reused counts and a label. `build-track` then carries those pieces.
   - a live label such as "R 120 m · 35 km/h · 1.2%".
 
   It stays on the lattice. Off-lattice geometry and clothoids are deferred beyond M4.
+- **As built (D3, 2026-09-27).** Defaults to test, not owner decisions:
+  - **Candidates:** 51 on a primary d0 and 75 on a secondary one (one straight run, 48 or
+    72 curves, 2 shifts), not "about 100". A shift fixes only n + m, so it is offered
+    first (n = 0) and last (m = 0).
+  - **Start heading d0:** `drag.fromHeading` when set. At an existing buffer end, whichever
+    of continuing and retracing the track is nearer the drag direction. Otherwise the
+    heading nearest the drag direction, ties to the lower index.
+  - **Target node, in order:**
+    - the pointer's nearest node N when a one-bend fit reaches it;
+    - else one bend a node off: the neighbour of N nearest the pointer that a one-bend fit
+      reaches, among N's six neighbours (5 m away, so the end lies under 7.64 m from the
+      pointer; 3.0–5.6 m in the forward-cone cases this replaced). The nodes 8.66 m from N
+      are left out, since they would put the end up to 11.5 m off. Distance ties go to the
+      single-bend selection, and validity never moves the end to a farther neighbour. The
+      halfway rule below applies, which only matters within about 15 m of the start;
+    - else N when a two-bend fit reaches it.
+
+    Otherwise, since no fit of one or two bends reaches inside the 60 m turning circles
+    beside the start, or behind it within 120 m of its line: a pointer behind the start
+    (fixed heading) takes the U-turn end nearest it, found exactly and at any distance;
+    any other pointer takes the nearest node reachable with one or two bends that reaches
+    at least halfway to it along the drag, by an exact ring search of up to 12 rings
+    (about 52 m), and failing that the nearest U-turn end. The halfway rule keeps a
+    pointer abeam inside a turning circle from getting a stub of straights ahead. A free
+    drag is therefore empty only when it is too short; a precision end heading that no fit
+    near the pointer can take still gives an empty plan with a `note`. Validity never moves
+    the target, so an unbuildable drag still shows where it would go.
+  - **Selection:** "fewer bends" comes before "largest radius", which changes nothing for
+    single-bend pools. Remaining ties go to the earlier bend, then a canonical signature.
+    Shifts keep their fixed radius and ignore the cap. Validity is checked lazily with
+    structure `auto`, on at most 8 candidates in rank order; when none is valid, the
+    top-ranked plan is returned for `preview` to explain.
+  - **Ports and magnetism:** a port is an existing buffer end. Magnetism tries those within
+    3 hex nodes of the pointer's node, nearest first. It skips `from` and any port that no
+    fit reaches, and the end takes the port's height. Two-bend fits are curve + curve (any
+    two turns summing to the heading change), or two shifts to one side (two rows).
+    Without magnetism, a drag whose end node is a buffer end joins it the same way, unless
+    precision fixes the end heading.
+  - **Two bends in one drag:** at a target no single bend reaches, two-bend fits rank valid
+    → largest smaller radius (under the cap) → total turn nearest the arc turn → shortest →
+    smallest summed |turn| → left before right → earlier first bend. The arc turn is the
+    turn of the one circular arc that leaves the start on its heading and passes through the
+    pointer: twice the pointer's bearing, or 180° toward the pointer's side for a pointer
+    abeam or behind, so those get U-turns whenever a U-turn is as wide as any other fit.
+    Radius comes first as for one bend; shortest-first made every fit R 60. Only the best 8
+    fits are kept, pruned by radius, and a tabled reach test serves the ring search
+    ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-d3-two-bend-free-drags)).
+  - **Precision:** curves only of the chosen radius class, both bends of a two-bend fit
+    included. An end heading keeps only fits that end on it: one bend when one reaches the
+    target, else one bend a node off (the same rule, with that radius class and end
+    heading), else two (an S-curve back onto the start heading, a U-turn onto the opposite
+    one).
+  - **Elevation:** an intermediate node where existing track has a node within 6.5 m (the
+    clearance height) of the plan's reference there takes that node's height, so a drag
+    that retraces or extends sloped track reuses the pieces it overlaps. The reference is
+    the ground plus the offset on the line, by length, from the last pinned node's offset
+    to the end's (since 2026-09-27; before, the absolute height on that line). From 6.5 m
+    on, the drag passes over or under and keeps its own height. With several heights in
+    reach, a height whose incoming piece already exists wins, then one whose outgoing
+    piece does, then the nearest, then the lower. Between pins (start, pinned nodes, end):
+    largest remainder over the per-piece offset changes, weighted by piece length, ties to
+    the earlier piece; each node is its ground plus its offset. A descent mirrors the climb
+    ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-d3-height-pinning)).
+  - **Ground following** (the rule is the owner's decision of 2026-09-27; these details are
+    defaults): the ground is `groundMmAt` in [`terrain.ts`](../src/core/terrain.ts), which
+    the app also gives the track tool, so a plan's ends and inner nodes agree. A node off
+    the map takes the ground of the last on-map node before it on the path, else the first
+    after it. On flat terrain the profile is the old one exactly. Limits, measured on the
+    diorama map
+    ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-d3-ground-following)):
+    only nodes follow the ground, so a curve or shift, one piece with one grade (shifts
+    43.7 m, curves a median 68 m and up to 200 m there), can still pass under a hill or over
+    a hollow between its ends; and about half the pieces of a ground-following drag exceed
+    35‰, which nothing rejects until D4's grade rule.
+  - **Malformed drags:** a non-integer start, non-finite pointer, or invalid heading or
+    radius throws a `TypeError`. It is a programmer error, like a malformed command.
 
 ## 9. Validation
 
@@ -788,7 +902,7 @@ The safety soak in the gates counts 0 double-held sections, 0 signals passed at 
 | S1 | lattice | D1 (**implemented**) |
 | S2 | templates, piece, sample | D2 (**implemented** 2026-09-26) |
 | S3 | terrain, authored, validate, clearance, history | D1 (terrain **implemented**), D2 (**implemented** for D2's codes, 2026-09-26), D4 |
-| S4 | planner, paired with a Three.js ghost spike to judge feel | D3 |
+| S4 | planner, paired with a Three.js ghost spike to judge feel | D3 (planner **implemented** in the core half, 2026-09-27; the ghost is the render half) |
 | S5 | derive, graph, signal/platform/depot commands | D2 (first `derive`: through and buffer nodes), D5–D7 |
 | S6 | pathfind | D8 |
 | S7 | trains, one on a fixed route | D8 |

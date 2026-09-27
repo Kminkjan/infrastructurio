@@ -191,7 +191,12 @@ different heights never share a node. Terrain heights are Int16 dm at lattice no
 convert at the terrain boundary. Millimetres are a default since 2026-09-26: dm could not
 hold 35‰ on a 5 m straight, while mm gives exactly 175 mm
 ([ADR 0010 D2 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d2-track-model)).
-The planner spreads elevation along a drag by length with largest-remainder rounding.
+Track follows the ground (owner decision, 2026-09-27, for D3; D4 revisits it with the 35‰
+rule): each planned node sits on the ground (the terrain, or the water surface over a lower
+bed) plus an offset. The planner spreads the offset along a drag by length with
+largest-remainder rounding, between the heights of existing nodes the drag passes within
+6.5 m, so retracing sloped track reuses it. A curve or shift has one grade, so only its ends
+follow the ground.
 
 ### End of authority (EOA)
 
@@ -347,7 +352,9 @@ all-reused drag is a no-op with no history entry, and undo can create no ID haza
 Turns a drag into resolved pieces: n straights, then one curve or shift template, then m
 straights. It solves a 2×2 integer system over about 100 candidates and chooses valid →
 largest radius under the user cap → shortest → smallest |turn| → left before right. A
-two-bend fit joins into existing ports. Commands carry the resolved pieces, so tuning the
+two-bend fit joins into existing ports, and, where no single bend reaches a free drag's
+end or a node next to it, two bends in one drag turn up to 180° (U-turns, hairpins,
+S-curves; owner decisions 2026-09-27). Commands carry the resolved pieces, so tuning the
 planner never breaks replays.
 
 ### Platform

@@ -102,6 +102,14 @@ at Look Gate A. The colour-blind overlay set still has no values (D7). A source-
 [`tests/architecture.test.ts`](../tests/architecture.test.ts) now rejects hex colour
 literals in `src/render`, `src/ui` and `src/app` outside `palette.ts`.
 
+**D3 (2026-09-27):** one token joins the UI group, **amber `#D9A13B`** (`signalAmber`), the
+construction tooltip's middle grade band (green ≤ 1.5 %, amber up to the 3.5 % maximum, red
+above it; signal green and red are the outer bands), so the table now has 71 tokens (72 with
+`forestFloor`). Chosen in-house, not yet judged at a look gate. The ghost, snap ring, drop
+lines, end-height tags, rejection highlight and undo flash use the existing build-state and
+UI tokens; the HUD reads them as CSS custom properties that `src/app` sets from `palette.ts`
+at start-up (`src/ui` never imports render).
+
 | Group | Colours |
 |---|---|
 | grass | `#8FA66B`, light `#A9BA7E`, shade `#6E8752`, meadow `#C2BE7C` |
@@ -115,7 +123,7 @@ literals in `src/render`, `src/ui` and `src/app` outside `palette.ts`.
 | stock | loco `#2F3B33`, brass `#B08D57`, buffer red `#9C3B30`, coach maroon `#6E3434`, coach green `#3F5B4A`, cream panel `#E6DCC3`, wagon grey `#6F6A62` |
 | air | haze `#DCDCCB`, steam `#F4F2EC` → `#CFCAC0`, smoke `#B9B4AA` |
 | light and grid | sky `#D6E4EC`, ground bounce `#6B6A4E`, sun `#FFE8C2`, lattice line `#F2F0E6` |
-| UI | parchment `#F3EDE0`, border `#D8CCB4`, ink `#3B3A36`, brass `#B08D57`, signal red `#C8453A`, green `#5E9C5A` |
+| UI | parchment `#F3EDE0`, border `#D8CCB4`, ink `#3B3A36`, brass `#B08D57`, signal red `#C8453A`, green `#5E9C5A`, amber `#D9A13B` (D3) |
 | build states | ghost valid `#FFFFFF`, invalid `#E0584C` (dashed), reused `#7FD1E8`, snap `#8FD694` |
 | block overlay | `#F2C94C`, `#4FC3D9`, `#D65DB1`, `#F08A4B`, `#8C7AE6`, `#F4F4F4`, plus a colour-blind-safe set; one-way blocks always get chevrons |
 
@@ -262,6 +270,17 @@ and arcs of the `NetworkView` render prims. Curves are sampled through
 - **The far-LOD threshold (4 ppm) sits inside the mid band** (2–5 ppm). That fits the
   numbers: below 4 ppm the sleeper pitch falls under 2.1–3.6 px (calculated) and would
   shimmer.
+- **D3 status (2026-09-27, [PR #82](https://github.com/Kminkjan/infrastructurio/pull/82); look not judged):** the table's
+  dimensions and arc sampling are implemented in
+  [`render/track/trackGeometry.ts`](../src/render/track/trackGeometry.ts). Choices the table
+  leaves open: sleepers are spread evenly per piece at round(L / 0.9 m); rails stand on the
+  sleepers (0.14–0.30 m); the whole track is lifted (render-only) so the ballast top never
+  z-fights the terrain it lies on: 5 cm at first, 15 cm since 2026-09-27, when track began to
+  follow the ground and the terrain between nodes could otherwise cover the rails (measured in
+  the [ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-d3-ground-following));
+  the far-LOD stripe is a centre band ±0.85 m wide in the
+  sleeper colour (a vertex attribute and the `trackStripe` chunk), and the rails stay. Turnout
+  timbers, blades and earthworks are not built yet.
 
 ## Structures
 
@@ -404,6 +423,16 @@ true bogies.
   - Colours: new white, reused cyan, invalid red and dashed.
   - Elevated ghosts show drop lines every 20 m and end-height tags.
 - **Handles** are screen-constant billboards drawn at 6–8 px and picked within 14 px.
+- **D3 status (2026-09-27; look not judged):** the ghost is a 2.6 m ribbon 5 cm above the
+  drawn rail tops (0.4 m above the track height at first, 0.5 m since the 15 cm track lift of
+  2026-09-27), in two passes at 0.7 (depth-tested) and 0.2
+  (see-through), dashed 3 m on, 2 m off when invalid; drop lines (ghost-valid white, 0.7) stand
+  every 20 m of plan length and at the end wherever the ghost is more than 0.5 m above the
+  terrain (the water surface over water, since 2026-09-27), and an elevated ghost tags both ends
+  with their height above it in parchment labels. Existing pieces a rejection names are overlaid in the invalid red. An undo
+  or redo flashes the added pieces in the snap green and the removed ones in red for 400 ms
+  (held, not faded, under reduced motion). The snap ring is a 9 px screen-constant billboard in
+  the snap green: filled on an endpoint, hollow on a free node, with a fork glyph on track.
 - Recommended: give ribbons a minimum screen width so blocks still read at Region and Far.
   D7 sets the value.
 

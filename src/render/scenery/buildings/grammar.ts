@@ -1,4 +1,4 @@
-import type { LotKind } from "../../../core/scenarios/baltic-diorama";
+import type { LotKind } from "../../../core/sim/api";
 import {
   type AnchorName,
   type AnchorPoint,

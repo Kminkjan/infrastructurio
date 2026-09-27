@@ -1,6 +1,5 @@
 import { Color, Group, InstancedBufferAttribute, InstancedMesh, type Material, Matrix4, Quaternion, SRGBColorSpace, Vector3 } from "three";
-import { TREE_BIRCH, TREE_PINE, TREE_SPRUCE, type TreeInstances } from "../../core/scenarios/baltic-diorama";
-import type { Terrain } from "../../core/terrain";
+import { TREE_BIRCH, TREE_PINE, TREE_SPRUCE, type Terrain, type TreeInstances } from "../../core/sim/api";
 import { type AssetData, type AssetLod, type AssetRegistry } from "../art/AssetRegistry";
 import { palette } from "../art/palette";
 import { simToWorld } from "../coords";

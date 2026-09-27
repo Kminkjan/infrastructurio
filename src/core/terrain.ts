@@ -183,6 +183,21 @@ export function isWaterAt(t: Terrain, a: Axial): boolean {
 }
 
 /**
+ * The ground track lies on at a node, in integer mm, or undefined outside the
+ * map: the terrain height, except on a water node, where the water surface
+ * counts when it lies above the bed. The planner lays track on it (D3 ground
+ * following, simulation model §8) and the app gives the track tool the same
+ * height, so a plan's ends and its inner nodes agree over water too.
+ */
+export function groundMmAt(t: Terrain, a: Axial): number | undefined {
+  const o = offsetOfNode(t, a);
+  if (o === undefined) return undefined;
+  const i = o.row * t.columns + o.col;
+  const h = t.heightsDm[i] ?? 0;
+  return (t.water[i] === 1 && t.waterLevelDm > h ? t.waterLevelDm : h) * 100;
+}
+
+/**
  * Identity hash of a terrain: FNV-1a over its canonical parameters, then the
  * heights as little-endian Int16 bytes (explicitly, not the host's byte
  * order), then the water mask. 8 hex digits.

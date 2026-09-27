@@ -112,6 +112,12 @@ export interface NodeEntry {
 /** Incremental lookups over the committed pieces; only commits change them. */
 export interface TrackIndex {
   readonly nodes: Map<string, NodeEntry[]>;
+  /**
+   * The heights of the committed nodes at each lattice position, keyed "q,r":
+   * ascending and distinct (a bridge over a track holds two). The planner pins
+   * its node heights to them.
+   */
+  readonly heights: Map<string, number[]>;
   readonly clearance: ClearanceIndex;
 }
 
@@ -132,9 +138,35 @@ export function resolveStructure(choice: StructureChoice): Structure {
 }
 
 export function createTrackIndex(pieces: Iterable<Piece> = []): TrackIndex {
-  const index: TrackIndex = { nodes: new Map(), clearance: createClearanceIndex() };
+  const index: TrackIndex = { nodes: new Map(), heights: new Map(), clearance: createClearanceIndex() };
   for (const p of pieces) indexAdd(index, p);
   return index;
+}
+
+const NO_HEIGHTS: readonly number[] = Object.freeze([]);
+
+/** The committed node heights at lattice position (q, r), ascending; empty where no track is. */
+export function heightsAt(index: TrackIndex, q: number, r: number): readonly number[] {
+  return index.heights.get(`${q},${r}`) ?? NO_HEIGHTS;
+}
+
+function addHeight(index: TrackIndex, n: NodeRef): void {
+  const k = `${n.q},${n.r}`;
+  const list = index.heights.get(k);
+  if (!list) {
+    index.heights.set(k, [n.zMm]);
+    return;
+  }
+  let i = 0;
+  while (i < list.length && (list[i] ?? 0) < n.zMm) i++;
+  if (list[i] !== n.zMm) list.splice(i, 0, n.zMm);
+}
+
+function removeHeight(index: TrackIndex, n: NodeRef): void {
+  const k = `${n.q},${n.r}`;
+  const rest = (index.heights.get(k) ?? []).filter((z) => z !== n.zMm);
+  if (rest.length > 0) index.heights.set(k, rest);
+  else index.heights.delete(k);
 }
 
 export function indexAdd(index: TrackIndex, piece: Piece): void {
@@ -143,7 +175,10 @@ export function indexAdd(index: TrackIndex, piece: Piece): void {
     const list = index.nodes.get(k);
     const entry = { key: piece.key, outward: end.outward };
     if (list) list.push(entry);
-    else index.nodes.set(k, [entry]);
+    else {
+      index.nodes.set(k, [entry]);
+      addHeight(index, end.node);
+    }
   }
   index.clearance.insert(piece);
 }
@@ -153,7 +188,10 @@ export function indexRemove(index: TrackIndex, piece: Piece): void {
     const k = nodeKey(end.node);
     const rest = (index.nodes.get(k) ?? []).filter((e) => e.key !== piece.key);
     if (rest.length > 0) index.nodes.set(k, rest);
-    else index.nodes.delete(k);
+    else {
+      index.nodes.delete(k);
+      removeHeight(index, end.node);
+    }
   }
   index.clearance.remove(piece.key);
 }

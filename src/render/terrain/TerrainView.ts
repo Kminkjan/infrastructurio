@@ -1,5 +1,5 @@
 import { Group, type Material, Mesh } from "three";
-import type { Terrain } from "../../core/terrain";
+import type { Terrain } from "../../core/sim/api";
 import type { WorldBox } from "../art/shadowFit";
 import type { TerrainLod } from "./offsetGrid";
 import { buildChunkData, buildWaterData, chunkCounts, terrainHeightRangeM, terrainWorldBounds, toBufferGeometry } from "./terrainGeometry";

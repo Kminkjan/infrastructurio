@@ -1,9 +1,14 @@
 # src/render — imperative Three.js presentation
 
 Status 2026-09-26: `coords.ts`, `camera/`, `core/`, `terrain/` and `art/` (+ tests) exist
-(D1: slices R0–R1); the D11a branch adds `scenery/`, `labels/`, `camera/bookmarks.ts` and the
+(D1: slices R0–R1); D11a adds `scenery/`, `labels/`, `camera/bookmarks.ts` and the
 art pipeline (`AssetRegistry`, `materials`, shader chunks, vignette, tweak panel) for the
-static diorama (R3, Look Gate A not yet held); `src/app/main.ts` wires them. ADR 0009 (**Accepted**, owner, 2026-09-26)
+static diorama (R3; Look Gate A held 2026-09-26, partial: legibility pending). Status 2026-09-27, D3
+(arriving with PR #82): `track/` (track meshes behind `TrackBatch`, the ghost, rejection
+highlight, undo flash, snap ring), `picking/trackPicker.ts`, three track materials and the
+`trackStripe` chunk (R2, R4 presentation); `CameraController` attaches no listeners, since
+`src/app/InputRouter.ts` owns input and offers gestures to the camera first. `src/app/main.ts`
+wires them. ADR 0009 (**Accepted**, owner, 2026-09-26)
 fixes the renderer, camera, coordinate convention, render-on-demand and React outside the
 frame loop; ADR 0013 (art pipeline) is Proposed. `three` is pinned at 0.185.1 (r185).
 Targets: [art direction](../../docs/art-direction.md), [architecture](../../docs/architecture.md).
@@ -22,8 +27,8 @@ The critical rules below stand alone; repo-wide rules are in the root [CLAUDE.md
   alpha = acc/100 clamped at 1, so a train never visibly overshoots a red signal.
 - **Imports:** `three` (and `three/addons/…`), `core/sim/api.ts` types, and the pure
   `core/geometry/sample.ts`, the single source of curve maths (never re-derive arcs here).
-  **Never `src/ui`** (enforced by `tests/architecture.test.ts`). The core limit is convention
-  until the scan is extended: if you need another core helper, export it through `sim/api.ts`.
+  **Never `src/ui`**, and no other core module (both enforced by `tests/architecture.test.ts`,
+  the core limit since D3): if you need another core helper, re-export it through `sim/api.ts`.
 - **React stays outside the frame loop:** publish to UI stores on change, never per frame.
 
 ## Single sources
@@ -67,7 +72,11 @@ The critical rules below stand alone; repo-wide rules are in the root [CLAUDE.md
 
 - **Instance and batch:** `InstancedMesh` per vehicle or tree type; track as three
   `BatchedMesh`es (ballast, sleepers, rails) behind a `TrackBatch` interface, with a
-  chunk-merged fallback when multi-draw is missing.
+  chunk-merged fallback when multi-draw is missing (`?trackBatch=chunked` forces it for checks).
+  Track geometry is baked per piece in world space, keyed by canonical piece key.
+- **Overlay geometry that changes** (ghost, highlight, flash, drop lines) gets a fresh
+  `BufferGeometry` per change and the old one disposed: three frees GPU buffers on geometry
+  disposal, not when an attribute is swapped.
 - **After moving instances,** set `instanceMatrix.needsUpdate = true` and call
   `computeBoundingSphere()` (and `computeBoundingBox()` if used): stale bounds cull or
   mis-pick them.
@@ -85,7 +94,9 @@ The critical rules below stand alone; repo-wide rules are in the root [CLAUDE.md
 In order: (1) screen-space handles within 14 px (drawn at 6–8 px); (2) proxy raycast in a
 never-rendered `pickScene` with layer bits TERRAIN, TRACK, DECK, TUNNEL, SIGNAL, STATION,
 DEPOT, TRAIN, filtered by the active tool; (3) track centreline within 10 px; (4) analytic
-heightfield ray march. Never raycast the visual meshes.
+heightfield ray march. Never raycast the visual meshes. D3 (`picking/trackPicker.ts`) does
+existing nodes within 14 px, then (3) and (4), measuring on screen at track height so elevated
+track picks where it is drawn; handles and the proxy scene arrive with R5.
 - **Occlusion aids are required:** H hides decks, U gives an underground x-ray, C cycles
   stacked hits, and an EntityList offers keyboard targets. ADR 0004's lesson: depth alone
   didn't solve occluded picking; a layer filter plus a keyboard list did.

@@ -6,6 +6,7 @@ import { type EdgeFadeUniforms, createEdgeFadeChunk, createEdgeFadeUniforms, haz
 import { createFoliageTintChunk } from "./shaderChunks/foliageTint";
 import { type GrainUniforms, GRAIN_AMOUNT, createGrainChunk, createGrainUniforms } from "./shaderChunks/grain";
 import { type SplatUniforms, createSplatChunk, createSplatUniforms, syncSplatColors } from "./shaderChunks/splat";
+import { type TrackStripeUniforms, createTrackStripeChunk, createTrackStripeUniforms } from "./shaderChunks/trackStripe";
 import { type WindSwayUniforms, SWAY_AMPLITUDE_M, createWindSwayChunk, createWindSwayUniforms } from "./shaderChunks/windSway";
 
 /**
@@ -18,8 +19,9 @@ import { type WindSwayUniforms, SWAY_AMPLITUDE_M, createWindSwayChunk, createWin
  * lattice first and these chunks after it), foliage, built (walls, roofs,
  * trim, metal and sails share one combination, so a chunk merges them into
  * one draw), glass and props. Flat shading: foliage, built (roofs) and props;
- * terrain stays smooth. Track (D3: ballast, sleepers, rails), steam and
- * vehicles bring the total to about the dozen ADR 0013 plans.
+ * terrain stays smooth. D3 adds the three track materials (ballast with the
+ * far-LOD stripe, sleepers, rails), nine in all; steam and vehicles bring the
+ * total to about the dozen ADR 0013 plans.
  */
 
 export interface ArtUniforms {
@@ -111,4 +113,40 @@ export function materialForSlot(m: WorldMaterials, slot: MaterialSlot): MeshLamb
     default:
       return m.built;
   }
+}
+
+export interface TrackMaterials {
+  readonly ballast: MeshLambertMaterial;
+  readonly sleepers: MeshLambertMaterial;
+  readonly rails: MeshLambertMaterial;
+  readonly stripe: TrackStripeUniforms;
+  readonly all: readonly MeshLambertMaterial[];
+  dispose(): void;
+}
+
+/**
+ * Track materials (art direction "Track"): vertex-coloured Lambert with the
+ * geometry's own normals. Ballast and sleepers take the grain; rails stay
+ * clean so the steel reads smooth. All fade into the haze at the map edge.
+ */
+export function createTrackMaterials(u: ArtUniforms): TrackMaterials {
+  const stripe = createTrackStripeUniforms();
+  const ballast = new MeshLambertMaterial({ vertexColors: true });
+  installChunks(ballast, [createTrackStripeChunk(stripe), createGrainChunk(u.grain), createEdgeFadeChunk(u.edge)]);
+  const sleepers = new MeshLambertMaterial({ vertexColors: true });
+  installChunks(sleepers, [createGrainChunk(u.grain), createEdgeFadeChunk(u.edge)]);
+  const rails = new MeshLambertMaterial({ vertexColors: true });
+  installChunks(rails, [createEdgeFadeChunk(u.edge)]);
+  const all = [ballast, sleepers, rails];
+  for (const [m, name] of [[ballast, "ballast"], [sleepers, "sleepers"], [rails, "rails"]] as const) m.name = name;
+  return {
+    ballast,
+    sleepers,
+    rails,
+    stripe,
+    all,
+    dispose: () => {
+      for (const m of all) m.dispose();
+    },
+  };
 }

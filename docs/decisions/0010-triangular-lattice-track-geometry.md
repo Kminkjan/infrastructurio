@@ -330,6 +330,577 @@ on macOS (Apple M5 Pro); the status of this ADR stays Proposed.
   and vertical clearance (D4), turnouts and diamonds (D5), any behaviour under traffic (D10), or
   that clearance decisions at exact thresholds match across JavaScript engines.
 
+## Findings (2026-09-27, D3 planner)
+
+Recorded while implementing D3's core half on branch `codex/d3-planner`
+([#67](https://github.com/Kminkjan/infrastructurio/issues/67);
+[`src/core/track/planner.ts`](../../src/core/track/planner.ts) and
+[`planner.test.ts`](../../src/core/track/planner.test.ts)). Automated evidence only, Vitest
+4.1.10, Node 26.7.0 on macOS (Apple M5 Pro); the status of this ADR stays Proposed.
+- **Decision 7 needed no template change.** The planner reads the D2 template table as it
+  is. Every solve is exact integer arithmetic on axial offsets, and a plan is the
+  `PieceSpec[]` that `build-track` carries. The contract types from commit `0dd6e90`
+  (`Drag`, `TrackPlan`, `PlanFit`, `PlanPointMm`) are unchanged.
+- **Candidates, exact:** 51 per primary start heading and 75 per secondary one (one
+  straight run, 48 or 72 curves, 2 shifts), not "about 100". A shift fixes only n + m, so
+  it is offered first and last. Two-bend fits (into ports only) are curve + curve, with any
+  two turns summing to the heading change, or two shifts to one side (two rows). For each
+  template pair the non-negative solutions lie on one line with period |det| ≤ 3, and the
+  length is affine along it, so the shortest comes in closed form.
+- **Choices this ADR left open** (defaults to test; the full list is in the
+  [simulation model §8, "As built"](../simulation-model.md#8-planner)):
+  - **Start heading d0:** the drag's own when set. At an existing buffer end, the nearer of
+    continuing and retracing: forcing the continuation made dragging back over existing
+    track (reuse) impossible. Otherwise the heading nearest the drag direction.
+  - **Target:** the pointer's nearest node when some candidate reaches it, so the plan
+    ends under the snap ring. Otherwise the nearest reachable node, by an exact ring search
+    of up to 12 rings (about 52 m). Otherwise an empty plan with a note.
+  - **Selection:** validity is checked lazily, on at most 8 candidates in rank order, with
+    structure `auto`. "Fewer bends" comes before "largest radius"; that changes nothing
+    for single-bend pools and ranks two-bend fits last. Ties then go to the earlier bend,
+    then a canonical signature. Shifts keep their fixed 82.3 m or 95 m radius and ignore
+    the cap.
+  - **Magnetism:** tries buffer ends within 3 hex nodes of the pointer's node, nearest
+    first. It skips `from` and any port that no one- or two-bend fit reaches. The end takes
+    the port's height and must arrive on the port's heading.
+- **Validity never moves the target.** Hopping to a valid node elsewhere would pull the
+  end away from the pointer and hide the reason. Instead the plan follows the pointer and
+  `preview` explains. Example (a unit test): an S-bend 12 rows over needs at least
+  32 q-steps. With 30 left, magnetism skips the port, the free plan ends on the port's node
+  at 30°, and preview rejects it as `kinked-join`.
+- **Follow, measured** (not the feel). Pointers were within ±60° of the start heading at
+  40–200 m, 425 per start mode (`planner.test.ts`, `--reporter=verbose`):
+
+  | Start heading | End on the pointer's node | Median | p95 | Max |
+  |---|---|---|---|---|
+  | 0 (fixed) | 81.2% | 2.00 m | 20.12 m | 30.41 m |
+  | 1 (fixed) | 76.7% | 2.00 m | 20.63 m | 30.06 m |
+  | free | 91.1% | 1.77 m | 3.40 m | 4.37 m |
+
+  With a fixed heading, the misses lie inside the 60 m minimum-radius turning circle,
+  which one bend cannot reach. As the pointer crosses into reach, the end can jump more
+  than 10 m: an uncommitted probe stepping the pointer 1 m at a time found 36 such jumps
+  among 1,468 end moves (heading 0).
+- **Selection in practice** (an uncommitted probe over every target within ±60 nodes for
+  free ends and ±30 nodes for ports). For free ends, radius, length and bend placement
+  decided between the top two candidates. For ports, bends, radius, length, placement and
+  the signature decided (the signature: two variants swapped at equal length). |turn| and
+  left before right never decided the top two, so a direct comparator test holds them.
+- **Performance, a dev measurement and not a gate.** One run of
+  [`sim/perf.test.ts`](../../src/core/sim/perf.test.ts) with `--reporter=verbose`, over
+  4,900 existing pieces on the default map:
+  - `planTrack`, 184 fixed drags × 3 passes: median 0.086 ms, p95 0.450 ms, max 1.193 ms
+    (n = 552);
+  - `preview` of the planned pieces: median 0.030 ms, p95 0.105 ms, max 0.647 ms
+    (n = 528);
+  - the worst case the validation cap allows (every candidate validated, at most 8, of a
+    plan over 100 pieces rejected by clearance): median 1.755 ms, p95 2.395 ms, max
+    2.731 ms (n = 40).
+
+  Magnetism scans every node of the track index on each call (about 5,000 at the piece
+  cap), with no cache. The gate numbers are D12's (preview p95 ≤ 4 ms, gate B3).
+- **Not established:**
+  - that dragging feels right (the owner's D3 feel check, human only);
+  - the ghost, tool and tooltip integration (the render half);
+  - how D4's grade and terrain rules change which candidates are valid (today "valid"
+    covers D2's rules, and `auto` resolves to ground);
+  - joining at turnouts (D5);
+  - timings on the gate hardware, or agreement across JavaScript engines.
+
+## Findings (2026-09-27, D3 height pinning)
+
+Recorded on branch `codex/d3-construction-tool`
+([#82](https://github.com/Kminkjan/infrastructurio/pull/82);
+[#67](https://github.com/Kminkjan/infrastructurio/issues/67)). Automated evidence only,
+Vitest 4.1.10, Node 26.7.0 on macOS 26.6.2 (Apple M5 Pro); the status of this ADR stays
+Proposed.
+- **Defect.** The planner split a drag's height change over the whole path. Where the drag
+  overlapped sloped existing track, the shared inner nodes came out millimetres off the
+  existing heights. Node identity includes z, so the overlapping pieces missed their keys,
+  and the plan was rejected (`kinked-join` or `tracks-too-close`) instead of reusing them.
+  Endpoint-to-endpoint reuse already worked: the start is the existing node, and the tool
+  snaps the end height.
+- **Rule (a default to test).** Walking from the start, an inner node where the authored
+  track has nodes takes one of their heights. It must lie within 6.5 m (the clearance
+  height) of the line, by length, from the last pinned node to the end.
+  - Nearer than that the plan would clash anyway. From 6.5 m on it passes over or under
+    (a grade separation) and keeps its own height; 6.5 m exactly counts as clear, as in
+    the clearance rule.
+  - Between consecutive pins (start, pinned nodes, end) the rise is split by length with
+    largest remainder, as before.
+  - The start and end heights, `Drag` and `TrackPlan` are unchanged.
+- **Several heights at one (q, r)** (a bridge over track, possible from D4). First wins:
+  the height whose incoming piece, from a pinned previous node, already exists; then one
+  whose outgoing piece, to an existing height at the next node or the end, already exists;
+  then the nearest to the line; then the lower. Only the authored heights and the path
+  decide, so the choice does not depend on build order.
+- **Index.** The track index now keeps the committed node heights per (q, r)
+  incrementally (`heightsAt` in [`track/validate.ts`](../../src/core/track/validate.ts)).
+  The planner looks up piece keys only when two or more heights are in reach.
+- **Tests (automated).**
+  - Eight new planner tests: a sloped extension (8 reused, 3 new), a partial retrace from
+    outside the run (6 reused, 4 new), the split between pins, the 6.5 m boundary, both
+    multi-height rules, build order with undo and redo, and a seeded property. In 150 runs
+    the property saw 65 retraces of random sloped chains, 52 of them extending the chain,
+    all at the chain's heights. There is also one index test.
+  - The seven sloped cases and both seeded properties on existing track (level and sloped)
+    fail on the previous planner.
+- **Performance, a dev measurement and not a gate.** Three runs each of
+  [`sim/perf.test.ts`](../../src/core/sim/perf.test.ts) before and after, on the same
+  machine. The two ranges overlap:
+  - `planTrack` median: 0.083–0.085 ms before, 0.084–0.088 ms after;
+  - worst-case median: 1.720–1.912 ms before, 1.749–1.972 ms after.
+- **Not established:**
+  - the feel of dragging over existing track (the owner's D3 feel check);
+  - D4's grade rule. A pin can make the pieces beside it steeper than the drag's average,
+    and D4 will reject pieces over 35‰;
+  - a later pin moving an earlier node. The line runs to the end because the next pin is
+    not yet known on the walk. A later pin can therefore move an unpinned node's final
+    height back within 6.5 m of existing track, where it clashes. No test builds that case;
+  - multi-height layouts beyond the constructed tests. D3 builds them only as level track
+    6.5 m or more above other track (`auto` resolves to ground).
+
+## Findings (2026-09-27, D3 review: the two-bend solve)
+
+Recorded after the code review of [#82](https://github.com/Kminkjan/infrastructurio/pull/82);
+automated evidence only. It corrects the D3 planner section's two-bend sentence, which stays
+as written above.
+- **The period divides |det|; it is not |det| itself.** For each template pair the
+  non-negative solutions lie on one line, and the length is affine along it, so the shortest
+  fit sits at one end of the feasible interval. The first version stepped by |det| and could
+  miss that end. With three secondary headings (for example 1 → 3 → 5) every step is
+  feasible, so some 60° + 60° joins came out up to two straights (17.3 m) longer than the
+  shortest: D = 5a + 5c gave (2, 3, 2), 7 steps, instead of (0, 5, 0).
+- **Now:** `solveThree` scans at most |det| values inward from each end of the feasible
+  interval. A brute-force oracle over every turn pair (8,378 solvable cases,
+  [`planner.twoBend.test.ts`](../../src/core/track/planner.twoBend.test.ts)) checks the
+  shortest fit; it also caught the 1 → 11 → 9 triple.
+- **Not established:** whether the shorter joins change how port joins feel; that is the
+  owner's check.
+
+## Findings (2026-09-27, D3 ground following)
+
+Recorded on branch `codex/d3-construction-tool`
+([#82](https://github.com/Kminkjan/infrastructurio/pull/82);
+[#67](https://github.com/Kminkjan/infrastructurio/issues/67)). Measurements are automated
+evidence only, Vitest 4.1.10, Node 26.7.0 on macOS 26.6.2 (Apple M5 Pro). The status of this
+ADR stays Proposed: the owner decision below sets D3's height rule, and it accepts no ADR.
+- **Owner decision (2026-09-27, as relayed to the implementing agent).** In D3, track
+  follows the ground. It sits on the terrain at every node, and `[` `]` still raise or lower
+  it. The 35‰ grade rule, earthworks, bridges and tunnels come in D4, which will revisit
+  this. Following the ground exceeds 35‰ on this terrain, which is accepted for D3 because
+  validation has no grade rule yet.
+- **Defect.** The tool set only the end heights from the ground, and the planner spread the
+  height change linearly between pins, so hills between the ends swallowed the track.
+  - Probe on the diorama map (seed `"baltic-diorama"`, 400 × 346 nodes, generator version
+    2): 2,000 random straight drags of 10–40 steps on all 12 headings, both ends on the
+    ground, starts at least 300 m inside the map, PRNG seed `ground-probe`.
+  - Before, over 52,267 nodes: 24.1% lay more than 1 m and 9.5% more than 3 m below the
+    ground, and 23.1% more than 1 m above it. 45.6% of drags dipped more than 1 m, and the
+    worst node lay 24.8 m under.
+  - That agrees with the figures relayed with the decision (24%, 9%, 43% of drags, worst
+    14 m; their seed is not recorded here).
+- **Rule.** Each node's height is the ground there plus an offset. The mechanism follows
+  the decision; the details are defaults to test.
+  - The ground is `groundMmAt` in [`terrain.ts`](../../src/core/terrain.ts), exported
+    through `sim/api`: the terrain height (dm × 100), or the water surface where it lies
+    above a water node's bed. The app gives the track tool the same function, so a plan's
+    ends and inner nodes agree, over water too.
+  - The planner interpolates the offset, not the absolute height, between pins (the start,
+    the existing-node height pins, the end) by cumulative length, with largest-remainder
+    rounding as before. With both ends on the ground and no pin, every node lies on it; a
+    raised end ramps the offset from the start's to the end's.
+  - Height pinning keeps its 6.5 m rule. The reference is now the ground plus the offset on
+    the line from the last pin to the end, so overlaps with existing track are still
+    reused. A node off the map takes the ground of the nearest on-map node along the path.
+  - `Drag`, `TrackPlan`, commands and keys are unchanged, and no field was added. `dzMm`
+    still fixes only the end (`from.zMm + dzMm`, or a snapped port's height). No optional
+    linear profile was kept: nothing in D3 uses it, and D4 reopens the profile anyway.
+  - On flat terrain the profile is exactly the old one. All the flat-map drag cases,
+    height-pinning cases and properties pass unchanged.
+- **After (automated).**
+  - The same probe finds all 52,267 nodes exactly on the ground: none below, none above.
+  - 50.5% of its 50,267 pieces exceed 35‰, against 38.3% on the old, smoother but
+    underground profile.
+  - A committed probe in [`planner.test.ts`](../../src/core/track/planner.test.ts) plans 400
+    straight and free drags with zero height steps, re-planning the end onto the ground as
+    the tool does. All 6,882 of their nodes lie on the ground, and 50.0% of 6,526 pieces
+    exceed 35‰.
+- **Tests.**
+  - Five new planner tests:
+    - a drag over a ridge on the ground at every node;
+    - the offset ramped by a raised end and down from a raised start;
+    - existing-node pins on hilly ground, reused, with the offset ramped between pins;
+    - a seeded property on rolling hills, which pinned in 15 of 150 runs when written;
+    - the diorama probe.
+  - One `groundMmAt` test, one render-lift ordering test, and the render-lift measurement
+    below as an annotated dev test with loose guards.
+  - The property helper now checks ground plus offset, which equals the old check on flat
+    maps.
+  - Changed because they assumed linear interiors on seeded terrain:
+    - the contract test now starts and ends on the ground, and its label reads the
+      steepest ground piece (10.0%);
+    - the track tool test's `flat` session now runs a flat sim. It used to report flat
+      ground over seeded terrain that the planner now follows.
+  - The track picker tests now aim with the exported `PICK_LIFT_M`.
+- **Limit: pieces carry one grade each, so only nodes follow the ground.** A curve or shift
+  is a single piece, so its interior still runs straight in height between its two end
+  nodes (§6 grade).
+  - In the render measurement below, curves were a median 68 m long, up to 200 m. 13.8% of
+    curve centreline samples lay more than 1 m under the terrain (worst 14.6 m), and 11.8%
+    more than 1 m above it.
+  - Shifts (43.7 m) had 1.2% more than 1 m under and 2.0% more than 1 m above.
+  - Before the change, curve samples had 23.6% under and 21.4% above.
+  - No render lift can hide this. D4's earthworks (render-only cuttings and embankments), or
+    a different way for curves to carry height, would have to.
+- **Render lift (visual only; sim heights untouched).** How it was measured, in
+  [`render/track/trackLift.test.ts`](../../src/render/track/trackLift.test.ts). The suite
+  runs it at 300 plans; the numbers here are from the same code at `PLANS = 3000`:
+  - 3,000 plans with zero height steps, as the tool makes them: half straight drags of
+    10–40 steps, half free drags within ±150 m, ends re-planned onto the ground. That gave
+    53,871 pieces.
+  - Each piece's rendered centreline (the track meshes' own sampling) was resampled every
+    0.25 m.
+  - At each sample, the visible surface was compared with the track height. The surface is
+    the LOD0 lattice-triangle terrain, or the water plane where that is higher. The
+    comparison ran across the track at u = 0, ±0.817 m (rails), ±1.3 m (ghost ribbon edge),
+    ±1.6 m (ballast top edge) and ±2.2 m (shoulder base).
+  - On straights, where node following applies, the centreline never dips under the
+    surface on primary headings, and at most 0.29 m on secondary ones. At the rails the
+    terrain rises above the track height by at most 0.39 / 0.41 m at p99.9 (primary /
+    secondary), and by at most 0.52 / 0.57 m overall.
+
+  | Lift | Rail-top samples buried (primary / secondary) | Ballast-top edge buried | Gap > 5 cm under the shoulder (floating) |
+  |---|---|---|---|
+  | 0.05 m (before) | 0.271% / 0.262% | 28.4% / 27.9% | 3.1% / 3.3% |
+  | 0.10 m | 0.070% / 0.124% | 13.6% / 14.0% | 3.8% / 4.1% |
+  | **0.15 m (chosen)** | **0.007% / 0.055%** | **6.4% / 8.0%** | **5.2% / 5.6%** |
+  | 0.20 m | 0.002% / 0.018% | 4.1% / 4.6% | 8.1% / 8.3% |
+  | 0.25 m | 0.000% / 0.001% | 2.9% / 3.3% | 13.6% / 12.8% |
+
+  - **Chosen: 0.15 m** (`TRACK_LIFT_M` in
+    [`render/track/trackGeometry.ts`](../../src/render/track/trackGeometry.ts)), which puts
+    the rail tops at 0.45 m.
+    - It is the knee of the table. 0.02% (primary) and 0.18% (secondary) of straight pieces
+      keep any buried rail-top sample, against 0.63% and 0.77% at 0.05 m.
+    - Ballast-top edges still sink where the terrain slopes up across the track, which reads
+      as track cut into a hillside.
+    - On flat ground the 0.35 m ballast keeps its shoulders 0.2 m below the surface. Gaps
+      open only on the downhill side of cross slopes. 0.20 m would add little for the rails
+      and float more.
+  - **No depth bias.** A polygon offset shifts depth by far less than decimetres here. Big
+    enough to matter, it would also draw track over terrain that really hides it.
+  - **Derived lifts,** which keep overlays and picking on the drawn rails:
+    - The ghost ribbon moves from 0.4 m to 0.5 m, 5 cm over the rail tops, so a reused
+      (cyan) piece still shows over built track. The ribbon edge is hidden on 0.51% /
+      0.42% of straight samples, against 1.10% at 0.4 m.
+    - The snap ring stays at 0.6 m, now derived as the ribbon + 0.1 m.
+    - The track picker aims 0.4 m up (0.3 m before), still 5 cm under the rail tops, so
+      nodes and centrelines pick where they are drawn.
+    - The terrain ray march and the snap ring's node anchoring read sim heights and are
+      unchanged. A test holds the order ballast top < pick aim < rail tops < ribbon < ring.
+  - **Whole population, curves included:** 4.6% of rail-top samples are buried at 0.15 m
+    and 5.4% at 0.05 m. With the old profile at 0.05 m it was 36.5%.
+  - **Ghost marks:** zero-step plans that show drop lines and end-height tags fell from
+    1,525 to 348 of 3,000. Those that remain are curves more than 0.5 m over a hollow;
+    straights never float more than 0.41 m between nodes.
+  - The ghost's drop lines and tags now measure from the water surface over water (in
+    `src/app/main.ts`), as the tool's ground does.
+- **Agent browser check (Playwright captures in headless Chrome, same machine; agent
+  evidence, not the owner's feel check or a Look Gate).**
+  - A 30-piece straight was dragged with the real pointer across a hill 7.1 m above its
+    higher end. Built, it lies on the ground at 6, 14 and 24 ppm, and at yaw 0° and 60°. The
+    rails show along its whole length, with no gap visible under the ballast.
+  - The tooltip read "Grade 34.0 %" (red) for its steepest piece, which is truthful.
+  - In the D3 manual capture set, the reused ribbon still draws over built track, and the
+    elevated ghost's tags and drop lines still draw.
+- **Performance, a dev measurement and not a gate.** Three runs each of
+  [`sim/perf.test.ts`](../../src/core/sim/perf.test.ts):
+  - `planTrack` median: 0.087–0.090 ms before, 0.088–0.092 ms after;
+  - worst-case median: 1.845–1.903 ms before, 2.033–2.263 ms after (about +10%, one terrain
+    lookup per node per candidate profile).
+- **Not established:**
+  - whether ground-following track feels or looks right: that is the owner's D3 feel
+    check, and the look is for the Look Gates;
+  - the far terrain LOD (LOD1, below 2 ppm), which was not measured. It is coarser, but
+    1 m there is under 2 px;
+  - how D4 treats the profile. Its grade rule would reject about half the pieces of a
+    ground-following drag on this map, so D4 needs smoothing, earthworks or structures.
+    This finding does not choose among them.
+
+## Findings (2026-09-27, D3 two-bend free drags)
+
+Recorded on branch `codex/d3-construction-tool`
+([#82](https://github.com/Kminkjan/infrastructurio/pull/82);
+[#67](https://github.com/Kminkjan/infrastructurio/issues/67)). Measurements are automated
+evidence, Vitest 4.1.10, Node 26.7.0 on macOS 26.6.2 (Apple M5 Pro); the e2e run is agent
+evidence (Playwright 1.63.0, Chrome 153). The status of this ADR stays Proposed: the owner
+decision below sets D3 planner behaviour and accepts no ADR.
+- **Owner decision (2026-09-27, after the D3 feel check, as relayed to the implementing
+  agent).** One drag should be able to turn beyond 90°. When no single bend reaches the
+  pointer, the planner fits two bends in one drag, up to 180° (hairpins, U-turns,
+  S-curves), reusing the two-bend machinery that until then served only port joins. The
+  relayed context: with a fixed start heading (chaining), pointers inside the 60 m turning
+  circle or behind the heading were out of reach, and 76.7–81.2% of pointers ended on their
+  node with a p95 offset of about 20 m (the D3 planner finding's table).
+- **Design.** The mechanism follows the decision; the details are defaults to test.
+  - **Fallback, not replacement.** Where a one-bend fit (straight, curve or shift) reaches
+    the pointer's node, the plan is exactly what it was. A golden hash in
+    [`planner.test.ts`](../../src/core/track/planner.test.ts) holds those plans: 2,131 of
+    5,760 drags (headings 0 and 1, a free start, and precision R 120; pointers every 5° all
+    around at 10–200 m), recorded at `211526f` before the change and unchanged after it.
+  - **Two bends at the pointer's node** otherwise: curve + curve with the end heading
+    free, d0 + t1 + t2 up to ±180°, or two shifts to one side. Each curve pair is solved in
+    closed form (`solveThree`); a cone test (two determinants) skips pairs whose straights
+    cannot reach, and only the best 8 are kept, since only 8 are ever validated.
+  - **Out of reach.** No fit of one or two bends (each at most 90°) reaches inside the
+    60 m turning circles beside the start, or behind it within 120 m (twice the smallest
+    radius) of its line. For those pointers:
+    - Behind the start: the U-turn end nearest the pointer, at any distance. It is found
+      exactly, by rounding each template pair's two square axes separately.
+    - Elsewhere: the nearest node that one or two bends reach, among those reaching at
+      least halfway to the pointer along the drag, by the 12-ring search; failing that, the
+      nearest U-turn end.
+    - Before, a pointer directly behind the start got a single straight ahead up to
+      45–55 m back, and nothing farther back (an uncommitted run on the previous planner).
+      The halfway rule keeps a pointer abeam inside a turning circle from getting such a
+      stub.
+  - **Rank of two-bend fits** (free end): valid → largest smaller radius → total turn
+    nearest the arc turn τ → shortest → smallest summed |turn| → left before right →
+    earlier first bend → signature. τ is the turn of the single circular arc that leaves
+    the start on d0 and passes through the pointer: twice the pointer's bearing, or ±180°
+    toward the pointer's side for a pointer abeam or behind. It needs no trigonometry: the
+    arc's end direction is the pointer offset squared as a complex number.
+  - **Precision.** A radius class applies to both bends. An end heading keeps the fits
+    that end on it: one bend when one reaches the target, else two (an S-curve back onto
+    d0, or a U-turn onto the opposite heading). With another end heading and nothing in
+    range, the plan is empty with the precision note, as before.
+  - **Unchanged:** `Drag`, `TrackPlan` (`fit: "two-bend"`, the end heading a chained drag
+    leaves with, `minRadiusM`, the label), magnetism and port joins (the cone test skips
+    only solves that return nothing), and the tool. Heights follow the ground as for any
+    plan: the diorama probe, whose fixed-heading drags behind their start are now U-turns,
+    found all 7,486 of its nodes on the ground (6,882 before).
+- **Choosing the rank** (an uncommitted probe, 2026-09-27): the 446 plans that end on the
+  pointer's node with two bends, for headings 0 and 1 and pointers every 5° all around at
+  20–200 m on a flat map, under three orders.
+
+  | Order | Smaller radius R 60 | Mean length | Pointers behind ending on a U-turn |
+  |---|---|---|---|
+  | Shortest first (the suggested order) | 100% | 241.1 m | 65.6% of 256 |
+  | Radius first, no τ | 81.6% | 250.4 m | 78.9% of 256 |
+  | **Radius first, then τ (chosen)** | **81.6%** | **256.5 m** | **100% of 256** |
+
+  - Shortest first gives the minimum radius every time, since a curvature-bounded
+    shortest path turns as tightly as it can: R 60 hairpins at 25 km/h with long
+    straights. Radius first matches the one-bend rule and gives wide loops.
+  - Without τ, 21% of pointers behind the start ended on 120° or 150° fits a little
+    shorter than the U-turn. τ costs 6.1 m (2.4%) of mean length.
+- **Follow, measured** (the committed forward-cone test: 425 pointers per start mode within
+  ±60° at 40–200 m; `--reporter=verbose`):
+
+  | Start heading | On the pointer's node | Median | p95 | Max |
+  |---|---|---|---|---|
+  | 0 (fixed) | 81.2% → 81.6% | 2.00 → 1.98 m | 20.12 → 20.12 m | 30.41 → 30.41 m |
+  | 1 (fixed) | 76.7% → 78.6% | 2.00 → 2.00 m | 20.63 → 20.63 m | 30.06 → 30.06 m |
+  | free | 91.1% → 93.9% | 1.77 → 1.76 m | 3.40 → 3.02 m | 4.37 → 4.37 m |
+
+  The fixed-heading misses in this cone lie inside the turning circle, which two bends
+  cannot reach either, so its p95 is unchanged.
+- **All around** (a new committed measurement: 1,224 pointers per start mode, every 5° at
+  40–200 m). Before, from the same grid on the previous planner (an uncommitted run):
+  - heading 0: 29.7% on the node, and 533 empty plans (43.5%);
+  - heading 1: 28.4%, and 568 empty (46.4%);
+  - free: 90.7%.
+
+  After, with no empty plan:
+
+  | Start heading | On the pointer's node | Median | p95 | Max |
+  |---|---|---|---|---|
+  | 0 (fixed) | 47.8% | 6.49 m | 105.73 m | 121.24 m |
+  | 1 (fixed) | 46.7% | 5.31 m | 104.51 m | 120.07 m |
+  | free | 93.6% | 1.83 m | 3.02 m | 4.37 m |
+
+  All 595 pointers behind each fixed heading end on a U-turn. The p95 of about 105 m is
+  the U-turn's width: a pointer behind the start within 120 m of its line gets an end up to
+  121 m to its side.
+- **Tests (automated).**
+  - Ten new drag-table cases: U-turns behind headings 0 and 1, a U-turn onto the pointer's
+    node, 120° and 150° turns, both out-of-reach fallbacks beside the start, and precision
+    with a radius class (a U-turn), with end heading d0 (an S-curve) and with the opposite
+    end heading (a U-turn).
+  - The golden hash, a rank test, determinism over build orders, and the all-around
+    measurement.
+  - Five oracles in
+    [`planner.twoBendFree.test.ts`](../../src/core/track/planner.twoBendFree.test.ts):
+    - τ against `atan2` over 2,160 bearings;
+    - the tabled reach test against finding a fit, at 33,492 nodes;
+    - the best-8 list against sorting every fit, over 1,014 pools;
+    - the best fit against plain enumeration without `solveThree`, and the planner's plan
+      equal to it, at 182 targets;
+    - the nearest U-turn end against enumeration, for 48 pointers.
+  - A two-bend-heavy case in [`sim/perf.test.ts`](../../src/core/sim/perf.test.ts).
+  - One Playwright e2e: after an 8-node run, a pointer 40 m behind the chain's end and 50 m
+    north gives a 10-piece U-turn (two R 60 bends and 8 straights) that one click builds.
+  - Changed: the empty-plan test, since a drag behind a fixed heading is no longer empty
+    (a precision end heading of 150° behind the start still is); the perf workload's
+    8 drags behind a fixed heading, now U-turns; and the generator counts quoted in
+    comments.
+- **Performance, a dev measurement and not a gate.** Three alternating runs each of
+  [`sim/perf.test.ts`](../../src/core/sim/perf.test.ts), before → after, on one machine
+  (load varies: the before runs are slower than the D3 planner finding's single run):
+  - `planTrack`, 184 fixed drags × 3 passes: median 0.089–0.106 → 0.110–0.128 ms, p95
+    0.526–0.587 → 0.517–0.594 ms, max 1.13–1.66 → 1.27–1.65 ms;
+  - `planTrack`, the two-bend-heavy case (348 drags × 3 passes, pointers behind the start
+    and inside its turning circle over 4,900 pieces): median 0.826–0.896 → 0.146–0.163 ms,
+    p95 1.209–1.326 → 0.839–0.868 ms, max 1.71–1.89 → 1.29–2.25 ms. Empty plans went from
+    178 of 348 to none (252 two-bend, 96 one-bend);
+  - `preview` of those plans after: median 0.016–0.017 ms, p95 0.063–0.065 ms, max
+    0.33–0.47 ms;
+  - the worst case the validation cap allows (the same one-bend workload): median
+    2.01–2.88 → 1.84–1.87 ms, p95 2.81–4.67 → 2.34–2.96 ms.
+
+  The costliest fallback, about 1 ms, is the 12-ring search over the turning circle's
+  interior: one table of up to 4,320 curve pairs per call, plus the one-bend test at each
+  ring node. A U-turn behind the start costs less than the old empty search did. No cache
+  was added. The gate numbers stay D12's (preview p95 ≤ 4 ms, gate B3).
+- **Not established:**
+  - whether two bends in one drag feel right: that is the owner's feel check;
+  - inside the turning circle nothing changed. Reaching there needs more than 180° of
+    turn (a loop), beyond this decision;
+  - a pointer one node behind the start already gets a U-turn about 120 m wide. The plan
+    jumps from a bend ahead to a U-turn as the pointer crosses the start's square line;
+  - lattice gaps: where one bend misses the pointer's node by a node, two bends now reach
+    it. In the forward cone that is 12 of 425 free drags, and 2 and 8 with headings 0 and
+    1. They take two R 60 or R 90 bends, mostly as a kink (30° one way, then 60° the
+    other), where one bend used to end a node away (at most 4.4 m for the free drags).
+    Preferring one bend a ring away would be the alternative;
+  - the chosen order differs from the suggested one (shortest before radius); the halfway
+    rule and τ are new heuristics;
+  - timings on the gate hardware, or agreement across JavaScript engines.
+
+## Findings (2026-09-27, D3 one bend a node off)
+
+Recorded on branch `codex/d3-construction-tool` at `c74f36a`
+([#82](https://github.com/Kminkjan/infrastructurio/pull/82);
+[#67](https://github.com/Kminkjan/infrastructurio/issues/67)). Measurements are automated
+evidence, Vitest 4.1.10, Node 26.7.0 on macOS 26.6.2 (Apple M5 Pro); the e2e run is agent
+evidence (Playwright 1.63.0, Chrome 153). The status of this ADR stays Proposed: the owner
+decision below sets D3 planner behaviour and accepts no ADR.
+- **Owner decision (2026-09-27, as relayed to the implementing agent): "Prefer one bend, a
+  node off".** "Only use two bends when no single bend lands within ~1 node of the pointer;
+  smoother track, end sits up to ~5 m from the cursor." It takes the alternative that the
+  two-bend free-drag finding named under "Not established": where one bend missed the
+  pointer's node by a lattice step, two bends landed on it with a small kink.
+- **Design.** The rule follows the decision; the details are defaults to test.
+  - **Order:** one bend on the pointer's node N (unchanged) → one bend on a node of ring 1
+    → two bends on N → the existing fallbacks (behind the start the nearest U-turn end,
+    elsewhere the halfway ring search, then the nearest U-turn end).
+  - **Ring 1 is N's six neighbours, 5 m from N,** so the end lies under 7.64 m from the
+    pointer. The six nodes one secondary step (8.66 m) from N are left out: they would put
+    the end up to 11.5 m off, well past the owner's "about 5 m", and ring 1 alone resolved
+    every kink below.
+  - **Choice:** nearest to the pointer first. Ring 1 is a single ring, so the plan distance
+    decides; it is the float distance the snapping already uses, for choosing only, so the
+    plan stays integer and no trigonometry is added. The fits of every neighbour at exactly
+    that distance then go through the single-bend selection unchanged (valid → radius →
+    length → …). Distance comes before validity, so validity never moves the end to a
+    farther neighbour, as it never moves any target.
+  - **The halfway rule** of the ring search applies to ring 1 too (it also excludes the
+    start). It only bites for pointers within about 15 m of the start.
+  - **Precision** follows the same rule, with the neighbours' fits restricted to its radius
+    class and, when set, its end heading, exactly as at N. It fits naturally: one candidate
+    function serves both.
+  - **Unchanged:** every plan that one bend reaches exactly (the golden hash in
+    [`planner.test.ts`](../../src/core/track/planner.test.ts), 2,131 plans, passes as
+    recorded at `211526f`), `Drag` and `TrackPlan`, magnetism and port joins, the two-bend
+    rank and the fallbacks, and the tool.
+- **The kinks (automated).** The committed forward-cone sweep had 22 plans with two bends
+  on the pointer's node (an uncommitted probe at `c699393` listed them): 12 free drags and
+  6 with heading 1 were kinks (30° one way, then 60° back, at R 60 or R 90), and 4 at
+  ±60°, 110 m with headings 0 and 1 were 120° turns of two 60° bends. Each is now a single
+  bend on the nearest neighbour one bend reaches, 3.03–5.63 m from the pointer (median
+  3.78 m; the free drags at most 4.12 m; the 120° turns become 90° bends 5.00–5.63 m
+  off). The probe found these the same pieces the planner gave at `211526f`, before the
+  two-bend fallback.
+- **Follow, measured** (the committed forward-cone test, 425 pointers per start mode within
+  ±60° at 40–200 m; `--reporter=verbose`), before → after:
+
+  | Start heading | On the pointer's node | Median | p95 | Max | Two-bend plans (on the node) |
+  |---|---|---|---|---|---|
+  | 0 (fixed) | 81.6% → 81.2% | 1.98 → 2.00 m | 20.12 → 20.12 m | 30.41 → 30.41 m | 4 (2) → 2 (0) |
+  | 1 (fixed) | 78.6% → 76.7% | 2.00 → 2.00 m | 20.63 → 20.63 m | 30.06 → 30.06 m | 12 (8) → 4 (0) |
+  | free | 93.9% → 91.1% | 1.76 → 1.77 m | 3.02 → 3.40 m | 4.37 → 4.37 m | 12 (12) → 0 (0) |
+
+  - The after values equal those before the two-bend fallback (the previous finding's
+    "before" column): those pointers end where they did then.
+  - The two-bend plans left in the cone are 120° turns toward pointers inside the turning
+    circle (the ring search), unchanged.
+  - The "before" two-bend counts come from the probe; the committed test counts them since
+    this change.
+- **All around** (the committed measurement, 1,224 pointers per start mode, every 5° at
+  40–200 m), before → after; the "before" two-bend counts come from the probe:
+
+  | Start heading | On the pointer's node | Median | p95 | Max | Two-bend plans |
+  |---|---|---|---|---|---|
+  | 0 (fixed) | 47.8% → 47.3% | 6.49 → 6.49 m | 105.73 → 105.73 m | 121.24 → 121.24 m | 747 → 741 |
+  | 1 (fixed) | 46.7% → 45.8% | 5.31 → 5.63 m | 104.51 → 104.51 m | 120.07 → 120.07 m | 753 → 741 |
+  | free | 93.6% → 90.7% | 1.83 → 1.85 m | 3.02 → 3.40 m | 4.37 → 4.37 m | 36 → 0 |
+
+  All 595 pointers behind each fixed heading still end on a U-turn.
+- **Where two bends remain** (an uncommitted probe after the change). The sweep put
+  pointers every 1° within ±89° of the start heading, at 20–200 m every 2 m. It ran with
+  headings 0 and 1 and a free start under the default cap, headings 0 and 1 under cap 90,
+  heading 1 under cap 60, and a free start under cap 120. It found no plan that ends on the
+  pointer's node with two bends turning 90° or less. On a free drag, two bends now land on
+  the pointer's node only for turns beyond 90° (120°, 150°, U-turns). In precision mode
+  they also land there as an S-curve back onto the start heading, for one.
+- **Tests (automated):** 543 tests in 70 files (537 before).
+  - **New:**
+    - two drag-table cases: a free kink, now one bend a node off; and precision R 60
+      with end heading 60°, one bend a node off where two R 60 bends reached the node;
+    - the 22 kinks against a brute-force single-bend oracle: no single bend reaches the
+      pointer's node, two bends do, and the plan ends on the nearest neighbour one bend
+      reaches;
+    - a 120° turn and a precision S-curve whose ring 1 no single bend reaches: still two
+      bends on the node;
+    - an obstacle that turns every fit at the nearest neighbour into a kinked join: the
+      end stays there, although a single bend to another neighbour would be valid;
+    - determinism over 10 build orders.
+  - **Measurements:** the forward-cone test reports two-bend counts and asserts that none
+    lands on the pointer's node; the all-around test reports them.
+  - **Adjusted:** no assertion assumed exact landing, so none changed. Comments changed:
+    - the two-bend oracle's: it lays two-bend plans only where no single bend reaches the
+      node or its neighbours, still 182 of them;
+    - two generator counts: existing-track reuse went from 17 to 16 of 150 runs, and the
+      diorama probe from 7,486 to 7,511 nodes and from 187 to 186 curved plans.
+  - **E2e:** the 8 Playwright e2e pass unchanged (agent evidence).
+- **Performance, a dev measurement and not a gate.** Three alternating runs each of
+  [`sim/perf.test.ts`](../../src/core/sim/perf.test.ts), before → after, on one machine:
+  - `planTrack`, 184 fixed drags × 3 passes: median 0.106–0.107 → 0.089–0.101 ms, p95
+    0.466–0.525 → 0.504–0.575 ms, max 1.02–1.08 → 0.93–1.66 ms;
+  - `planTrack`, the two-bend-heavy case (348 drags × 3 passes): median 0.154–0.162 →
+    0.163–0.167 ms, p95 0.860–0.906 → 0.830–0.863 ms, max 1.93–2.27 → 1.38–1.90 ms; its
+    fits are unchanged (252 two-bend, 96 one-bend);
+  - `preview` of the planned pieces: medians 0.016–0.032 ms before and after, p95 at most
+    0.111 → 0.125 ms;
+  - the worst case the validation cap allows: median 1.86–2.04 → 1.83–2.03 ms, p95
+    2.63–3.39 → 2.80–3.20 ms.
+
+  This is within run-to-run noise. The ring-1 step costs at most six single-bend solves,
+  and where it succeeds it spares the two-bend solve. The gate numbers stay D12's (gate
+  B3).
+- **Not established:**
+  - whether the track feels smoother: that is the owner's to judge, and no feel check has
+    run on this build;
+  - the end sits up to 5.63 m from the pointer in the cone, a little past the owner's
+    "about 5 m"; ring 1's geometric bound is 7.64 m;
+  - at the edge of one bend's reach, a pointer that two 60° bends reached on its node now
+    gets a 90° bend a node off. A chained drag then leaves 30° short of the two-bend
+    plan's heading;
+  - distance before validity: when every fit at the nearest neighbour is invalid, the plan
+    shows it, although another neighbour, or two bends on the node, may be valid;
+  - timings on the gate hardware, or agreement across JavaScript engines.
+
 ## Revisit when
 
 - The D3 feel check finds construction unsatisfying for reasons that planner tuning, chained
@@ -358,3 +929,24 @@ on macOS (Apple M5 Pro); the status of this ADR stays Proposed.
   clearance names the closest partner, the ±10 km node-height bound, the command-shape
   contract, the performance numbers marked as an uncommitted probe) and decision 6 and the
   open-point line pointed at the mm finding; status unchanged, still Proposed.
+- 2026-09-27: D3 planner findings added (exact candidate counts, start-heading, snapping,
+  selection and magnetism choices, two-bend fits, follow and performance measurements);
+  status unchanged, still Proposed.
+- 2026-09-27: D3 height-pinning findings added (inner nodes pinned to existing node heights
+  within 6.5 m, the multi-height order, the per-position height index); status unchanged,
+  still Proposed.
+- 2026-09-27: D3 review findings added (the two-bend solve's period divides |det| rather than
+  equalling it; a brute-force oracle now checks the shortest fit); status unchanged, still
+  Proposed.
+- 2026-09-27: D3 ground-following findings added (the relayed owner decision that track
+  follows the ground in D3, the offset interpolation between pins, before and after
+  underground numbers, the 0.15 m render lift and its measurement, the curve limit); status
+  unchanged, still Proposed.
+- 2026-09-27: D3 two-bend free-drag findings added (the relayed owner decision that one
+  drag may turn up to 180° with two bends, the fallback and its snapping, the rank and why,
+  follow and performance numbers before and after, open doubts); status unchanged, still
+  Proposed.
+- 2026-09-27: D3 one-bend-a-node-off findings added (the relayed owner decision to prefer
+  one bend on a neighbour of the pointer's node over two bends on it, ring 1 and its order,
+  the kinks, follow and performance numbers before and after, open doubts); status
+  unchanged, still Proposed.

@@ -1,6 +1,4 @@
-import type { DioramaScenery } from "../../core/scenarios/baltic-diorama";
-import { type Terrain, nodeOfOffset, terrainBoundsM } from "../../core/terrain";
-import { toWorld } from "../../core/lattice";
+import { type DioramaScenery, type Terrain, nodeOfOffset, terrainBoundsM, toWorld } from "../../core/sim/api";
 import { simToWorld } from "../coords";
 import { sampleTerrainHeightM } from "../terrain/heightfieldRay";
 import { type GroundPoint, ISO_PITCH_RAD, NAMED_ZOOMS } from "./isoMath";
