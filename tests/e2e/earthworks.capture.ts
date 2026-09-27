@@ -6,7 +6,8 @@ import { dragBetween, lookAtNode, nodeScreen, snapshot, undoToEmpty } from "./ho
  * the owner's Look Gate). Runs only with
  * `CAPTURE=1 npx playwright test --project=capture`; images go to the
  * gitignored test-results/earthworks/. Two layouts on the diorama's hill east
- * of the centre, each laid with the real pointer, at Region, Default and Close:
+ * of the centre, each laid with the real pointer, at Far (LOD1 terrain), Region, Default and
+ * Close:
  * - a curve over the hill: a free drag (226, 100) → (233, 117), a straight and an
  *   R 180 curve that runs up to 10 m under the natural ground;
  * - a straight on a cross-slope of about 44%: (226, 115) → (238, 115) eastwards.
@@ -17,6 +18,7 @@ import { dragBetween, lookAtNode, nodeScreen, snapshot, undoToEmpty } from "./ho
 
 const OUT = "test-results/earthworks";
 const ZOOMS = [
+  ["far", 0.9],
   ["region", 2.5],
   ["default", 6],
   ["close", 12],
