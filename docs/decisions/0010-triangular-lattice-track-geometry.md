@@ -365,7 +365,7 @@ Recorded while implementing D3's core half on branch `codex/d3-planner`
     the port's height and must arrive on the port's heading.
 - **Validity never moves the target.** Hopping to a valid node elsewhere would pull the
   end away from the pointer and hide the reason. Instead the plan follows the pointer and
-  `preview` explains. Example (a table case): an S-bend 12 rows over needs at least
+  `preview` explains. Example (a unit test): an S-bend 12 rows over needs at least
   32 q-steps. With 30 left, magnetism skips the port, the free plan ends on the port's node
   at 30°, and preview rejects it as `kinked-join`.
 - **Follow, measured** (not the feel). Pointers were within ±60° of the start heading at
@@ -393,8 +393,9 @@ Recorded while implementing D3's core half on branch `codex/d3-planner`
     (n = 552);
   - `preview` of the planned pieces: median 0.030 ms, p95 0.105 ms, max 0.647 ms
     (n = 528);
-  - the worst case the validation cap allows (8 candidates of a plan over 100 pieces, each
-    rejected by clearance): median 1.755 ms, p95 2.395 ms, max 2.731 ms (n = 40).
+  - the worst case the validation cap allows (every candidate validated, at most 8, of a
+    plan over 100 pieces rejected by clearance): median 1.755 ms, p95 2.395 ms, max
+    2.731 ms (n = 40).
 
   Magnetism scans every node of the track index on each call (about 5,000 at the piece
   cap), with no cache. The gate numbers are D12's (preview p95 ≤ 4 ms, gate B3).
