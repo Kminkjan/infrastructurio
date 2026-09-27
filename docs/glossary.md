@@ -352,8 +352,10 @@ all-reused drag is a no-op with no history entry, and undo can create no ID haza
 Turns a drag into resolved pieces: n straights, then one curve or shift template, then m
 straights. It solves a 2×2 integer system over about 100 candidates and chooses valid →
 largest radius under the user cap → shortest → smallest |turn| → left before right. A
-two-bend fit joins into existing ports. Commands carry the resolved pieces, so tuning the
-planner never breaks replays.
+two-bend fit joins into existing ports, and, where no single bend reaches a free drag's
+end, two bends in one drag turn up to 180° (U-turns, hairpins, S-curves; owner decision
+2026-09-27). Commands carry the resolved pieces, so tuning the planner never breaks
+replays.
 
 ### Platform
 

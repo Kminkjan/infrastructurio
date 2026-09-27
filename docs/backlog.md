@@ -310,6 +310,9 @@ tool). Tool reducers go in `src/tools`, and the tooltip in the HUD.
 - [ ] `planTrack(drag)` returns n straights + one curve or shift template + m straights. It
   solves a 2×2 integer system over about 100 candidates, and selects in this order:
   valid → largest radius under the user cap → shortest → smallest |turn| → left before right.
+  *Extended by the owner decision of 2026-09-27, after the D3 feel check: where no single
+  bend reaches a free drag's end, the planner fits two bends in the same drag, up to 180°
+  ([ADR 0010 D3 two-bend finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-d3-two-bend-free-drags)).*
 - [ ] A two-bend fit joins into existing ports. Magnetism snaps within 3 nodes. Elevation is
   spread by length with largest-remainder rounding. *Refined by the owner decision of
   2026-09-27: track follows the ground in D3, so the planner spreads the offset above the
