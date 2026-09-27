@@ -94,7 +94,7 @@ else is planned and lands slice by slice.
 | HUD | [src/ui/](../src/ui/) | **D3 render branch**: `store` (the HUD store) and `Hud` (construction tooltip, toast, aria-live status line, bottom toolbar with Track and undo/redo), mounted at `#hud`. Time controls, counters, inspector, entity list, notifications and overlay toggles planned | R4 (D3); R5–R6, D10 |
 | Quality presets, hardening, bench | `src/render/core/`, `bench/` | Planned | R7 (D11b, D12) → Look Gate B |
 | Replay harness | `tests/replay/`, `tests/fixtures/` | Planned | D12 |
-| Browser e2e | [tests/e2e/](../tests/e2e/), [playwright.config.ts](../playwright.config.ts) | **D3 render branch**: Playwright on its own Vite server (port 5232, system Chrome): drag-build and undo to empty, keyboard construction, a closed loop through ordinary drags; `*.capture.ts` screenshots for manual checks (`CAPTURE=1`). Agent evidence only | D3 |
+| Browser e2e | [tests/e2e/](../tests/e2e/), [playwright.config.ts](../playwright.config.ts) | **D3 render branch**: Playwright on its own Vite server (port 5232, system Chrome): drag-build and undo to empty, keyboard construction, a closed loop through ordinary drags, camera gestures still reaching the camera first; `*.capture.ts` screenshots for manual checks (`CAPTURE=1`). Agent evidence only | D3 |
 
 ## Module layout
 
@@ -580,7 +580,8 @@ other tools are planned (R5).*
   - Depot places a depot. No tool buys, assigns or dispatches trains.
 - **Testing.** Reducer unit tests replay scripted event sequences without a browser.
   Playwright (`npx playwright test`, [tests/e2e/](../tests/e2e/)) covers drag-build → undo to
-  empty, keyboard construction and a closed loop (D3); its runs are agent evidence.
+  empty, keyboard construction, a closed loop and the camera-first gesture routing (D3); its
+  runs are agent evidence.
 
 ## UI (HUD)
 

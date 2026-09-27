@@ -116,3 +116,47 @@ test("builds a closed loop by dragging, then undoes back to an empty network", a
   expect(undos).toBe(5);
   expect(errors).toEqual([]);
 });
+
+test("camera gestures still reach the camera first: wheel zoom, right-drag pan, Q/E, arrows in Select only", async ({ page }) => {
+  await openDiorama(page);
+  const view = () =>
+    page.evaluate(() => {
+      const c = (window.__diorama as unknown as { camera: { ppm: number; yawStep: number; target: { x: number; z: number } } }).camera;
+      return { ppm: c.ppm, yawStep: c.yawStep, x: c.target.x, z: c.target.z };
+    });
+  const v0 = await view();
+  await page.mouse.move(640, 400);
+  await page.mouse.wheel(0, -100);
+  await expect.poll(async () => (await view()).ppm).toBeGreaterThan(v0.ppm);
+  // Right drag pans in every tool, including Track.
+  await page.keyboard.press("1");
+  const v1 = await view();
+  await page.mouse.move(640, 400);
+  await page.mouse.down({ button: "right" });
+  await page.mouse.move(540, 350, { steps: 5 });
+  await page.mouse.up({ button: "right" });
+  const v2 = await view();
+  expect(Math.hypot(v2.x - v1.x, v2.z - v1.z)).toBeGreaterThan(5);
+  expect((await snapshot(page)).pieces).toBe(0);
+  // In Track the arrows drive the lattice cursor, not the camera.
+  await page.keyboard.press("ArrowRight");
+  await page.waitForTimeout(200);
+  const v3 = await view();
+  expect([v3.x, v3.z]).toEqual([v2.x, v2.z]);
+  // Shift+wheel steps the height in Track instead of zooming.
+  await page.keyboard.down("Shift");
+  await page.mouse.wheel(0, -100);
+  await page.keyboard.up("Shift");
+  expect((await view()).ppm).toBe(v3.ppm);
+  // Back in Select, Q rotates and the arrows pan.
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  expect((await snapshot(page)).tool).toBe("select");
+  await page.keyboard.press("q");
+  await expect.poll(async () => (await view()).yawStep).toBe((v3.yawStep + 5) % 6);
+  await page.keyboard.down("ArrowRight");
+  await page.waitForTimeout(250);
+  await page.keyboard.up("ArrowRight");
+  const v4 = await view();
+  expect(Math.hypot(v4.x - v3.x, v4.z - v3.z)).toBeGreaterThan(5);
+});
