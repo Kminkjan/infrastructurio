@@ -37,11 +37,11 @@ around 1900 in web + TypeScript + Three.js 2.5D. Owner direction of 2026-09-26 (
 | Path | Contract | Guide |
 |---|---|---|
 | `src/core/` | Deterministic, DOM-free simulation; public surface `sim/api.ts` (first slice in D2). Exists: `lattice.ts`, `terrain.ts`, `util/` (D1); `geometry/`, `track/`, `network/derive.ts`, `sim/` (D2); `scenarios/` (D11a) | [src/core/CLAUDE.md](src/core/CLAUDE.md) |
-| `src/render/` | Imperative Three.js; reads snapshots only. Exists: `coords.ts`, `camera/`, `core/`, `terrain/`, `art/` (D1); `scenery/`, `labels/` (D11a) | [src/render/CLAUDE.md](src/render/CLAUDE.md) |
-| `src/tools/` | Pure tool reducers `(state, event, ctx) → [state, effects]` (planned) | below |
-| `src/ui/` | React 19 HUD only, fed via `useSyncExternalStore`, never in the frame loop; palette UI colours, aria-live status, reduced motion honoured (planned) | — |
-| `index.html` → `src/app/main.ts` | Wiring, fixed-step host loop, input → commands. Today: seeded terrain under the iso camera (D1), plus the static diorama, labels and lookdev bookmarks on the D11a branch; no sim loop yet | below |
-| `tests/` | `architecture.test.ts` (source-scan boundaries, negative self-check); `replay/`, `fixtures/` planned | core guide |
+| `src/render/` | Imperative Three.js; reads snapshots only. Exists: `coords.ts`, `camera/`, `core/`, `terrain/`, `art/` (D1); `scenery/`, `labels/` (D11a); `track/`, `picking/` (D3) | [src/render/CLAUDE.md](src/render/CLAUDE.md) |
+| `src/tools/` | Pure tool reducers `(state, event, ctx) → [state, effects]`: no three, DOM, clock, randomness or timers; reducer unit tests. Exists (D3): the track tool, the preview memo (LRU of 16), picks, tooltip text | below |
+| `src/ui/` | React 19 HUD only, fed via `useSyncExternalStore` (the app the only writer), never in the frame loop; colours as CSS custom properties from `palette.ts`, never three or render; aria-live status, reduced motion honoured. Exists (D3): the store, construction tooltip, toast, status line, toolbar (Track, Undo, Redo), mounted at `#hud` | — |
+| `index.html` → `src/app/main.ts` | Wiring, fixed-step host loop, input → commands. Today: seeded terrain under the iso camera (D1), the static diorama, labels and lookdev bookmarks (D11a), and construction (D3: the sim, `InputRouter`, the command gateway in `construction.ts`, track meshes, ghost, HUD, dev-only `__diorama` hook); no sim step loop yet | below |
+| `tests/` | `architecture.test.ts` (source-scan boundaries, negative self-check); `e2e/` (Playwright, D3); `replay/`, `fixtures/` planned | core guide |
 | `docs/` | Plans, ADRs, dated evidence, archive pointers | [docs/CLAUDE.md](docs/CLAUDE.md) |
 
 - **Imports:** core → nothing outside core; render, tools and ui → core only via
@@ -79,6 +79,7 @@ Node `^20.19 || >=22.12`. There is no CI, linter, formatter config or Stop hook.
 | `npm run build` | Typecheck, then `vite build` |
 | `npm run check` | `npm test` + `npm run build` |
 | `npm run dev` | Plain `vite`, so the port can move: open the exact URL it prints and confirm it is yours |
+| `npx playwright test` | Browser e2e (`tests/e2e/*.e2e.ts`, agent evidence) on its own Vite server at port 5232 (`--strictPort`) with system Chrome; `CAPTURE=1 npx playwright test --project=capture` saves manual-check screenshots to the gitignored `test-results/` |
 
 Recorded 2026-09-26 (automated, D1 branch `codex/d1-lattice-terrain`): 159 tests in 20
 files. Counts change with every slice; report fresh ones.
@@ -92,7 +93,7 @@ files. Counts change with every slice; report fresh ones.
   one negative fixture per new reason code. **`src/tools`:** reducer unit tests.
 - **`src/render`, `src/ui`, wiring:** no DOM/WebGL test env. Check manually with `npm run dev`
   and name what you exercised (tool, zoom, yaw, preset), or say you didn't. Playwright
-  (installed, not configured yet) e2e is **agent** evidence.
+  e2e (`npx playwright test`, configured in D3) is **agent** evidence.
 - **Docs:** every relative link resolves. **`package*.json`:** dedicated PR, fresh `npm ci`,
   `npm run check`; `three` stays exact-pinned (`0.185.1`).
 - **Report** exact counts, SHA, environment and every skipped check, quoting failing output.
