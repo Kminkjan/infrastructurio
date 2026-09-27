@@ -1,5 +1,6 @@
 import { Color, type IUniform, Vector2 } from "three";
 import { palette } from "../palette";
+import { smoothstep } from "../../math";
 
 /**
  * Crisp ground detail on the grass (terrain look variants, 2026-09-27). The
@@ -278,11 +279,6 @@ export function gdNoise(x: number, y: number): number {
   const uy = s(y - iy);
   const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
   return lerp(lerp(gdHash(ix, iy), gdHash(ix + 1, iy), ux), lerp(gdHash(ix, iy + 1), gdHash(ix + 1, iy + 1), ux), uy);
-}
-
-function smoothstep(e0: number, e1: number, x: number): number {
-  const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
-  return t * t * (3 - 2 * t);
 }
 
 /** Mirror of `gdCut` for a given screen footprint `w` of x (0 = a hard step). */

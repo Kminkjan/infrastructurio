@@ -255,6 +255,22 @@ describe("earthworks conform (the rule)", () => {
     }
   });
 
+  it("returns a fresh nearest point per call unless the caller passes its own scratch", () => {
+    // Review finding (PR #83): the result was one module-level object that every call overwrote.
+    const a = earthworkPiece(flat, straight(20, 40, 0, 20_000));
+    const b = earthworkPiece(flat, straight(18, 44, 0, 20_000));
+    const x = 5 * (20 + 20) + 2;
+    const y = 41 * 2.5 * Math.sqrt(3);
+    const fromA = nearestOnPiece(a, x, y);
+    const fromB = nearestOnPiece(b, x, y);
+    expect(fromA).not.toBe(fromB);
+    expect(fromA.d).toBeCloseTo(2.5 * Math.sqrt(3), 9);
+    expect(fromB.d).toBeCloseTo(3 * 2.5 * Math.sqrt(3), 9);
+    const scratch = { d: 0, s: 0 };
+    expect(nearestOnPiece(a, x, y, scratch)).toBe(scratch);
+    expect(scratch).toEqual(fromA);
+  });
+
   it("sizes each piece's reach from the relief around it, round-offs included", () => {
     const reachFor = (relief: number) => FORMATION_HALF_WIDTH_M + CREST_ROUND_M / 2 + SIDE_SLOPE_RUN * (relief + DAYLIGHT_ROUND_M) + 1;
     expect(earthworkPiece(flat, straight(20, 40, 0, 20_000)).reachM).toBeCloseTo(reachFor(2), 9);

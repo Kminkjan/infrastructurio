@@ -2,6 +2,7 @@ import { Color, type IUniform } from "three";
 import { palette } from "../palette";
 import { CREST_ROUND_M, EARTHWORK_WEIGHT_FROM_X, FORMATION_HALF_WIDTH_M, SIDE_SLOPE_RUN, encodeEarthworkPotential, slopeRiseM } from "../../terrain/earthworks";
 import { ALBEDO_ANCHOR, type ShaderChunk, type ShaderSource, inject } from "./chunk";
+import { smoothstep } from "../../math";
 
 /**
  * Earthworks on the terrain (earthworks-lite, `render/terrain/earthworks.ts`;
@@ -164,11 +165,6 @@ export function createEarthworkChunk(uniforms: EarthworkUniforms): ShaderChunk {
       shader.fragmentShader = inject(shader.fragmentShader, ALBEDO_ANCHOR, FRAGMENT_MAIN, "before");
     },
   };
-}
-
-function smoothstep(e0: number, e1: number, x: number): number {
-  const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
-  return t * t * (3 - 2 * t);
 }
 
 type Rgb = readonly [number, number, number];

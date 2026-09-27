@@ -11,13 +11,16 @@ import { dragBetween, lookAtNode, nodeScreen, snapshot } from "./hook";
  * the cutting and over the embankment by the water, then the four Look Gate A
  * bookmarks. Runs only with `CAPTURE=1 npx playwright test --project=capture
  * renderIter`; images go to the gitignored test-results/render-iter/<label>/,
- * where RENDER_ITER_LABEL names the build (default "after").
+ * where RENDER_ITER_LABEL names the build (default "after"). RENDER_ITER_STILL=1
+ * emulates reduced motion (no wind sway or ambient frames), so two builds can be
+ * compared pixel for pixel.
  */
 
 // The tsconfig has no Node types (specs run in Node, but type-check with the app's DOM libs).
 const env = (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env ?? {};
 const LABEL = env.RENDER_ITER_LABEL ?? "after";
 const QUERY = env.RENDER_ITER_QUERY ?? "";
+const STILL = env.RENDER_ITER_STILL === "1";
 const OUT = `test-results/render-iter/${LABEL}`;
 const FROM = { q: 50, r: 203 };
 const TO = { q: 34, r: 246 };
@@ -62,6 +65,7 @@ test(`render pass iteration captures (${LABEL})`, async ({ page }) => {
   page.on("console", (m) => {
     if (m.type() === "error" || m.type() === "warning") errors.push(`${m.type()}: ${m.text()}`);
   });
+  if (STILL) await page.emulateMedia({ reducedMotion: "reduce" });
   await open(page, QUERY);
   await lookAtNode(page, 42, 224, 4);
   await page.keyboard.press("1");

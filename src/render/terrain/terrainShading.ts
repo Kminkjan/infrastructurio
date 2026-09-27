@@ -3,6 +3,7 @@ import { LATTICE_SPACING_M, type Terrain, unit } from "../../core/sim/api";
 import { palette } from "../art/palette";
 import { simToWorld } from "../coords";
 import { neighbourHeading, neighbourIndex } from "./offsetGrid";
+import { smoothstep } from "../math";
 
 /**
  * Per-node presentation data for the terrain mesh, computed once from the
@@ -366,11 +367,6 @@ function hash01(a: number, b: number, salt: number): number {
   h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
   h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
-}
-
-function smoothstep(edge0: number, edge1: number, x: number): number {
-  const t = clamp01((x - edge0) / (edge1 - edge0));
-  return t * t * (3 - 2 * t);
 }
 
 function clamp01(x: number): number {

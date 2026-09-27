@@ -100,6 +100,7 @@ export class EarthworksView {
   private rebuild = { chunks: 0, slices: 0, totalMs: 0, longestSliceMs: 0 };
   private maxCutM = 0;
   private maxFillM = 0;
+  private readonly near = { d: 0, s: 0 };
 
   constructor(private readonly options: EarthworksViewOptions) {
     this.heightfield = new DrawnHeightfield(options.terrain, 0);
@@ -179,7 +180,7 @@ export class EarthworksView {
   clearsScenery(x: number, y: number, near: readonly EarthworkPiece[]): boolean {
     for (const p of near) {
       if (x < p.minX || x > p.maxX || y < p.minY || y > p.maxY) continue;
-      if (nearestOnPiece(p, x, y).d <= SCENERY_CLEARANCE_M) return true;
+      if (nearestOnPiece(p, x, y, this.near).d <= SCENERY_CLEARANCE_M) return true;
     }
     if (this.heightfield.triangles.size === 0) return false;
     const drawn = this.heightfield.heightAtM(x, y);

@@ -1,5 +1,6 @@
 import { type IUniform, Vector2 } from "three";
 import { ALBEDO_ANCHOR, type ShaderChunk, ensureArtWorld, inject } from "./chunk";
+import { smoothstep } from "../../math";
 
 /**
  * Terrain relief (terrain look variants, 2026-09-27): makes the gentle
@@ -176,12 +177,6 @@ export function exaggerateNormal(n: Vec3, gain: number, maxTan = 1e6): [number, 
   const tan = Math.hypot(u[0], u[2]) / Math.max(u[1], 1e-3);
   const scale = gain / (1 + (tan * gain) / maxTan);
   return normalize([u[0] * scale, u[1], u[2] * scale]);
-}
-
-
-function smoothstep(e0: number, e1: number, x: number): number {
-  const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
-  return t * t * (3 - 2 * t);
 }
 
 /** How much of the facet normal the shader blends in at a zoom, over earthwork lip weight `lip` (0 off earthworks). */

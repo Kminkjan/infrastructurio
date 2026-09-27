@@ -3,6 +3,7 @@ import { EARTHWORK_ITEM_SIZE } from "../art/shaderChunks/earthwork";
 import { type ChunkPass, EARTHWORK_MIN_M, REFINE, SUB_VERTS, forEachChunkTriangle, lodNodeIndex, subAxial, triangleCorners } from "./earthworks";
 import { type MeshData, buildChunkData } from "./terrainGeometry";
 import type { TerrainShading } from "./terrainShading";
+import { smoothstep } from "../math";
 
 /**
  * Chunk geometry with earthworks (see `earthworks.ts`): the plain chunk mesh,
@@ -276,9 +277,4 @@ export function buildEarthworkChunk(pass: ChunkPass, shading: TerrainShading, pl
     triangleCount: ni / 3,
     earthwork: earthwork.slice(0, count * EARTHWORK_ITEM_SIZE),
   };
-}
-
-function smoothstep(edge0: number, edge1: number, x: number): number {
-  const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
-  return t * t * (3 - 2 * t);
 }

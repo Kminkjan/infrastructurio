@@ -7,7 +7,7 @@ import { makeTerrain } from "../../../tests/support/makeTerrain";
 import { ISO_PITCH_RAD, cameraBasis } from "../camera/isoMath";
 import { simToWorld, worldToSim } from "../coords";
 import { type PieceSpec, resolvePiece } from "../../core/sim/api";
-import { conformTerrain } from "./earthworks";
+import { DrawnHeightfield, conformTerrain } from "./earthworks";
 import { intersectTerrain, raycastTerrain, sampleTerrainHeightM } from "./heightfieldRay";
 import { forEachLatticeTriangle } from "./offsetGrid";
 
@@ -135,5 +135,26 @@ describe("heightfield ray", () => {
       expect(sim.z).toBeCloseTo(20, 6);
       expect(Math.hypot(sim.x - aim.x, sim.y - aim.y)).toBeGreaterThan(3);
     }
+  });
+
+  it("reads the one natural interpolation: the sim-height sampler and the drawn heightfield agree bit for bit off earthworks", () => {
+    // Review finding (PR #83): three copies of the lattice interpolation had to stay bit-identical (the undo e2e
+    // compares drawn and natural heights with toBe). Now `naturalHeightM` is the only one; pin that they agree.
+    const prng = createPrng("one-interpolation");
+    const t = makeTerrain(50, 40, () => 100 + prng.nextInt(300));
+    const lod0 = new DrawnHeightfield(t, 0);
+    const lod1 = new DrawnHeightfield(t, 1);
+    let defined = 0;
+    for (let k = 0; k < 20_000; k++) {
+      // Over the map and a little past its edges, with some points exactly on nodes and lattice rows.
+      const x = k % 7 === 0 ? 5 * prng.nextInt(52) - 5 : prng.nextInt(26_000) / 100 - 5;
+      const y = k % 5 === 0 ? 2.5 * Math.sqrt(3) * prng.nextInt(42) - 4 : prng.nextInt(18_000) / 100 - 5;
+      const natural = lod0.naturalAtM(x, y);
+      expect(Object.is(sampleTerrainHeightM(t, x, y) ?? Number.NaN, natural)).toBe(true);
+      expect(Object.is(lod0.heightAtM(x, y), natural)).toBe(true);
+      expect(Object.is(lod1.heightAtM(x, y), lod1.naturalAtM(x, y))).toBe(true);
+      if (!Number.isNaN(natural)) defined += 1;
+    }
+    expect(defined).toBeGreaterThan(15_000);
   });
 });

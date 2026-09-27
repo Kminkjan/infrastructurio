@@ -21,8 +21,9 @@ import { createPrng } from "../../src/core/util/prng";
  * (zero height steps, the end re-planned onto the ground at the plan's actual
  * end): half straight drags of 10–40 steps on all 12 headings, half free
  * drags within ±150 m, a quarter of all drags without a start heading. The
- * same generator as `render/track/trackLift.test.ts` (ADR 0010, D3 ground
- * following), shared here so the earthworks tests measure the same population.
+ * one copy of the generator: `render/track/trackLift.test.ts` (ADR 0010, D3
+ * ground following) and the earthworks tests both call it, so they measure the
+ * same population.
  */
 
 export const DIORAMA_PARAMS = { seed: "baltic-diorama", ...DEFAULT_TERRAIN_SIZE } as const;

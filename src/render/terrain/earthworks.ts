@@ -1,4 +1,4 @@
-import { primLengthM, primitives } from "../../core/geometry/sample";
+import { centrelineIndex, nearestOnCentreline } from "../../core/geometry/sample";
 import { LATTICE_SPACING_M, type RenderPrim, SQRT3, type Structure, type Terrain } from "../../core/sim/api";
 import { lodGridSize, type TerrainLod } from "./offsetGrid";
 import { CHUNK_NODES, chunkCounts } from "./terrainGeometry";
@@ -82,7 +82,6 @@ export const MAX_REACH_M = 120;
 const CONFORMED: ReadonlySet<Structure> = new Set(["ground"]);
 
 const HALF_SQRT3 = SQRT3 / 2;
-const TWO_PI = 2 * Math.PI;
 
 /** What the conform needs of a piece (a `NetworkPiece` has this shape). */
 export interface PieceInput {
@@ -118,48 +117,14 @@ export function conforms(piece: PieceInput): boolean {
 }
 
 /**
- * Prepares a piece: prim lengths through `geometry/sample.ts`, and the reach
- * from the natural relief around it (found by growing the box until the
- * relief inside it cannot reach further).
+ * Prepares a piece: its centreline index (prim lengths, arc ends and plan box,
+ * all from `geometry/sample.ts`), and the reach from the natural relief around
+ * it (found by growing the box until the relief inside it cannot reach
+ * further).
  */
 export function earthworkPiece(terrain: Terrain, piece: PieceInput): EarthworkPiece {
-  const prims = primitives(piece);
-  const primStartM = new Float64Array(prims.length);
-  const arcEnds = new Float64Array(prims.length * 4);
-  let length = 0;
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  const grow = (x: number, y: number) => {
-    if (x < minX) minX = x;
-    if (x > maxX) maxX = x;
-    if (y < minY) minY = y;
-    if (y > maxY) maxY = y;
-  };
-  prims.forEach((p, i) => {
-    primStartM[i] = length;
-    length += primLengthM(p);
-    if (p.kind === "line") {
-      grow(p.x0, p.y0);
-      grow(p.x1, p.y1);
-      return;
-    }
-    const a1 = p.startRad + p.sweepRad;
-    arcEnds[4 * i] = p.cx + p.radiusM * Math.cos(p.startRad);
-    arcEnds[4 * i + 1] = p.cy + p.radiusM * Math.sin(p.startRad);
-    arcEnds[4 * i + 2] = p.cx + p.radiusM * Math.cos(a1);
-    arcEnds[4 * i + 3] = p.cy + p.radiusM * Math.sin(a1);
-    // The arc's box: its ends plus any axis extreme inside the sweep.
-    grow(arcEnds[4 * i] ?? 0, arcEnds[4 * i + 1] ?? 0);
-    grow(arcEnds[4 * i + 2] ?? 0, arcEnds[4 * i + 3] ?? 0);
-    for (let k = 0; k < 4; k++) {
-      const angle = (k * Math.PI) / 2;
-      let delta = (angle - p.startRad) * (p.sweepRad >= 0 ? 1 : -1);
-      delta -= TWO_PI * Math.floor(delta / TWO_PI);
-      if (delta <= Math.abs(p.sweepRad)) grow(p.cx + p.radiusM * Math.cos(angle), p.cy + p.radiusM * Math.sin(angle));
-    }
-  });
+  const c = centrelineIndex(piece);
+  const { minX, minY, maxX, maxY } = c;
   const z0M = piece.z0Mm / 1000 - BED_BELOW_TRACK_M;
   const z1M = piece.z1Mm / 1000 - BED_BELOW_TRACK_M;
   const bedMin = Math.min(z0M, z1M);
@@ -174,7 +139,7 @@ export function earthworkPiece(terrain: Terrain, piece: PieceInput): EarthworkPi
     if (need <= reach) break;
     reach = need;
   }
-  return { key: piece.key, prims, lengthM: length, z0M, z1M, primStartM, arcEnds, reachM: reach, minX: minX - reach, minY: minY - reach, maxX: maxX + reach, maxY: maxY + reach };
+  return { key: piece.key, prims: c.prims, lengthM: c.lengthM, z0M, z1M, primStartM: c.primStartM, arcEnds: c.arcEnds, reachM: reach, minX: minX - reach, minY: minY - reach, maxX: maxX + reach, maxY: maxY + reach };
 }
 
 /** Lowest and highest node height (m) inside a plan box, over the LOD0 nodes. */
@@ -198,68 +163,15 @@ function naturalRange(t: Terrain, x0: number, y0: number, x1: number, y1: number
   return { min, max };
 }
 
-/** Nearest centreline point of the last `nearestOnPiece` call: plan distance and arc length. */
-const near = { d: 0, s: 0 };
-
 /**
- * The centreline point nearest (x, y): projection onto each line, or the
- * angle clamp onto each arc, of the piece's own render prims (the analytic
- * lines and arcs `sample.ts` samples; the drawn chords sit within 2 cm).
+ * The centreline point nearest (x, y): its plan distance `d` and arc length
+ * `s`, from the piece's own render prims (the analytic lines and arcs
+ * `sample.ts` samples; the drawn chords sit within 2 cm), through
+ * `geometry/sample.ts`'s `nearestOnCentreline`. Written to `out`, a fresh
+ * object unless the caller passes its own scratch (the hot loops do).
  */
-export function nearestOnPiece(p: EarthworkPiece, x: number, y: number): { readonly d: number; readonly s: number } {
-  let bestD2 = Infinity;
-  let bestS = 0;
-  const prims = p.prims;
-  for (let i = 0; i < prims.length; i++) {
-    const prim = prims[i];
-    if (!prim) continue;
-    const s0 = p.primStartM[i] ?? 0;
-    if (prim.kind === "line") {
-      const dx = prim.x1 - prim.x0;
-      const dy = prim.y1 - prim.y0;
-      const len2 = dx * dx + dy * dy;
-      let t = len2 > 0 ? ((x - prim.x0) * dx + (y - prim.y0) * dy) / len2 : 0;
-      t = t < 0 ? 0 : t > 1 ? 1 : t;
-      const ex = prim.x0 + dx * t - x;
-      const ey = prim.y0 + dy * t - y;
-      const d2 = ex * ex + ey * ey;
-      if (d2 < bestD2) {
-        bestD2 = d2;
-        bestS = s0 + t * Math.sqrt(len2);
-      }
-      continue;
-    }
-    const vx = x - prim.cx;
-    const vy = y - prim.cy;
-    const sweep = Math.abs(prim.sweepRad);
-    let delta = (Math.atan2(vy, vx) - prim.startRad) * (prim.sweepRad >= 0 ? 1 : -1);
-    delta -= TWO_PI * Math.floor(delta / TWO_PI);
-    if (delta <= sweep) {
-      const d = Math.sqrt(vx * vx + vy * vy) - prim.radiusM;
-      if (d * d < bestD2) {
-        bestD2 = d * d;
-        bestS = s0 + prim.radiusM * delta;
-      }
-      continue;
-    }
-    const sx = (p.arcEnds[4 * i] ?? 0) - x;
-    const sy = (p.arcEnds[4 * i + 1] ?? 0) - y;
-    const ex = (p.arcEnds[4 * i + 2] ?? 0) - x;
-    const ey = (p.arcEnds[4 * i + 3] ?? 0) - y;
-    const ds = sx * sx + sy * sy;
-    const de = ex * ex + ey * ey;
-    if (ds < bestD2) {
-      bestD2 = ds;
-      bestS = s0;
-    }
-    if (de < bestD2) {
-      bestD2 = de;
-      bestS = s0 + prim.radiusM * sweep;
-    }
-  }
-  near.d = Math.sqrt(bestD2);
-  near.s = bestS;
-  return near;
+export function nearestOnPiece(p: EarthworkPiece, x: number, y: number, out: { d: number; s: number } = { d: 0, s: 0 }): { d: number; s: number } {
+  return nearestOnCentreline(p, x, y, out);
 }
 
 /** The bed height (m) at arc length s along the piece. */
@@ -289,9 +201,10 @@ export function smoothMin(a: number, b: number, k: number): number {
 export function conformedHeightM(pieces: readonly EarthworkPiece[], x: number, y: number, natural: number): number {
   let u = Infinity;
   let l = -Infinity;
+  const n = { d: 0, s: 0 };
   for (const p of pieces) {
     if (x < p.minX || x > p.maxX || y < p.minY || y > p.maxY) continue;
-    const n = nearestOnPiece(p, x, y);
+    nearestOnPiece(p, x, y, n);
     if (n.d >= p.reachM) continue;
     const bed = bedAt(p, n.s);
     const rise = slopeRiseM(n.d);
@@ -385,6 +298,30 @@ function onGrid(lat: LodLattice, Q: number, R: number): boolean {
 function lodHeightM(t: Terrain, lat: LodLattice, Q: number, R: number): number {
   const n = lodNodeIndex(t, lat, Q, R);
   return n < 0 ? Number.NaN : (t.heightsDm[n] ?? 0) / 10;
+}
+
+/**
+ * Natural height (m) at sim plan (x, y) on a LOD's lattice: the planar
+ * interpolation inside its lattice triangle, exactly the plain chunk mesh's
+ * surface (at LOD0, the sim heights that picking reads). Zero weights skip
+ * their lookup, so points on the grid's outer edges stay defined; NaN off the
+ * grid. The one copy of this interpolation: `DrawnHeightfield` and
+ * `heightfieldRay` both call it, so where nothing is refined the drawn height
+ * equals the natural one bit for bit.
+ */
+export function naturalHeightM(t: Terrain, lat: LodLattice, x: number, y: number): number {
+  const a = lat.spacingM;
+  const rf = y / (a * HALF_SQRT3);
+  const qf = x / a - rf / 2;
+  const Q = Math.floor(qf);
+  const R = Math.floor(rf);
+  const fq = qf - Q;
+  const fr = rf - R;
+  if (fq + fr <= 1) {
+    const w = 1 - fq - fr;
+    return (w === 0 ? 0 : w * lodHeightM(t, lat, Q, R)) + (fq === 0 ? 0 : fq * lodHeightM(t, lat, Q + 1, R)) + (fr === 0 ? 0 : fr * lodHeightM(t, lat, Q, R + 1));
+  }
+  return (1 - fr) * lodHeightM(t, lat, Q + 1, R) + (1 - fq) * lodHeightM(t, lat, Q, R + 1) + (fq + fr - 1) * lodHeightM(t, lat, Q + 1, R + 1);
 }
 
 /**
@@ -511,6 +448,7 @@ export class ChunkPass {
   private flagRowMin = Infinity;
   private flagRowMax = -Infinity;
   private readonly sub = { qs: 0, rs: 0 };
+  private readonly near = { d: 0, s: 0 };
 
   /** Chunk box in plan metres, grown by one LOD cell (the ring), for picking candidate pieces. */
   static chunkBox(t: Pick<Terrain, "columns" | "rows">, lod: TerrainLod, chunkX: number, chunkY: number): { minX: number; minY: number; maxX: number; maxY: number } {
@@ -680,7 +618,7 @@ export class ChunkPass {
       const rowBase = (rs - this.rs0) * this.width - this.cs0;
       for (let cs = csA; cs <= csB; cs++) {
         const x = sub * (cs + parity / 2);
-        const n = nearestOnPiece(p, x, y);
+        const n = nearestOnPiece(p, x, y, this.near);
         evaluated += 1;
         if (n.d >= p.reachM) continue;
         const bed = bedAt(p, n.s);
@@ -893,15 +831,7 @@ export class DrawnHeightfield {
     const fr = rf - R;
     const up: 0 | 1 = fq + fr <= 1 ? 0 : 1;
     const heights = this.triangles.size === 0 ? undefined : this.triangles.get(triangleId(Q, R, up));
-    if (!heights) {
-      const t = this.terrain;
-      const lat = this.lat;
-      if (up === 0) {
-        const w = 1 - fq - fr;
-        return (w === 0 ? 0 : w * lodHeightM(t, lat, Q, R)) + (fq === 0 ? 0 : fq * lodHeightM(t, lat, Q + 1, R)) + (fr === 0 ? 0 : fr * lodHeightM(t, lat, Q, R + 1));
-      }
-      return (1 - fr) * lodHeightM(t, lat, Q + 1, R) + (1 - fq) * lodHeightM(t, lat, Q, R + 1) + (fq + fr - 1) * lodHeightM(t, lat, Q + 1, R + 1);
-    }
+    if (!heights) return naturalHeightM(this.terrain, this.lat, x, y);
     // Inside a refined triangle: local sub-lattice coordinates (a, b) from its corner A
     // (scaling by REFINE = 4 is exact, so a + b ≤ REFINE holds wherever fq + fr ≤ 1 did).
     const la = up === 0 ? fq * REFINE : (1 - fq) * REFINE;
@@ -926,20 +856,7 @@ export class DrawnHeightfield {
 
   /** Natural height (m) at plan (x, y) on this LOD (the plain mesh), NaN off the grid. */
   naturalAtM(x: number, y: number): number {
-    const a = this.lat.spacingM;
-    const rf = y / (a * HALF_SQRT3);
-    const qf = x / a - rf / 2;
-    const Q = Math.floor(qf);
-    const R = Math.floor(rf);
-    const fq = qf - Q;
-    const fr = rf - R;
-    const t = this.terrain;
-    const lat = this.lat;
-    if (fq + fr <= 1) {
-      const w = 1 - fq - fr;
-      return (w === 0 ? 0 : w * lodHeightM(t, lat, Q, R)) + (fq === 0 ? 0 : fq * lodHeightM(t, lat, Q + 1, R)) + (fr === 0 ? 0 : fr * lodHeightM(t, lat, Q, R + 1));
-    }
-    return (1 - fr) * lodHeightM(t, lat, Q + 1, R) + (1 - fq) * lodHeightM(t, lat, Q, R + 1) + (fq + fr - 1) * lodHeightM(t, lat, Q + 1, R + 1);
+    return naturalHeightM(this.terrain, this.lat, x, y);
   }
 
   get waterLevel(): number {

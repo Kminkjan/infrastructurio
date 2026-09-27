@@ -5,6 +5,7 @@ import { type GroundBounds, lodBandForPpm } from "../camera/isoMath";
 import { simToWorld } from "../coords";
 import { type TerrainLod, forEachLatticeTriangle, lodCol, lodGridSize, lodRow } from "./offsetGrid";
 import type { TerrainShading } from "./terrainShading";
+import { smoothstep } from "../math";
 
 /**
  * Terrain and water meshes from the sim's heights (art direction "Terrain and
@@ -226,9 +227,4 @@ function emptyMesh(): MeshData {
     nodeIndices: new Int32Array(0),
     triangleCount: 0,
   };
-}
-
-function smoothstep(edge0: number, edge1: number, x: number): number {
-  const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
-  return t * t * (3 - 2 * t);
 }

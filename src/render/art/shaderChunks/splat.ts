@@ -3,6 +3,7 @@ import { palette } from "../palette";
 import { ALBEDO_ANCHOR, type ShaderChunk, ensureArtWorld, inject } from "./chunk";
 import { ensureEarthworkVarying } from "./earthwork";
 import { GROUND_DETAIL_PARS, type GroundDetailUniforms } from "./groundDetail";
+import { smoothstep } from "../../math";
 
 /**
  * The terrain splat (art direction "Terrain and water"): data textures painted
@@ -291,7 +292,7 @@ export function furrowStripe(x: number, y: number, k: number, spacing = FURROW_S
  * level between SPLAT_CUTS.forestFloor chosen by `noise` (0–1).
  */
 export function crispSplatWeight(channel: keyof SplatWeights, w: number, fw = 0, noise = 0.5): number {
-  const cut = (x: number) => (fw <= 0 ? (x > 0 ? 1 : x < 0 ? 0 : 0.5) : smoothstep01((x + fw) / (2 * fw)));
+  const cut = (x: number) => (fw <= 0 ? (x > 0 ? 1 : x < 0 ? 0 : 0.5) : smoothstep(0, 1, (x + fw) / (2 * fw)));
   switch (channel) {
     case "dirt":
       return w * cut(w - SPLAT_CUTS.dirt);
@@ -304,9 +305,4 @@ export function crispSplatWeight(channel: keyof SplatWeights, w: number, fw = 0,
       return w * cut(w - (lo + (hi - lo) * noise));
     }
   }
-}
-
-function smoothstep01(x: number): number {
-  const t = Math.min(1, Math.max(0, x));
-  return t * t * (3 - 2 * t);
 }
