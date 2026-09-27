@@ -1171,6 +1171,55 @@ automated (Vitest 4.1.10, Node 26.7.0, macOS 26.6.2, Apple M5 Pro) unless labell
   gate hardware. Nor how the track's rounded end-cap earthworks read: at a shore node they
   form a small rounded nose into the water, as in round 1.
 
+## Findings (2026-09-28, PR #83 review fixes)
+
+Recorded on branch `codex/render-earthworks-terrain`, code at `8635640` (from `81663f8`,
+draft PR [#83](https://github.com/Kminkjan/infrastructurio/pull/83)). The trigger was a code
+review of the PR in recall mode (13 findings, not adversarially verified); each was checked
+against the code before it was fixed. Measurements are automated (Vitest 4.1.10, Node 26.7.0,
+macOS 26.6.2, Apple M5 Pro) unless labelled agent (Playwright, headless Chrome, same machine).
+The status of this ADR stays Proposed.
+- **The reach converges, per LOD** ([`earthworks.ts`](../../src/render/terrain/earthworks.ts)).
+  - The loop stopped after 8 passes without rescanning its last growth. It now grows until
+    the relief in the box needs no more, still capped at 120 m.
+  - A LOD1 triangle interpolates corners up to one 10 m cell past the box that the LOD0 node
+    scan sees, so LOD1 gets its own reach, from a scan 10 m wider.
+  - Tests: a 32° slope across a run left a 0.67 m ledge at the reach, and a rise just beyond
+    the scan left a 0.63 m ledge at LOD1. Both are now continuous: no jump over 5 cm between
+    samples 1 cm apart.
+  - On a probe of 3,815 diorama pieces (265 plans), 14 pieces had not converged in 8 passes,
+    and 6 of their LOD0 reaches change. 2,328 LOD1 reaches grow, by up to 42 m. On the
+    411-piece network of the new byte pin, LOD0 stays byte-identical and LOD1 changes only in
+    the colour attribute.
+- **Seams.** An unmoved plain corner of a refined triangle carried its colour attribute only
+  in the chunk owning that triangle. The neighbouring chunk's vertex there kept zeros, so the
+  lip weight (facets, slope soil) could jump along the seam: by up to 0.77 of its range on
+  three diorama plans. Both chunks now write it, tested at both LODs. Positions, normals,
+  colours and indices are unchanged.
+- **Ghost.** Its drop lines and end-height tags measure against the drawn surface, as picking
+  does; sim-facing heights keep `groundMmAt`. Agent e2e: a plan started with the real pointer
+  on the hill cutting's floor shows a tag of 9.3 m, for a node 9.26 m above the drawn floor.
+  Before, no tag showed.
+- **Single sources.** The arc maths go through `geometry/sample.ts` (new pure centreline
+  helpers), and one lattice interpolation serves the drawn heightfield and the ray march. A
+  byte pin (`earthworksGolden.test.ts`, 411 pieces on the diorama), recorded at `81663f8`,
+  held through those refactors and the efficiency fixes.
+- **Rebuild cost** (dev measurements, not gates; the machine's load average was 7–15 while
+  measuring, so the ranges overlap).
+  - 10-piece edits in
+    [`EarthworksView.test.ts`](../../src/render/terrain/EarthworksView.test.ts), cold (40
+    edits per run): p95 4.70–5.52 ms over ten runs at `81663f8`, 4.34–5.71 ms over five now;
+    median 2.09–2.37 ms against 2.11–2.30 ms.
+  - Warmed (320 edits per run, five alternating runs each): p95 3.40–3.80 ms against
+    3.20–3.50 ms; median 1.58–1.66 ms against 1.44–1.58 ms.
+  - Undo: median 0.46 → 0.16 ms, p95 1.20–1.37 → 0.29–0.32 ms. A chunk rebuild no longer walks
+    all 8,192 triangle ids of the heightfield.
+  - The 505-piece network: a full rebuild of 58.6 ms against 64.3–65.9 ms.
+  - The savings (pooled heights, per-chunk deletes, fewer nearest-point queries) are partly
+    spent on the per-LOD reach and the seam corners. Gate B8 (provisional, authoritative only
+    in the [acceptance gates](../evidence/m4/2026-09-26-acceptance-gates.md)) stays at risk.
+- **Not established:** the owner's reading; the look gates; timings on the gate hardware.
+
 ## Revisit when
 
 - The D3 feel check finds construction unsatisfying for reasons that planner tuning, chained
@@ -1229,3 +1278,7 @@ automated (Vitest 4.1.10, Node 26.7.0, macOS 26.6.2, Apple M5 Pro) unless labell
   water; departure-gradient normals, the vec3 colour attribute and the dry bake; visibility
   re-measured on 3,000 plans; the shore e2e; rebuild costs before and after); status
   unchanged, still Proposed.
+- 2026-09-28: PR #83 review findings added (the reach grows until it converges, with its own
+  LOD1 reach; seam corners carry the colour attribute in both chunks; the ghost measures
+  against the drawn surface; single sources and a byte pin; rebuild costs before and after);
+  status unchanged, still Proposed.

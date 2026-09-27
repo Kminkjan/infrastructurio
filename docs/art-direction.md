@@ -698,7 +698,7 @@ grassland.
 
 | URL | Variant | What it adds |
 |---|---|---|
-| `?terrain=d11a` | D11a | nothing: the look Look Gate A scored, bit-identical (the splat GLSL, baked colours and normals were checked against `c699393`) |
+| `?terrain=d11a` | D11a | nothing: the look Look Gate A scored, identical where no track is built (2026-09-28, PR #83 review: its splat GLSL and baked colours and normals are pinned by a test against `61bd690`, whose splat matches `b0a7500`, the Look Gate A record). Earthworks keep their colours, but D11a's splat does not fade fields, roads, forest floor or the AO tint on them |
 | `?terrain=a` | Crisp relief | slope gain on smooth normals, a calmer bake, crisp grass detail, crisp splat edges, 8× anisotropic filtering of the splat and AO maps |
 | `?terrain=b` | Faceted (default) | `a`, plus each lattice triangle lit as a facet from Region zoom in, and the tone patches at 70% |
 | `?terrain=c` | Contour hint | `b`, plus a faint line every 2.5 m of height |

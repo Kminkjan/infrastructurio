@@ -368,6 +368,36 @@ ADR stays **Proposed**; nothing here is a look verdict.
   the Low preset. Nor whether the soft patch edges (median ±3.5 m on the noise mirror) read as
   calm or, again, as soft blotches.
 
+## Findings (2026-09-28, PR #83 review fixes)
+
+Recorded on branch `codex/render-earthworks-terrain`, code at `8635640` (from `81663f8`,
+draft PR [#83](https://github.com/Kminkjan/infrastructurio/pull/83)). The trigger was a code
+review of the PR in recall mode (13 findings, not adversarially verified); each was checked
+against the code before it was fixed. The evidence is automated tests and an **agent**
+capture (headless Chrome, 1280 × 800, Apple M5 Pro, ANGLE Metal, reduced motion, compared
+pixel for pixel). The status of this ADR stays **Proposed**; nothing here is a look verdict.
+- **`d11a` compiles D11a's splat again.** The render pass iteration made the terrain material
+  always set the splat's `earthwork` option, so `?terrain=d11a` compiled
+  `terrain-splat-v4-earthwork`, and the claim that it was the look Look Gate A scored had no
+  test behind it.
+  - Now the option is opt-in (`earthworkSplat`): looks `a`–`c` set it, and `d11a` compiles
+    D11a's `terrain-splat-v2` plus the `terrain-earthwork-v2` chunk. Earthworks are
+    independent of the look.
+  - The claim is now "identical where no track is built". A test pins d11a's chunk list, the
+    splat GLSL (a hash recorded from `createSplatChunk` at `61bd690`, equal at `b0a7500`, the
+    Look Gate A record) and the diorama bake (normals, colours and water rings, recorded at
+    `61bd690`). Where no track is built every terrain vertex carries a zero earthwork
+    attribute, which the earthwork chunk reads as no weight.
+  - Agent capture: d11a's four bookmarks, which build no track, are pixel-identical before and
+    after. With track built, the d11a curve views differ only on the earthworks: D11a's
+    splat still draws the forest floor and its AO tint on the formation beside the straight.
+- **Look `b` is unchanged.** Its eleven render-iteration captures are pixel-identical before
+  (`81663f8`) and after all review fixes, the seam and reach fixes included.
+- **Single sources.** One `smoothstep` for render (`render/math.ts`) replaces eight private
+  copies, which a test shows return the same values, edge cases included.
+- **Not established:** the owner's reading; Look Gates A and B; how any of this reads on
+  other GPUs.
+
 ## Revisit when
 
 - Look Gate A scores low on mood, cohesion or originality in a way parameters cannot fix
@@ -391,3 +421,7 @@ ADR stays **Proposed**; nothing here is a look verdict.
 - 2026-09-27: render pass iteration findings added (the earthwork chunk's vec3 attribute and
   grass-first colours, the splat's earthwork option, facets faded on earthworks, look `b`
   calmed, agent frame costs before and after); status unchanged, still Proposed.
+- 2026-09-28: PR #83 review findings added (`d11a` compiles D11a's splat again, identical
+  where no track is built and pinned by a test; the splat's earthwork option is opt-in; look
+  `b` pixel-identical before and after the fixes; one `smoothstep`); status unchanged, still
+  Proposed.
