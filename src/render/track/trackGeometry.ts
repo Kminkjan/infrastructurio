@@ -36,8 +36,8 @@ export const TRACK_MAX_CHORD_RAD = (5 * Math.PI) / 180;
  * the ground at its nodes (D3), but between nodes the lattice-triangle terrain
  * can rise above a piece's straight height line, most across the slope at the
  * rails and ballast edges. 0.15 m was chosen from a 2026-09-27 measurement of
- * 3,000 ground-level plans on the diorama map (ADR 0010, D3 ground-following
- * finding): on straights it leaves 0.007% (primary) and 0.055% (secondary) of
+ * 3,000 ground-level plans on the diorama map (`trackLift.test.ts`; ADR 0010,
+ * D3 ground-following finding): on straights it leaves 0.007% (primary) and 0.055% (secondary) of
  * rail-top samples under the terrain, against 0.27% and 0.26% at the former
  * 0.05 m, while the 0.35 m deep ballast still meets flat ground with its
  * shoulders 0.2 m below the surface. Long curves and shifts, whose interiors
