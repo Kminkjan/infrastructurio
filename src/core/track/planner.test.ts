@@ -9,6 +9,7 @@ import { type Heading, HEADINGS, SQRT3, nearestNode, opposite, rotateHeading, st
 import { createSim } from "../sim/api";
 import { type Command, type Result, type World, createWorld } from "../sim/world";
 import { DEFAULT_TERRAIN_SIZE, type Terrain, generateTerrain, groundMmAt, isWaterAt, nodeOfOffset, offsetOfNode, terrainBoundsM } from "../terrain";
+import { hashCanonical } from "../util/hash";
 import type { Prng } from "../util/prng";
 import {
   type Candidate,
@@ -19,6 +20,7 @@ import {
   type TrackPlan,
   apportionMm,
   compareCandidates,
+  twoBendOrder,
 } from "./planner";
 
 const TERRAIN = { seed: "d3-planner", columns: 60, rows: 52 } as const;
@@ -384,6 +386,103 @@ const CASES: readonly DragCase[] = [
     label: "R 180 m · 45 km/h · 0.9%",
     lengthMm: 220_988,
   },
+  // Two bends in one drag (owner decision 2026-09-27): only when no single bend reaches the pointer's node.
+  {
+    // Nothing reaches within 120 m of the line behind the start: the U-turn end nearest the pointer lies level
+    // with it (x 200 m, like the pointer), 28 rows (121.2 m) to the left, the side ties go to.
+    name: "two-bend free: a pointer 100 m directly behind a fixed heading gives a U-turn toward it (two R 60 bends)",
+    drag: { from: node(40, 40), fromHeading: 0, to: at(20, 40), dzMm: 0, magnetism: true },
+    fit: "two-bend",
+    pieces: [curve(40, 40, 0, 3, 60, 0), curve(45, 54, 3, 3, 60, 0), ...straights(26, 68, 6, 20)],
+    end: { node: node(6, 68), heading: 6 },
+    label: "R 60 m · 25 km/h · 0.0%",
+    lengthMm: 289_740,
+  },
+  {
+    name: "two-bend free: 87 m behind a secondary heading, a U-turn too",
+    drag: { from: node(40, 40), fromHeading: 1, to: at(30, 30), dzMm: 0, magnetism: true },
+    fit: "two-bend",
+    pieces: [curve(40, 40, 1, 3, 60, 0), curve(35, 59, 4, 3, 60, 0), ...straights(16, 64, 7, 10)],
+    end: { node: node(6, 54), heading: 7 },
+    label: "R 60 m · 25 km/h · 0.0%",
+    lengthMm: 276_340,
+  },
+  {
+    // 50 m behind and 150 m to the left: a U-turn reaches the pointer's node itself.
+    name: "two-bend free: a U-turn onto the pointer's node, 150 m over (R 60, three straights between the bends)",
+    drag: { from: node(40, 40), fromHeading: 0, to: at(40, 40, -50_000, 150_000), dzMm: 0, magnetism: true },
+    fit: "two-bend",
+    pieces: [curve(40, 40, 0, 3, 60, 0), ...straights(45, 54, 3, 3), curve(42, 60, 3, 3, 60, 0), ...straights(23, 74, 6, 10)],
+    end: { node: node(13, 74), heading: 6 },
+    label: "R 60 m · 25 km/h · 0.0%",
+    lengthMm: 265_720,
+  },
+  {
+    name: "two-bend free: a 120° turn onto the pointer's node (90° + 30°, R 60)",
+    drag: { from: node(40, 40), fromHeading: 0, to: at(36, 65), dzMm: 0, magnetism: true },
+    fit: "two-bend",
+    pieces: [curve(40, 40, 0, 3, 60, 0), curve(45, 54, 3, 1, 60, 0), ...straights(39, 62, 4, 3)],
+    end: { node: node(36, 65), heading: 4 },
+    label: "R 60 m · 25 km/h · 0.0%",
+    lengthMm: 146_453,
+  },
+  {
+    name: "two-bend free: a 150° turn onto the pointer's node (90° + 60°, R 90)",
+    drag: { from: node(40, 40), fromHeading: 0, to: at(24, 83), dzMm: 0, magnetism: true },
+    fit: "two-bend",
+    pieces: [curve(40, 40, 0, 3, 90, 1), curve(47, 62, 3, 2, 90, 1), ...straights(28, 81, 5, 2)],
+    end: { node: node(24, 83), heading: 5 },
+    label: "R 90 m · 30 km/h · 0.0%",
+    lengthMm: 263_975,
+  },
+  {
+    // 30 m ahead, 60 m left: inside the 60 m turning circle, where no fit of one or two bends reaches.
+    name: "fallback: a pointer inside the turning circle to the side gets the tightest bend toward it (90°, 30 m off)",
+    drag: { from: node(40, 40), fromHeading: 0, to: at(40, 40, 30_000, 60_000), dzMm: 0, magnetism: true },
+    fit: "one-bend",
+    pieces: [curve(40, 40, 0, 3, 60, 0)],
+    end: { node: node(45, 54), heading: 3 },
+    label: "R 60 m · 25 km/h · 0.0%",
+    lengthMm: 94_870,
+  },
+  {
+    // 3 m ahead, 50 m left: the straights ahead lie nearest but stop short of halfway to the pointer.
+    name: "fallback: a pointer abeam inside the turning circle gets a bend toward it, not a stub ahead",
+    drag: { from: node(40, 40), fromHeading: 0, to: at(40, 40, 3_000, 50_000), dzMm: 0, magnetism: true },
+    fit: "one-bend",
+    pieces: [curve(40, 40, 0, 2, 60, 0)],
+    end: { node: node(47, 47), heading: 2 },
+    label: "R 60 m · 25 km/h · 0.0%",
+    lengthMm: 63_550,
+  },
+  {
+    name: "precision: a radius class alone makes both bends of the U-turn that radius (R 90, 180 m over)",
+    drag: { from: node(40, 40), fromHeading: 0, to: at(20, 40), dzMm: 0, magnetism: false, precision: { radiusM: 90 } },
+    fit: "two-bend",
+    pieces: [curve(40, 40, 0, 3, 90, 0), curve(48, 61, 3, 3, 90, 0), ...straights(19, 82, 6, 20)],
+    end: { node: node(-1, 82), heading: 6 },
+    label: "R 90 m · 30 km/h · 0.0%",
+    lengthMm: 389_608,
+  },
+  {
+    // Only a straight or a shift ends on heading 0 in one bend, and neither reaches 30 m to the side.
+    name: "precision: an end heading no single bend reaches gives an S-curve onto it (R 120)",
+    drag: { from: node(40, 40), fromHeading: 0, to: at(40, 40, 150_000, 30_000), dzMm: 0, magnetism: false, precision: { radiusM: 120, endHeading: 0 } },
+    fit: "two-bend",
+    pieces: [curve(40, 40, 0, 1, 120, 0), curve(51, 44, 1, -1, 120, 0), ...straights(62, 48, 0, 4)],
+    end: { node: node(66, 48), heading: 0 },
+    label: "R 120 m · 35 km/h · 0.0%",
+    lengthMm: 156_330,
+  },
+  {
+    name: "precision: the end heading opposite the start gives a U-turn onto the pointer's node",
+    drag: { from: node(40, 40), fromHeading: 0, to: at(40, 40, -30_000, 150_000), dzMm: 0, magnetism: false, precision: { radiusM: 60, endHeading: 6 } },
+    fit: "two-bend",
+    pieces: [curve(40, 40, 0, 3, 60, 0), ...straights(45, 54, 3, 3), curve(42, 60, 3, 3, 60, 0), ...straights(23, 74, 6, 6)],
+    end: { node: node(17, 74), heading: 6 },
+    label: "R 60 m · 25 km/h · 0.0%",
+    lengthMm: 245_720,
+  },
   {
     // The shift-first placement passes 2.2 m from the obstacle on row 41; shift-last keeps 4.33 m.
     name: "valid first: an obstacle beside the shift-first placement gives the shift-last one",
@@ -485,9 +584,11 @@ describe("planTrack drag cases", () => {
     const w = world();
     const short = w.plan({ from: node(40, 40), to: at(40, 40, 1000, 500), dzMm: 0, magnetism: true });
     expect(short).toMatchObject({ fit: "none", pieces: [], end: null, note: "Drag farther to lay track" });
-    const behind = w.plan({ from: node(40, 40), fromHeading: 0, to: at(20, 40), dzMm: 0, magnetism: true });
-    expect(behind.fit).toBe("none");
-    expect(behind.note).toMatch(/one bend turns at most 90°/);
+    // Behind a fixed heading a free end always has a U-turn (see the drag cases); a precision end heading of
+    // 150° has only fits that end over 112 m to the side, out of the 12-ring search around a pointer behind.
+    const behind = w.plan({ from: node(40, 40), fromHeading: 0, to: at(30, 40), dzMm: 0, magnetism: false, precision: { radiusM: 60, endHeading: 5 } });
+    expect(behind).toMatchObject({ fit: "none", pieces: [], end: null });
+    expect(behind.note).toBe("No R 60 m fit ending at 150° lies near the pointer; drag farther from the start or change the end heading.");
     const precise = w.plan({ from: node(40, 40), fromHeading: 0, to: at(46, 42), dzMm: 0, magnetism: false, precision: { radiusM: 360, endHeading: 3 } });
     expect(precise.fit).toBe("none");
     expect(precise.note).toBe("No R 360 m fit ending at 90° lies near the pointer; drag farther from the start or change the end heading.");
@@ -784,7 +885,8 @@ describe("planTrack on the ground: track follows the terrain", () => {
       },
     );
     await annotate(`${nodes} nodes, none below or above the ground; ${curved} plans with curves or shifts; ${((100 * steep) / pieces).toFixed(1)}% of ${pieces} pieces over 35‰`);
-    // Guards against a degenerate generator (when written: 6,882 nodes, 137 plans with curves or shifts).
+    // Guards against a degenerate generator (when written: 6,882 nodes, 137 plans with curves or shifts;
+    // 7,486 and 187 since the two-bend fallback, whose U-turns follow the ground like every plan).
     expect(nodes).toBeGreaterThan(4000);
     expect(curved).toBeGreaterThan(50);
   });
@@ -811,7 +913,7 @@ function lengthOf(pieces: readonly PieceSpec[]): number {
 }
 
 describe("candidate ranking", () => {
-  const base: Candidate = { fit: "one-bend", segs: [], bends: 1, radiusMm: 120_000, lengthMm: 100_000, turnSum: 1, sides: 0, lead: 0, endHeading: 1 };
+  const base: Candidate = { fit: "one-bend", segs: [], bends: 1, radiusMm: 120_000, lengthMm: 100_000, turnSum: 1, turn: 1, sides: 0, lead: 0, endHeading: 1 };
   const worse = (patch: Partial<Candidate>): Candidate => ({ ...base, ...patch });
 
   it("orders fewer bends → larger radius → shorter → smaller |turn| → left → earlier bend", () => {
@@ -829,6 +931,29 @@ describe("candidate ranking", () => {
       expect(compareCandidates(other, base), key).toBeGreaterThan(0);
     }
     expect(compareCandidates(base, { ...base })).toBe(0);
+  });
+
+  it("orders free two-bend fits larger radius → total turn nearer the arc turn → shorter → |turn| → left → earlier bend", () => {
+    const two: Candidate = { ...base, fit: "two-bend", bends: 2, turnSum: 6, turn: 6, sides: 0, endHeading: 6 };
+    const other = (patch: Partial<Candidate>): Candidate => ({ ...two, ...patch });
+    // With τ = 6 (a pointer behind), a U-turn beats a 150° fit of the same radius even when it is longer.
+    const order = twoBendOrder(6);
+    const pairs: [string, Candidate][] = [
+      ["radius", other({ radiusMm: 90_000, turn: 6, lengthMm: 1 })],
+      ["arc turn", other({ turn: 5, turnSum: 5, lengthMm: 1 })],
+      ["arc turn, other side", other({ turn: -6, sides: 3, lengthMm: 1 })],
+      ["length", other({ lengthMm: 100_001, turnSum: 0, sides: 0 })],
+      ["turn", other({ turnSum: 7, sides: 0, lead: 0 })],
+      ["sides", other({ sides: 1, lead: 0 })],
+      ["lead", other({ lead: 1 })],
+    ];
+    for (const [key, worse2] of pairs) {
+      expect(order(two, worse2), key).toBeLessThan(0);
+      expect(order(worse2, two), key).toBeGreaterThan(0);
+    }
+    // With τ = 4 (a pointer at 60° bearing) the 120° fit wins at equal radius.
+    expect(twoBendOrder(4)(other({ turn: 4, turnSum: 4 }), two)).toBeLessThan(0);
+    expect(order(two, { ...two })).toBe(0);
   });
 
   it("gives the same order for any input order", () => {
@@ -1032,9 +1157,10 @@ describe("planner properties", () => {
         }
       },
     );
-    // Guards against a degenerate generator only (245 and 195 of 400 when written): pointers fall
-    // anywhere within ±200 m, so drags behind a fixed start heading are empty, and some plans leave
-    // the 600 × 450 m map.
+    // Guards against a degenerate generator only (245 and 195 of 400 when written; 361 and 279 since the
+    // two-bend fallback, which turns drags behind a fixed start heading into U-turns): pointers fall
+    // anywhere within ±200 m, some precision end headings fit nothing near, and some plans leave the
+    // 600 × 450 m map.
     expect(nonEmpty).toBeGreaterThan(200);
     expect(executed).toBeGreaterThan(150);
   });
@@ -1106,7 +1232,8 @@ describe("planner properties", () => {
         }
       },
     );
-    // Guards that the generator reaches reuse and magnetism (13 and 16 of 150 runs when written).
+    // Guards that the generator reaches reuse and magnetism (13 and 16 of 150 runs when written; 17 and 16
+    // since the two-bend fallback).
     expect(reusedSome).toBeGreaterThanOrEqual(5);
     expect(snappedSome).toBeGreaterThanOrEqual(5);
   });
@@ -1195,6 +1322,108 @@ describe("planner properties", () => {
       // A plan ends within one node cell (2.887 m) of the pointer at least half the time.
       expect(Number(q(0.5))).toBeLessThanOrEqual(2.887);
       if (fromHeading === undefined) expect(onNode / offsets.length).toBeGreaterThan(0.8);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Two bends in one drag (owner decision 2026-09-27): the fallback when no single bend reaches the pointer.
+
+describe("planTrack: two bends in one drag", () => {
+  /**
+   * 5,760 drags from (60, 60): headings 0, 1, free, and precision R 120 on heading 2, pointers every 5°
+   * all around at 10–200 m. Where one bend reaches the pointer's node the plan must be the pre-fallback
+   * one, byte for byte: recorded at 211526f (before the fallback) as 2,131 such plans.
+   */
+  it("keeps every plan that one bend reaches exactly as it was before the fallback (golden hash)", () => {
+    const w = world();
+    const kept: unknown[] = [];
+    let i = 0;
+    for (const mode of ["h0", "h1", "free", "precise"] as const) {
+      for (let deg = -175; deg <= 180; deg += 5) {
+        for (let distM = 10; distM <= 200; distM += 10) {
+          const a = (deg * Math.PI) / 180;
+          const to = at(60, 60, Math.round(distM * 1000 * Math.cos(a)), Math.round(distM * 1000 * Math.sin(a)));
+          const drag: Drag = {
+            from: node(60, 60),
+            ...(mode === "h0" ? { fromHeading: 0 } : mode === "h1" ? { fromHeading: 1 } : mode === "precise" ? { fromHeading: 2 } : {}),
+            to,
+            dzMm: 0,
+            magnetism: mode !== "precise",
+            ...(mode === "precise" ? { precision: { radiusM: 120 } } : {}),
+          };
+          const plan = w.plan(drag);
+          const p = nearestNode({ x: to.xMm / 1000, y: to.yMm / 1000 });
+          if (plan.fit !== "two-bend" && plan.end && plan.end.node.q === p.q && plan.end.node.r === p.r) kept.push([i, plan]);
+          i += 1;
+        }
+      }
+    }
+    expect(i).toBe(5760);
+    expect(kept).toHaveLength(2131);
+    expect(hashCanonical(kept)).toBe("3e3fbde4");
+  });
+
+  it("plans two-bend drags deterministically, whatever order the track was built in", () => {
+    // Existing track: the line and the bridge over it, and a stub beside the first case's U-turn (its top fit clashes).
+    const setup = [...LINE, ...OVER, ...straights(30, 66, 0, 2)];
+    const drags: Drag[] = CASES.filter((c) => c.fit === "two-bend" && !c.setup).map((c) => c.drag);
+    for (const h of [0, 1, 5] as const) {
+      for (let deg = 95; deg <= 265; deg += 34) {
+        const a = ((h * 30 + deg) * Math.PI) / 180;
+        drags.push({ from: node(60, 60), fromHeading: h, to: at(60, 60, Math.round(90_000 * Math.cos(a)), Math.round(90_000 * Math.sin(a))), dzMm: 0, magnetism: true });
+      }
+    }
+    const reference = world(setup);
+    const expected = drags.map((d) => reference.plan(d));
+    expect(drags.map((d) => reference.plan(d))).toEqual(expected);
+    expect(expected.filter((p) => p.fit === "two-bend").length).toBeGreaterThanOrEqual(drags.length - 2);
+    // The stub makes the 100 m U-turn's top fit invalid; it is still the one shown, for preview to explain.
+    expect(reference.run(build(expected[0]?.pieces ?? []), false)).toMatchObject({ ok: false, reason: { code: "tracks-too-close" } });
+    forAll(
+      { seed: "two-bend-build-order", runs: 10 },
+      (prng) => shuffled(prng, setup),
+      (order) => {
+        const w = world();
+        for (const spec of order) expectOk(w.run(build([spec]), true));
+        expect(drags.map((d) => w.plan(d))).toEqual(expected);
+      },
+    );
+  });
+
+  it("follows the pointer all around the start (a dev measurement, not a gate)", async ({ annotate }) => {
+    // Pointers every 5° all around, 40–200 m out: 72 directions × 17 distances per start mode.
+    const w = world();
+    for (const fromHeading of [0, 1, undefined] as const) {
+      let onNode = 0;
+      let behind = 0;
+      let uTurns = 0;
+      const offsets: number[] = [];
+      for (let deg = -175; deg <= 180; deg += 5) {
+        for (let distM = 40; distM <= 200; distM += 10) {
+          const a = (((fromHeading === 1 ? 30 : 0) + deg) * Math.PI) / 180;
+          const to = at(60, 60, Math.round(distM * 1000 * Math.cos(a)), Math.round(distM * 1000 * Math.sin(a)));
+          const plan = w.plan({ from: node(60, 60), ...(fromHeading === undefined ? {} : { fromHeading }), to, dzMm: 0, magnetism: true });
+          if (!plan.end) throw new Error(`no plan at ${deg}°, ${distM} m`);
+          const n = nearestNode({ x: to.xMm / 1000, y: to.yMm / 1000 });
+          if (plan.end.node.q === n.q && plan.end.node.r === n.r) onNode += 1;
+          const e = at(plan.end.node.q, plan.end.node.r);
+          offsets.push(Math.hypot(e.xMm - to.xMm, e.yMm - to.yMm) / 1000);
+          if (fromHeading !== undefined && Math.abs(deg) > 90) {
+            behind += 1;
+            if (plan.end.heading === opposite(fromHeading)) uTurns += 1;
+          }
+        }
+      }
+      offsets.sort((x, y) => x - y);
+      const q = (f: number) => (offsets[Math.min(offsets.length - 1, Math.floor(f * offsets.length))] ?? Number.NaN).toFixed(2);
+      await annotate(
+        `start heading ${fromHeading ?? "free"}: end on the pointer's node ${((100 * onNode) / offsets.length).toFixed(1)}% of ${offsets.length}; end to pointer median ${q(0.5)} m, p95 ${q(0.95)} m, max ${q(1)} m` +
+          (fromHeading === undefined ? "" : `; ${uTurns} of ${behind} pointers behind end on a U-turn`),
+      );
+      // Every drag gives a plan (no pointer is out of reach any more), and every pointer behind a fixed heading turns back.
+      expect(offsets).toHaveLength(72 * 17);
+      if (fromHeading !== undefined) expect(uTurns).toBe(behind);
     }
   });
 });

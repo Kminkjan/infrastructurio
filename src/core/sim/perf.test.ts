@@ -67,7 +67,8 @@ function at(q: number, r: number, dxMm = 0, dyMm = 0): { xMm: number; yMm: numbe
 /**
  * A fixed drag list: 168 free-end drags (two starts × headings 0, 1 and free × 7 directions within
  * ±60° × 4 distances of 50–200 m), 8 drags joining the east buffer end of row 12 by magnetism, and
- * 8 drags behind a fixed start heading, which search all 12 rings and come back empty.
+ * 8 drags behind a fixed start heading. Those searched all 12 rings and came back empty until the
+ * two-bend fallback (2026-09-27); now each is a U-turn.
  */
 function plannerWorkload(): Drag[] {
   const drags: Drag[] = [];
@@ -124,10 +125,58 @@ describe("planner performance (dev measurement, not a gate)", () => {
     await annotate(`preview of the planned pieces: ${stats(previews)}`);
     expect(drags).toHaveLength(184);
     expect(snapped).toBe(8);
-    expect(empty).toBe(8);
+    expect(empty).toBe(0);
     const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] ?? Number.NaN;
     expect(median(plans)).toBeLessThan(20);
     expect(median(previews)).toBeLessThan(20);
+  });
+
+  it("plans two-bend-heavy drags: pointers behind the start and inside its turning circle", async ({ annotate }) => {
+    // Per start (two) and fixed heading (0, 1, 5): 36 pointers behind (±100–180° × 20–200 m, the U-turn
+    // fallback or an exact U-turn), 18 inside the 60 m turning circle (±40–80° at 30–70 m, the ring search
+    // over one- and two-bend fits) and 4 abeam beyond it (exact two-bend fits): 348 drags.
+    const sim = filledSim(MAX_PIECES - 100);
+    const drags: Drag[] = [];
+    const cases: (readonly [number, number])[] = [
+      ...[100, 120, 140, 160, 180, -100, -120, -140, -160].flatMap((deg) => [20, 60, 120, 200].map((distM) => [deg, distM] as const)),
+      ...[40, 60, 80, -40, -60, -80].flatMap((deg) => [30, 50, 70].map((distM) => [deg, distM] as const)),
+      ...[90, -90].flatMap((deg) => [130, 180].map((distM) => [deg, distM] as const)),
+    ];
+    for (const [q, r] of [
+      [150, 150],
+      [220, 180],
+    ] as const) {
+      for (const heading of [0, 1, 5] as const) {
+        for (const [deg, distM] of cases) {
+          const a = ((heading * 30 + deg) * Math.PI) / 180;
+          drags.push({ from: { q, r, zMm: 0 }, fromHeading: heading, to: at(q, r, Math.round(distM * 1000 * Math.cos(a)), Math.round(distM * 1000 * Math.sin(a))), dzMm: 0, magnetism: true });
+        }
+      }
+    }
+    const plans: number[] = [];
+    const previews: number[] = [];
+    const fits = new Map<string, number>();
+    for (let pass = 0; pass < 4; pass++) {
+      for (const drag of drags) {
+        const t0 = performance.now();
+        const plan = sim.planTrack(drag);
+        const t1 = performance.now();
+        if (pass === 0) fits.set(plan.fit, (fits.get(plan.fit) ?? 0) + 1);
+        if (pass > 0) plans.push(t1 - t0);
+        if (plan.pieces.length === 0) continue;
+        const t2 = performance.now();
+        sim.preview({ type: "build-track", pieces: plan.pieces, structure: "auto" });
+        const t3 = performance.now();
+        if (pass > 0) previews.push(t3 - t2);
+      }
+    }
+    await annotate(`planTrack, two-bend-heavy: ${stats(plans)}; fits ${[...fits].map(([k, v]) => `${k} ${v}`).join(", ")}`);
+    await annotate(`preview of the planned pieces: ${stats(previews)}`);
+    expect(drags).toHaveLength(348);
+    expect(fits.get("none") ?? 0).toBe(0);
+    expect(fits.get("two-bend") ?? 0).toBeGreaterThan(200);
+    const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] ?? Number.NaN;
+    expect(median(plans)).toBeLessThan(20);
   });
 
   it("plans the worst case the validation cap allows: every candidate of a long plan rejected", async ({ annotate }) => {

@@ -10,10 +10,9 @@ import {
   type ShiftTemplate,
   type Turn,
   isRadiusClass,
-  isTurn,
   shiftTemplate,
 } from "../geometry/templates";
-import { type Axial, HEADINGS, type Heading, SQRT3, isHeading, nearestNode, opposite, rotateHeading, stepLengthMm, stepOf, unit } from "../lattice";
+import { type Axial, HEADINGS, type Heading, SQRT3, isHeading, isPrimary, nearestNode, opposite, rotateHeading, stepLengthMm, stepOf, unit } from "../lattice";
 import { groundMmAt } from "../terrain";
 import { divFloor } from "../util/int";
 import { type Counts, type TrackContext, heightsAt, resolveStructure, validate } from "./validate";
@@ -25,17 +24,21 @@ import { type Counts, type TrackContext, heightsAt, resolveStructure, validate }
  * later planner tuning never breaks a replay. Pure and deterministic: the
  * same track and drag always give the same plan.
  *
- * **Shapes.** A free end is one bend: n straights + one curve or shift
- * template + m straights on the start heading d0 (51 candidates on a primary
- * d0, 75 on a secondary one: 1 straight run, 48 or 72 curves, 2 shifts). For
- * a template with axial end offset T the planner solves
- * Δ = n·step(d0) + T + m·step(d1) as a 2×2 integer system; a candidate
+ * **Shapes.** A free end is one bend when one reaches it: n straights + one
+ * curve or shift template + m straights on the start heading d0 (51
+ * candidates on a primary d0, 75 on a secondary one: 1 straight run, 48 or 72
+ * curves, 2 shifts). For a template with axial end offset T the planner
+ * solves Δ = n·step(d0) + T + m·step(d1) as a 2×2 integer system; a candidate
  * without an exact solution with n, m ≥ 0 drops out, and a collinear target
  * needs straights only. A shift has d1 = d0, so only n + m is fixed: it is
- * offered with the shift first (n = 0) and last (m = 0). A fixed end (an
- * existing port, position and heading both fixed) adds two-bend fits:
+ * offered with the shift first (n = 0) and last (m = 0). Two-bend fits are
  * straights + curve + straights + curve + straights, or two shifts to the
- * same side (two rows), solved in closed form per template pair.
+ * same side (two rows), solved in closed form per template pair
+ * (`solveThree`). A fixed end (an existing port, position and heading both
+ * fixed) takes them alongside one-bend fits. A free end takes them only as a
+ * fallback, when no one-bend fit reaches its target (owner decision
+ * 2026-09-27): then the end heading is free, d2 = d0 + t1 + t2 with each turn
+ * ±30° to ±90°, so one drag turns up to 180° (hairpins, U-turns, S-curves).
  *
  * **Start heading d0.** `drag.fromHeading` when set. Otherwise, when
  * `drag.from` is an existing buffer end, whichever of the two headings plain
@@ -46,13 +49,27 @@ import { type Counts, type TrackContext, heightsAt, resolveStructure, validate }
  * compete.
  *
  * **Target node (pointer snapping).** The pointer's nearest lattice node N
- * when some candidate reaches it, so the plan ends under the tool's snap ring
- * and follows the pointer within one node cell (≤ 2.89 m). Otherwise the
- * reachable node nearest the pointer, by an exact ring search around N
- * (distance ties go to the smaller q, then r), up to 12 rings (about 52 m);
- * nothing reachable in that range gives an empty plan with a note. Validity
- * never moves the target, so an unbuildable drag still shows where it would
- * go and `preview` explains why.
+ * when a one-bend fit reaches it (exactly the selection from before the
+ * two-bend fallback), else when a two-bend fit does, so the plan ends under
+ * the tool's snap ring and follows the pointer within one node cell
+ * (≤ 2.89 m). No fit of one or two bends (each at most 90°) reaches inside
+ * the 60 m turning circles beside the start, or behind it nearer its line
+ * than twice the smallest radius (120 m), so otherwise:
+ * - a pointer behind the start (behind the line through it square to d0)
+ *   gets the U-turn end nearest it (`nearestUTurnEnd`, exact, no range limit):
+ *   the track turns back toward it on its side, whatever the distance;
+ * - any other pointer gets the reachable node nearest it among those reaching
+ *   at least halfway to it along the drag (`reachesHalfway`, so a pointer
+ *   abeam inside a turning circle gets a bend toward it, not a stub of
+ *   straights ahead), by an exact ring search around N (distance ties go to
+ *   the smaller q, then r) up to 12 rings (about 52 m); nothing there gives
+ *   the nearest U-turn end.
+ *
+ * A U-turn needs a free end heading or one fixed opposite d0; with another
+ * precision end heading, nothing in range gives an empty plan with a note.
+ * At a fallback target, one-bend fits compete when any reach it, else
+ * two-bend fits. Validity never moves the target, so an unbuildable drag
+ * still shows where it would go and `preview` explains why.
  *
  * **Magnetism** (`drag.magnetism`, never in precision mode): the end snaps
  * to the existing buffer end nearest the pointer among those within 3 nodes
@@ -76,9 +93,28 @@ import { type Counts, type TrackContext, heightsAt, resolveStructure, validate }
  * `MAX_VALIDATIONS` candidates; when none of them is valid the top-ranked
  * candidate is returned, invalid, for the tool's preview to explain.
  *
+ * **Two bends (free end)** rank differently (`twoBendOrder`), since their end
+ * heading is free too: valid first, then the largest smaller radius (as for
+ * one bend, so a wide loop beats a tight hairpin with long straights), then
+ * the total turn nearest the arc turn τ, then shortest, smallest summed
+ * |turn|, left before right (first bend most significant), the first bend
+ * placed earlier, and the signature. τ (`arcTurn`) is the turn of the single
+ * circular arc that leaves the start on d0 and passes through the pointer:
+ * twice the pointer's bearing, or ±180° (toward the pointer's side) for a
+ * pointer abeam or behind. So a pointer beside or behind the start gets a
+ * U-turn whenever one is as wide as any other fit, as an arc drawn through
+ * the pointer would. A probe of exact two-bend plans (ADR 0010, D3 two-bend
+ * finding) found shortest-first choosing R 60 every time (a
+ * curvature-bounded shortest path uses the minimum radius: hairpins at
+ * 25 km/h with long straights), and radius-first without τ ending 21% of the
+ * pointers behind the start on 120° or 150° fits a little shorter than the
+ * U-turn. Only the best `MAX_VALIDATIONS` fits are kept, so a pool of
+ * thousands never sorts.
+ *
  * **Precision** (`drag.precision`): magnetism off, curves only of the given
- * radius class, and with `endHeading` only candidates ending on that
- * heading (single bend). Everything stays on the lattice.
+ * radius class (both bends of a two-bend fit), and with `endHeading` only
+ * candidates ending on that heading: one bend when one reaches the target,
+ * else two (an S-curve back onto d0, say). Everything stays on the lattice.
  *
  * **Elevation: track follows the ground** (owner decision, 2026-09-27, for
  * D3; D4 revisits it with the 35‰ rule and earthworks). The start z is
@@ -197,6 +233,8 @@ export interface Candidate {
   readonly lengthMm: number;
   /** Sum of |turn| over the curves, in 30° steps (a shift turns 0). */
   readonly turnSum: number;
+  /** The signed heading change from start to end, in 30° steps, left positive (−6…6; a U-turn is ±6). */
+  readonly turn: number;
   /** Left before right: 0 = left or none, 1 = right per bend, the first bend most significant. */
   readonly sides: number;
   /** Straights before the first bend: the earlier bend wins a tie. */
@@ -204,7 +242,8 @@ export interface Candidate {
   readonly endHeading: Heading;
 }
 
-interface Rules {
+/** What a drag allows, from its radius cap or precision; exported for the oracle tests. */
+export interface Rules {
   /** Whether a curve of this radius class may be used. */
   readonly allowRadius: (radiusM: RadiusClassM) => boolean;
 }
@@ -277,6 +316,7 @@ function straightCandidate(d0: Heading, k: number): Candidate {
     radiusMm: STRAIGHT_RADIUS_MM,
     lengthMm: k * stepLengthMm(d0),
     turnSum: 0,
+    turn: 0,
     sides: 0,
     lead: 0,
     endHeading: d0,
@@ -291,6 +331,7 @@ function curveCandidate(d0: Heading, t: CurveTemplate, n: number, m: number): Ca
     radiusMm: t.radiusM * 1000,
     lengthMm: n * stepLengthMm(d0) + t.lengthMm + m * stepLengthMm(t.endHeading),
     turnSum: Math.abs(t.turn),
+    turn: t.turn,
     sides: sideOf(t.turn),
     lead: n,
     endHeading: t.endHeading,
@@ -305,6 +346,7 @@ function shiftCandidate(d0: Heading, t: ShiftTemplate, n: number, m: number): Ca
     radiusMm: t.radiusMm,
     lengthMm: (n + m) * stepLengthMm(d0) + t.lengthMm,
     turnSum: 0,
+    turn: 0,
     sides: t.side === "left" ? 0 : 1,
     lead: n,
     endHeading: d0,
@@ -406,65 +448,237 @@ export function solveThree(a: Axial, la: number, b: Axial, lb: number, c: Axial,
 }
 
 /**
- * Two-bend fits from d0 arriving on `de` exactly at start + `delta`:
- * curve + curve (any turns summing to the heading change) with straights
- * before, between and after, and, when de = d0, two shifts to the same side.
+ * One turn pair of a two-bend fit from d0: the headings and steps of its
+ * three straight runs (d0, dm = d0 + turn1, de = dm + turn2) and the cone they
+ * span. The runs' non-negative combinations fill the cone between its
+ * extreme rays `lo` and `hi` (counter-clockwise, at most 180° apart, exactly
+ * 180° only for a U-turn), so D can be a combination only when
+ * det(lo, D) ≥ 0 and det(D, hi) ≥ 0: a necessary test that skips most
+ * `solveThree` calls and never rejects a fit.
  */
-function twoBend(d0: Heading, de: Heading, delta: Axial, rules: Rules): Candidate[] {
-  const out: Candidate[] = [];
-  const a = stepOf(d0);
-  const la = stepLengthMm(d0);
-  const c = stepOf(de);
-  const lc = stepLengthMm(de);
+interface TurnPair {
+  readonly turn1: Turn;
+  readonly turn2: Turn;
+  readonly dm: Heading;
+  readonly de: Heading;
+  readonly a: Axial;
+  readonly la: number;
+  readonly b: Axial;
+  readonly lb: number;
+  readonly c: Axial;
+  readonly lc: number;
+  readonly lo: Axial;
+  readonly hi: Axial;
+}
+
+/** Every turn pair from each start heading, built once: 36 per heading (6 × 6 turns). */
+const TURN_PAIRS: readonly (readonly TurnPair[])[] = HEADINGS.map((d0) => {
+  const out: TurnPair[] = [];
   for (const turn1 of CURVE_TURNS) {
     const dm = rotateHeading(d0, turn1);
-    const turn2 = signedTurn(dm, de);
-    if (!isTurn(turn2)) continue;
-    const b = stepOf(dm);
-    const lb = stepLengthMm(dm);
-    for (const t1 of curvesTurning(d0, turn1)) {
-      if (!rules.allowRadius(t1.radiusM)) continue;
-      for (const t2 of curvesTurning(dm, turn2)) {
-        if (!rules.allowRadius(t2.radiusM)) continue;
-        const D = { q: delta.q - t1.dq - t2.dq, r: delta.r - t1.dr - t2.dr };
-        for (const [x, y, z] of solveThree(a, la, b, lb, c, lc, D)) {
-          out.push({
-            fit: "two-bend",
-            segs: [...straightSegs(d0, x), { kind: "curve", t: t1 }, ...straightSegs(dm, y), { kind: "curve", t: t2 }, ...straightSegs(de, z)],
-            bends: 2,
-            radiusMm: Math.min(t1.radiusM, t2.radiusM) * 1000,
-            lengthMm: x * la + t1.lengthMm + y * lb + t2.lengthMm + z * lc,
-            turnSum: Math.abs(turn1) + Math.abs(turn2),
-            sides: 2 * sideOf(turn1) + sideOf(turn2),
-            lead: x,
-            endHeading: de,
-          });
-        }
-      }
-    }
-  }
-  if (de === d0) {
-    for (const side of SHIFT_SIDES) {
-      const t = shiftTemplate(d0, side);
-      const k = multipleOf({ q: delta.q - 2 * t.dq, r: delta.r - 2 * t.dr }, a);
-      if (k === undefined || k < 0) continue;
-      const placements: readonly (readonly [number, number])[] = k === 0 ? [[0, 0]] : [[0, k], [k, 0]];
-      for (const [x, z] of placements) {
-        out.push({
-          fit: "two-bend",
-          segs: [...straightSegs(d0, x), { kind: "shift", t }, { kind: "shift", t }, ...straightSegs(d0, z)],
-          bends: 2,
-          radiusMm: t.radiusMm,
-          lengthMm: k * la + 2 * t.lengthMm,
-          turnSum: 0,
-          sides: 3 * (t.side === "left" ? 0 : 1),
-          lead: x,
-          endHeading: d0,
-        });
-      }
+    for (const turn2 of CURVE_TURNS) {
+      const de = rotateHeading(dm, turn2);
+      const lo = Math.min(0, turn1, turn1 + turn2);
+      const hi = Math.max(0, turn1, turn1 + turn2);
+      out.push({
+        turn1,
+        turn2,
+        dm,
+        de,
+        a: stepOf(d0),
+        la: stepLengthMm(d0),
+        b: stepOf(dm),
+        lb: stepLengthMm(dm),
+        c: stepOf(de),
+        lc: stepLengthMm(de),
+        lo: stepOf(rotateHeading(d0, lo)),
+        hi: stepOf(rotateHeading(d0, hi)),
+      });
     }
   }
   return out;
+});
+
+function turnPairsFrom(d0: Heading, endHeading: Heading | undefined): readonly TurnPair[] {
+  const all = TURN_PAIRS[d0] ?? [];
+  return endHeading === undefined ? all : all.filter((tp) => tp.de === endHeading);
+}
+
+function curvePairCandidate(d0: Heading, tp: TurnPair, t1: CurveTemplate, t2: CurveTemplate, [x, y, z]: Triple): Candidate {
+  return {
+    fit: "two-bend",
+    segs: [...straightSegs(d0, x), { kind: "curve", t: t1 }, ...straightSegs(tp.dm, y), { kind: "curve", t: t2 }, ...straightSegs(tp.de, z)],
+    bends: 2,
+    radiusMm: Math.min(t1.radiusM, t2.radiusM) * 1000,
+    lengthMm: x * tp.la + t1.lengthMm + y * tp.lb + t2.lengthMm + z * tp.lc,
+    turnSum: Math.abs(tp.turn1) + Math.abs(tp.turn2),
+    turn: tp.turn1 + tp.turn2,
+    sides: 2 * sideOf(tp.turn1) + sideOf(tp.turn2),
+    lead: x,
+    endHeading: tp.de,
+  };
+}
+
+/** The placements of two shifts to one side landing on start + `delta`: none, or (x, z) straights before and after. */
+function doubleShiftPlacements(d0: Heading, t: ShiftTemplate, delta: Axial): readonly (readonly [number, number])[] {
+  const k = multipleOf({ q: delta.q - 2 * t.dq, r: delta.r - 2 * t.dr }, stepOf(d0));
+  if (k === undefined || k < 0) return [];
+  return k === 0 ? [[0, 0]] : [[0, k], [k, 0]];
+}
+
+function doubleShiftCandidate(d0: Heading, t: ShiftTemplate, x: number, z: number): Candidate {
+  return {
+    fit: "two-bend",
+    segs: [...straightSegs(d0, x), { kind: "shift", t }, { kind: "shift", t }, ...straightSegs(d0, z)],
+    bends: 2,
+    radiusMm: t.radiusMm,
+    lengthMm: (x + z) * stepLengthMm(d0) + 2 * t.lengthMm,
+    turnSum: 0,
+    turn: 0,
+    sides: 3 * (t.side === "left" ? 0 : 1),
+    lead: x,
+    endHeading: d0,
+  };
+}
+
+/**
+ * Every two-bend fit from d0 landing exactly on start + `delta`, each passed
+ * to `emit`: curve + curve (turns t1, t2 of ±30° to ±90° each) with straights
+ * before, between and after, and, when the end heading may be d0, two shifts
+ * to the same side. `endHeading` restricts the fits to one arrival heading (a
+ * port, or precision); undefined leaves it free, d0 + t1 + t2, up to ±180°.
+ * `skip(radiusMm)` may drop a curve pair, by its smaller radius, before it is
+ * solved (the free fallback's bound).
+ */
+function forEachTwoBend(
+  d0: Heading,
+  delta: Axial,
+  endHeading: Heading | undefined,
+  rules: Rules,
+  emit: (c: Candidate) => void,
+  skip?: (radiusMm: number) => boolean,
+): void {
+  for (const tp of turnPairsFrom(d0, endHeading)) {
+    const v1 = det(tp.lo, delta);
+    const v2 = det(delta, tp.hi);
+    for (const t1 of curvesTurning(d0, tp.turn1)) {
+      if (!rules.allowRadius(t1.radiusM)) continue;
+      for (const t2 of curvesTurning(tp.dm, tp.turn2)) {
+        if (!rules.allowRadius(t2.radiusM)) continue;
+        const T = { q: t1.dq + t2.dq, r: t1.dr + t2.dr };
+        // D = delta − T lies in the cone only if det(lo, D) ≥ 0 and det(D, hi) ≥ 0.
+        if (det(tp.lo, T) > v1 || det(T, tp.hi) > v2) continue;
+        if (skip?.(Math.min(t1.radiusM, t2.radiusM) * 1000)) continue;
+        for (const xyz of solveThree(tp.a, tp.la, tp.b, tp.lb, tp.c, tp.lc, sub(delta, T))) emit(curvePairCandidate(d0, tp, t1, t2, xyz));
+      }
+    }
+  }
+  if (endHeading === undefined || endHeading === d0) {
+    for (const side of SHIFT_SIDES) {
+      const t = shiftTemplate(d0, side);
+      for (const [x, z] of doubleShiftPlacements(d0, t, delta)) emit(doubleShiftCandidate(d0, t, x, z));
+    }
+  }
+}
+
+/**
+ * Every two-bend fit from d0 landing exactly on start + `delta` (see
+ * `forEachTwoBend`), unranked: a port join takes them all, with `endHeading`
+ * the port's. Exported for the oracle tests.
+ */
+export function twoBendFits(d0: Heading, delta: Axial, endHeading: Heading | undefined, rules: Rules): Candidate[] {
+  const out: Candidate[] = [];
+  forEachTwoBend(d0, delta, endHeading, rules, (c) => out.push(c));
+  return out;
+}
+
+/**
+ * The best `MAX_VALIDATIONS` two-bend fits of a free end at start + `delta`,
+ * best first by `twoBendOrder(arcTurnSteps)` (see "Two bends" in the module
+ * comment). Only that many can be validated, so no more are kept, and a
+ * curve pair whose smaller radius is below the worst kept fit's (radius is
+ * the first key) is skipped unsolved. Exported for the oracle tests.
+ */
+export function bestTwoBend(d0: Heading, delta: Axial, endHeading: Heading | undefined, rules: Rules, arcTurnSteps: number): Candidate[] {
+  const kept: Candidate[] = [];
+  const order = twoBendOrder(arcTurnSteps);
+  const skip = (radiusMm: number): boolean => {
+    const worst = kept.length === MAX_VALIDATIONS ? kept[MAX_VALIDATIONS - 1] : undefined;
+    return worst !== undefined && radiusMm < worst.radiusMm;
+  };
+  forEachTwoBend(d0, delta, endHeading, rules, (c) => keepBest(kept, c, order, MAX_VALIDATIONS), skip);
+  return kept;
+}
+
+/** Inserts `c` into `kept` (sorted best first by `cmp`), keeping at most `limit`. */
+function keepBest(kept: Candidate[], c: Candidate, cmp: (a: Candidate, b: Candidate) => number, limit: number): void {
+  const worst = kept[kept.length - 1];
+  if (kept.length === limit && worst && cmp(c, worst) >= 0) return;
+  let i = kept.length;
+  kept.push(c);
+  while (i > 0) {
+    const prev = kept[i - 1];
+    if (!prev || cmp(c, prev) >= 0) break;
+    kept[i] = prev;
+    i -= 1;
+  }
+  kept[i] = c;
+  if (kept.length > limit) kept.pop();
+}
+
+interface PairRow {
+  readonly dq: number;
+  readonly dr: number;
+  /** det(lo, T) and det(T, hi): the pair can reach delta only when det(lo, delta) ≥ s1 and det(delta, hi) ≥ s2. */
+  readonly s1: number;
+  readonly s2: number;
+}
+
+interface ReachRows {
+  readonly tp: TurnPair;
+  /** Sorted by s1, so a scan stops at the first row past det(lo, delta). */
+  readonly rows: readonly PairRow[];
+  readonly min2: number;
+}
+
+/**
+ * Whether any two-bend fit from d0 reaches start + delta, for the snapping
+ * search, which asks this of many nodes: the curve pairs are tabled once per
+ * call, per turn pair and sorted by their cone offsets, so a node outside
+ * every pair's cone costs about two determinants per turn pair. Agrees
+ * exactly with `twoBendFits` finding a fit (an oracle test checks it).
+ * Exported for that test.
+ */
+export function twoBendReach(d0: Heading, endHeading: Heading | undefined, rules: Rules): (delta: Axial) => boolean {
+  const table: ReachRows[] = [];
+  for (const tp of turnPairsFrom(d0, endHeading)) {
+    const rows: PairRow[] = [];
+    for (const t1 of curvesTurning(d0, tp.turn1)) {
+      if (!rules.allowRadius(t1.radiusM)) continue;
+      for (const t2 of curvesTurning(tp.dm, tp.turn2)) {
+        if (!rules.allowRadius(t2.radiusM)) continue;
+        const T = { q: t1.dq + t2.dq, r: t1.dr + t2.dr };
+        rows.push({ dq: T.q, dr: T.r, s1: det(tp.lo, T), s2: det(T, tp.hi) });
+      }
+    }
+    if (rows.length === 0) continue;
+    rows.sort((x, y) => x.s1 - y.s1);
+    table.push({ tp, rows, min2: Math.min(...rows.map((row) => row.s2)) });
+  }
+  const shifts = endHeading === undefined || endHeading === d0 ? SHIFT_SIDES.map((side) => shiftTemplate(d0, side)) : [];
+  return (delta) => {
+    for (const { tp, rows, min2 } of table) {
+      const v1 = det(tp.lo, delta);
+      const v2 = det(delta, tp.hi);
+      if (v2 < min2) continue;
+      for (const row of rows) {
+        if (row.s1 > v1) break;
+        if (row.s2 > v2) continue;
+        if (solveThree(tp.a, tp.la, tp.b, tp.lb, tp.c, tp.lc, { q: delta.q - row.dq, r: delta.r - row.dr }).length > 0) return true;
+      }
+    }
+    return shifts.some((t) => doubleShiftPlacements(d0, t, delta).length > 0);
+  };
 }
 
 function signature(c: Candidate): string {
@@ -481,9 +695,31 @@ function signature(c: Candidate): string {
 export function compareCandidates(a: Candidate, b: Candidate): number {
   const d = a.bends - b.bends || b.radiusMm - a.radiusMm || a.lengthMm - b.lengthMm || a.turnSum - b.turnSum || a.sides - b.sides || a.lead - b.lead;
   if (d !== 0) return d;
+  return compareSignatures(a, b);
+}
+
+function compareSignatures(a: Candidate, b: Candidate): number {
   const sa = signature(a);
   const sb = signature(b);
   return sa < sb ? -1 : sa > sb ? 1 : 0;
+}
+
+/**
+ * The rank of a free end's two-bend fits (the fallback when no single bend
+ * reaches the target), best first; see "Two bends" in the module comment.
+ * Exported for the oracle test.
+ */
+export function twoBendOrder(arcTurnSteps: number): (a: Candidate, b: Candidate) => number {
+  return (a, b) => {
+    const d =
+      b.radiusMm - a.radiusMm ||
+      Math.abs(a.turn - arcTurnSteps) - Math.abs(b.turn - arcTurnSteps) ||
+      a.lengthMm - b.lengthMm ||
+      a.turnSum - b.turnSum ||
+      a.sides - b.sides ||
+      a.lead - b.lead;
+    return d !== 0 ? d : compareSignatures(a, b);
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -776,9 +1012,13 @@ function finish(ctx: PlannerContext, chosen: Chosen, snapped: NodeRef | null): T
   });
 }
 
-/** Ranks the candidates and returns the first valid one among the first `MAX_VALIDATIONS`, else the top one. */
+/** Ranks the candidates by `compareCandidates` and chooses among them. */
 function choose(ctx: PlannerContext, from: NodeRef, endZMm: number, candidates: readonly Candidate[]): Chosen {
-  const ranked = [...candidates].sort(compareCandidates);
+  return chooseRanked(ctx, from, endZMm, [...candidates].sort(compareCandidates));
+}
+
+/** Returns the first valid candidate among the first `MAX_VALIDATIONS` of `ranked` (best first), else the top one. */
+function chooseRanked(ctx: PlannerContext, from: NodeRef, endZMm: number, ranked: readonly Candidate[]): Chosen {
   const structure = resolveStructure("auto");
   let top: Chosen | undefined;
   for (let i = 0; i < ranked.length && i < MAX_VALIDATIONS; i++) {
@@ -796,7 +1036,8 @@ function choose(ctx: PlannerContext, from: NodeRef, endZMm: number, candidates: 
 // ---------------------------------------------------------------------------
 // Snapping
 
-interface PlanXY {
+/** A plan position in mm as floats: for choosing (snapping, ranking), never for keys. */
+export interface PlanXY {
   readonly x: number;
   readonly y: number;
 }
@@ -815,6 +1056,112 @@ function dist2(p: PlanXY, q: number, r: number): number {
 
 function hexDistance(dq: number, dr: number): number {
   return divFloor(Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr), 2);
+}
+
+/** The pointer relative to the start in d0's frame, mm: `ahead` along d0, `left` square to it. */
+function frameOf(p: PlanXY, from: Axial, d0: Heading): { readonly ahead: number; readonly left: number } {
+  const s = planOf(from.q, from.r);
+  const u = unit(d0);
+  const dx = p.x - s.x;
+  const dy = p.y - s.y;
+  return { ahead: dx * u.x + dy * u.y, left: u.x * dy - u.y * dx };
+}
+
+/**
+ * The turn, in 30° steps, that a single circular arc leaving the start on
+ * d0 and passing through the pointer would make: twice the pointer's bearing
+ * from d0 (the tangent–chord angle), as the nearest heading step (ties to the
+ * lower heading index). The arc's end direction is the pointer offset
+ * (ahead, left) squared as a complex number, (ahead² − left², 2·ahead·left),
+ * so no trigonometry is needed. A pointer abeam or behind the start gives a
+ * U-turn toward its side, ±6 (left when exactly on the line): an arc through
+ * it would turn 180° or more. Exported for the oracle tests.
+ */
+export function arcTurn(p: PlanXY, from: Axial, d0: Heading): number {
+  const { ahead, left } = frameOf(p, from, d0);
+  const side = left < 0 ? -6 : 6;
+  if (ahead <= 0) return side;
+  const u = unit(d0);
+  const vx = ahead * ahead - left * left;
+  const vy = 2 * ahead * left;
+  const t = signedTurn(d0, nearestHeading(vx * u.x - vy * u.y, vx * u.y + vy * u.x));
+  return t === -6 ? side : t;
+}
+
+/**
+ * The U-turn end nearest the pointer: the node, among those a two-bend fit
+ * turning 180° reaches, nearest `p` (ties: left before right, then the
+ * smaller q, then r). A U-turn is two 90° bends to one side, so its
+ * straights run on d0, on d0 ± 90° and back on d0 + 180°: each template pair
+ * reaches T + k·step(d0) + y·step(d0 ± 90°) for any integer k and y ≥ 0. The
+ * two steps are square to each other, so the nearest such node rounds each
+ * coordinate on its own (both neighbours are checked); the minimum over the
+ * pairs is then exact. Undefined when the rules allow no U-turn pair.
+ * Exported for the oracle tests.
+ */
+export function nearestUTurnEnd(p: PlanXY, from: Axial, d0: Heading, rules: Rules): Axial | undefined {
+  let best: Axial | undefined;
+  let bestKey: readonly [number, number, number, number] | undefined;
+  const a = stepOf(d0);
+  const ua = unit(d0);
+  const lenA = isPrimary(d0) ? 5000 : 5000 * SQRT3;
+  ([3, -3] as const).forEach((turn, side) => {
+    const dm = rotateHeading(d0, turn);
+    const b = stepOf(dm);
+    const ub = unit(dm);
+    const lenB = isPrimary(dm) ? 5000 : 5000 * SQRT3;
+    for (const t1 of curvesTurning(d0, turn)) {
+      if (!rules.allowRadius(t1.radiusM)) continue;
+      for (const t2 of curvesTurning(dm, turn)) {
+        if (!rules.allowRadius(t2.radiusM)) continue;
+        const q0 = from.q + t1.dq + t2.dq;
+        const r0 = from.r + t1.dr + t2.dr;
+        const o = planOf(q0, r0);
+        const f = ((p.x - o.x) * ua.x + (p.y - o.y) * ua.y) / lenA;
+        const l = ((p.x - o.x) * ub.x + (p.y - o.y) * ub.y) / lenB;
+        const k0 = Math.floor(f);
+        const y0 = Math.max(0, Math.floor(l));
+        for (const k of [k0, k0 + 1]) {
+          for (const y of y0 === 0 && l < 0 ? [0] : [y0, y0 + 1]) {
+            const q = q0 + k * a.q + y * b.q;
+            const r = r0 + k * a.r + y * b.r;
+            const key = [dist2(p, q, r), side, q, r] as const;
+            if (bestKey && compareTuples(key, bestKey) >= 0) continue;
+            best = { q, r };
+            bestKey = key;
+          }
+        }
+      }
+    }
+  });
+  return best;
+}
+
+/**
+ * Whether a node reaches at least halfway from the start to the pointer,
+ * measured along the drag (the start → pointer direction). The fallback
+ * search skips nodes that stop short of that, so a pointer abeam inside the
+ * turning circle gets a bend towards it instead of a stub of straights ahead,
+ * which lie nearer it. Beyond a few nodes from the start, nodes within a few
+ * metres of the pointer always pass.
+ */
+function reachesHalfway(p: PlanXY, from: Axial): (node: Axial) => boolean {
+  const s = planOf(from.q, from.r);
+  const wx = p.x - s.x;
+  const wy = p.y - s.y;
+  const w2 = wx * wx + wy * wy;
+  return (node) => {
+    const e = planOf(node.q, node.r);
+    return 2 * ((e.x - s.x) * wx + (e.y - s.y) * wy) >= w2;
+  };
+}
+
+function compareTuples(a: readonly number[], b: readonly number[]): number {
+  for (let i = 0; i < a.length; i++) {
+    const d = (a[i] ?? 0) - (b[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
 }
 
 /** The heading whose direction is nearest (dx, dy); ties to the lower index. */
@@ -921,7 +1268,7 @@ function planToPort(ctx: PlannerContext, drag: Drag, from: NodeRef, port: Port, 
   const delta = sub(port.node, from);
   if (delta.q === 0 && delta.r === 0) return undefined;
   const d0 = startHeading(ctx, from, drag.fromHeading, planOf(port.node.q, port.node.r));
-  const candidates = [...singleBend(d0, delta, port.heading, rules), ...twoBend(d0, port.heading, delta, rules)];
+  const candidates = [...singleBend(d0, delta, port.heading, rules), ...twoBendFits(d0, delta, port.heading, rules)];
   if (candidates.length === 0) return undefined;
   return finish(ctx, choose(ctx, from, port.node.zMm, candidates), snapped);
 }
@@ -978,14 +1325,32 @@ export function planTrack(ctx: PlannerContext, drag: Drag): TrackPlan {
   if (n.q === from.q && n.r === from.r) return emptyPlan("Drag farther to lay track");
   const d0 = startHeading(ctx, from, drag.fromHeading, pointer);
   const endHeading = precision?.endHeading;
-  const target = nearestReachable(pointer, n, (node) => singleBend(d0, sub(node, from), endHeading, rules).length > 0);
+  const oneBend = (node: Axial): Candidate[] => singleBend(d0, sub(node, from), endHeading, rules);
+  // One bend reaching the pointer's node: the selection as before the two-bend fallback, exactly.
+  const atPointer = oneBend(n);
+  if (atPointer.length > 0) return finish(ctx, choose(ctx, from, endZMm, atPointer), null);
+  // Otherwise two bends in one drag (owner decision 2026-09-27).
+  const tau = arcTurn(pointer, from, d0);
+  const twoAtPointer = bestTwoBend(d0, sub(n, from), endHeading, rules, tau);
+  if (twoAtPointer.length > 0) return finish(ctx, chooseRanked(ctx, from, endZMm, twoAtPointer), null);
+  const uTurns = endHeading === undefined || endHeading === opposite(d0);
+  let target: Axial | undefined;
+  if (uTurns && frameOf(pointer, from, d0).ahead < 0) {
+    target = nearestUTurnEnd(pointer, from, d0, rules);
+  } else {
+    const halfway = reachesHalfway(pointer, from);
+    const twoReach = twoBendReach(d0, endHeading, rules);
+    target = nearestReachable(pointer, n, (node) => halfway(node) && (oneBend(node).length > 0 || twoReach(sub(node, from))));
+    if (!target && uTurns) target = nearestUTurnEnd(pointer, from, d0, rules);
+  }
   if (!target) {
     return emptyPlan(
       precision && endHeading !== undefined
         ? `No R ${precision.radiusM} m fit ending at ${endHeading * 30}° lies near the pointer; drag farther from the start or change the end heading.`
-        : "No track from this heading reaches near the pointer (one bend turns at most 90°); drag ahead of the start, or chain a second drag.",
+        : "No track from this heading reaches near the pointer; drag farther from the start.",
     );
   }
-  const candidates = singleBend(d0, sub(target, from), endHeading, rules);
-  return finish(ctx, choose(ctx, from, endZMm, candidates), null);
+  const atTarget = oneBend(target);
+  if (atTarget.length > 0) return finish(ctx, choose(ctx, from, endZMm, atTarget), null);
+  return finish(ctx, chooseRanked(ctx, from, endZMm, bestTwoBend(d0, sub(target, from), endHeading, rules, tau)), null);
 }

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { cameraView, dragBetween, findDryRun, lookAtNode, nodeAtOffset, nodeScreen, openDiorama, snapshot, undoToEmpty } from "./hook";
+import { cameraView, dragBetween, findDryBox, findDryRun, lookAtNode, nodeAtOffset, nodeScreen, openDiorama, snapshot, undoToEmpty } from "./hook";
 
 /**
  * D3 construction e2e (agent evidence: synthetic input through the real
@@ -243,6 +243,53 @@ test("builds a closed loop by dragging, then undoes back to an empty network", a
   expect((await snapshot(page)).tool).toBe("select");
   const undos = await undoToEmpty(page);
   expect(undos).toBe(5);
+  expect(errors).toEqual([]);
+});
+
+test("turns back in one drag: a U-turn from a chained start, laid with a click", async ({ page }) => {
+  // Two bends in one drag (owner decision 2026-09-27). After an 8-node run east, the chain leaves east;
+  // a pointer 40 m behind its end and 50 m north is out of reach of any fit, so the plan is the U-turn
+  // end nearest it: two 90° bends at R 60 (28 rows, 121 m, north) and 8 straights back west, level with
+  // the pointer. A dry box of 28 × 34 nodes holds it all.
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await openDiorama(page);
+  const box = await findDryBox(page, 28, 34);
+  const [q, r] = nodeAtOffset(box.q, box.r, 15, 9);
+  const centre = nodeAtOffset(q, r, 50, 60);
+  await lookAtNode(page, centre[0], centre[1], 4);
+  await page.keyboard.press("1");
+  await dragBetween(page, await nodeScreen(page, q, r), await nodeScreen(page, q + 8, r));
+  let s = await snapshot(page);
+  expect(s.pieces).toBe(8);
+  expect(s.phase).toBe("anchored");
+
+  const [pq, pr] = nodeAtOffset(q + 8, r, -40, 50);
+  const behind = await nodeScreen(page, pq, pr);
+  await page.mouse.move(behind.x, behind.y, { steps: 10 });
+  await expect(page.getByTestId("construction-tooltip")).toContainText("Pieces: 10 new, 0 reused");
+  await expect(page.getByTestId("construction-tooltip")).toContainText("Min radius 60 m");
+  await page.mouse.click(behind.x, behind.y);
+  s = await snapshot(page);
+  expect(s.pieces).toBe(18);
+  // Still chained, now from the U-turn's end: the track's two buffer ends are the start and that end.
+  expect(s.phase).toBe("anchored");
+  const ends = await page.evaluate(
+    ({ q, r }) =>
+      (window.__diorama as unknown as { network(): { nodes: { q: number; r: number; kind: string }[] } })
+        .network()
+        .nodes.filter((n) => n.kind === "buffer")
+        .map((n) => [n.q - q, n.r - r])
+        .sort((a, b) => (a[0] ?? 0) - (b[0] ?? 0)),
+    { q, r },
+  );
+  expect(ends).toEqual([
+    [-14, 28],
+    [0, 0],
+  ]);
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  expect(await undoToEmpty(page)).toBe(2);
   expect(errors).toEqual([]);
 });
 

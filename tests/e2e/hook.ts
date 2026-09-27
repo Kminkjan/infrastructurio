@@ -96,6 +96,29 @@ export async function findDryRun(page: Page, length: number, rowFraction = 0.25)
   );
 }
 
+/**
+ * The south-west node of a dry box `columns` × `rows` nodes (offset columns and rows), searched from
+ * `rowFraction` of the way up the map and 30–80 % across it, away from the river and the lake.
+ */
+export async function findDryBox(page: Page, columns: number, rows: number, rowFraction = 0.2): Promise<{ q: number; r: number }> {
+  return page.evaluate(
+    ({ columns, rows, rowFraction }) => {
+      const t = window.__diorama?.terrain;
+      if (!t) throw new Error("no terrain");
+      const dry = (col: number, row: number) => col >= 0 && row >= 0 && col < t.columns && row < t.rows && !t.water[row * t.columns + col];
+      for (let row0 = Math.round(t.rows * rowFraction); row0 + rows < t.rows * 0.9; row0 += 2) {
+        for (let col0 = Math.round(t.columns * 0.3); col0 + columns < t.columns * 0.8; col0 += 2) {
+          let ok = true;
+          for (let row = row0; ok && row < row0 + rows; row++) for (let col = col0; ok && col < col0 + columns; col++) ok = dry(col, row);
+          if (ok) return { q: col0 - Math.floor(row0 / 2), r: row0 };
+        }
+      }
+      throw new Error("no dry box found");
+    },
+    { columns, rows, rowFraction },
+  );
+}
+
 /** The lattice node nearest (q0, r0) moved by (dx east, dy north) metres (a = 5 m, rows 4.33 m apart). */
 export function nodeAtOffset(q0: number, r0: number, dx: number, dy: number): [number, number] {
   const rowM = 2.5 * 1.7320508075688772;
