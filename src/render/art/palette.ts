@@ -86,6 +86,8 @@ const BASE = {
   uiInk: 0x3b3a36,
   signalRed: 0xc8453a,
   signalGreen: 0x5e9c5a,
+  // D3: the tooltip's middle grade band (green ≤ 1.5 %, amber up to the maximum, red above it)
+  signalAmber: 0xd9a13b,
   // build states
   ghostValid: 0xffffff,
   ghostInvalid: 0xe0584c,

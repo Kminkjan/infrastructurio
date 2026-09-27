@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
  *   three/react, no wall-clock, randomness, DOM or console APIs;
  * - trigonometry and friends only in the whitelisted geometry modules;
  * - src/tools has no three, DOM, clock or randomness (reducers are pure);
- *   src/render never imports src/ui;
+ *   src/render never imports src/ui, and src/ui never three or src/render;
  * - src/render, src/tools and src/ui reach the core only through
  *   core/sim/api.ts and the pure core/geometry/sample.ts (src/app, the
  *   composition root, may import the core directly);
@@ -86,6 +86,9 @@ function layerViolations(path: string, raw: string): string[] {
       if (target.startsWith("/src/render/") || target.startsWith("/src/ui/") || target === "react") problems.push(`tools import ${spec}`);
     }
     if (path.startsWith("/src/render/") && target.startsWith("/src/ui/")) problems.push(`render imports ui ${spec}`);
+    if (path.startsWith("/src/ui/") && (target === "three" || target.startsWith("three/") || target.startsWith("/src/render/"))) {
+      problems.push(`ui imports ${spec}`);
+    }
   }
   if (path.startsWith("/src/tools/")) {
     // Reducers are pure: the same state, event and ctx always give the same result.
@@ -136,7 +139,7 @@ describe("architecture boundaries", () => {
     expect(failures).toEqual([]);
   });
 
-  it("keeps tools free of three/DOM and render free of ui imports", () => {
+  it("keeps tools free of three/DOM, render free of ui, and ui free of three/render", () => {
     const failures = Object.entries(sources)
       .filter(([path]) => !isTest(path))
       .flatMap(([path, code]) => layerViolations(path, code).map((v) => `${path}: ${v}`));
@@ -179,6 +182,8 @@ describe("architecture boundaries", () => {
     ).toEqual(["tools touch the DOM", "tools use DOM types", "tools read a clock or randomness", "tools schedule work"]);
     expect(layerViolations("/src/tools/track.ts", 'import type { ToolEvent } from "./types";\nconst d = Math.hypot(1, 2);')).toEqual([]);
     expect(layerViolations("/src/render/hud.ts", 'import { Hud } from "../ui/Hud";')).not.toEqual([]);
+    expect(layerViolations("/src/ui/Hud.tsx", 'import { palette } from "../render/art/palette";\nimport { Color } from "three";')).toHaveLength(2);
+    expect(layerViolations("/src/ui/Hud.tsx", 'import { useSyncExternalStore } from "react";\nimport type { HudStore } from "./store";')).toEqual([]);
     expect(coreViolations("/src/core/a.ts", '// Math.random() in a comment\nimport { b } from "./b";')).toEqual([]);
     expect(coreViolations("/src/core/track/a.ts", 'import { c } from "../lattice";')).toEqual([]);
     expect(coreGatewayViolations("/src/render/terrain/x.ts", 'import { toWorld } from "../../core/lattice";')).toHaveLength(1);

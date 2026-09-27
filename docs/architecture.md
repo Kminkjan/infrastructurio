@@ -148,7 +148,7 @@ The allowed import directions are:
 | Tools never import three, render, ui or react, never touch `window`/`document`/`navigator` or DOM types, and read no clock or randomness and schedule nothing (reducers are pure) | boundary test | on main; clock, randomness, scheduling and DOM types added in D3 (2026-09-27) |
 | Render never imports ui | boundary test | on main |
 | Render, tools and ui import core only through `sim/api.ts` (snapshot types and the façade; it re-exports the lattice, terrain and scenario helpers the edges need) and the pure `geometry/sample.ts`, so curve maths has one source. `src/app`, the composition root, may import core directly; `main.ts` does | boundary test (test files exempt, like every scan) | since D3 (2026-09-27): the D1 and D11a exceptions were cleared when `render/terrain/`, `render/scenery/`, `render/labels/placeLabels.ts` and `render/camera/bookmarks.ts` moved to `sim/api.ts`, which now also re-exports the scenario types |
-| Ui imports neither three nor render | convention | recommendation |
+| Ui imports neither three nor render (it gets palette colours as CSS custom properties from `src/app`) | boundary test | since D3 (2026-09-27) |
 
 **[tsconfig.core.json](../tsconfig.core.json)**
 - Settings: `lib: ["ES2022"]`, `types: []`, `strict`, `noUncheckedIndexedAccess`,
