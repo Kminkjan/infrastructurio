@@ -35,7 +35,8 @@ const PAN_KEYS: Readonly<Record<string, "left" | "right" | "up" | "down">> = {
   KeyA: "left",
   KeyS: "down",
   KeyD: "right",
-  // Arrows pan until D3 gives them to the keyboard lattice cursor.
+  // Arrows pan too, except while the track tool has them for the keyboard lattice cursor
+  // (the app's InputRouter then never offers them here).
   ArrowUp: "up",
   ArrowLeft: "left",
   ArrowDown: "down",
@@ -45,10 +46,14 @@ const PAN_KEYS: Readonly<Record<string, "left" | "right" | "up" | "down">> = {
 /**
  * Camera input (architecture "Camera"): wheel zoom-to-cursor (×1.15 a notch,
  * pinch as ctrl-wheel), right/middle drag pan, left drag on empty ground pans
- * too (D1 has no tools), WASD/arrows at 700 px/s with a short glide, Q/E yaw
- * steps, +/− named zooms and Home to recentre. It mutates the `IsoCamera`
- * state and asks the scheduler for frames; the three camera catches up in
- * `update`, which the app calls first in every frame.
+ * in Select, WASD/arrows at 700 px/s with a short glide, Q/E yaw steps, +/−
+ * named zooms and Home to recentre. It mutates the `IsoCamera` state and asks
+ * the scheduler for frames; the three camera catches up in `update`, which
+ * the app calls first in every frame.
+ *
+ * Since D3 it attaches no listeners itself: the app's `InputRouter` owns the
+ * DOM events and offers each gesture to the camera first (`handle*`, true
+ * when taken), then to the active tool.
  */
 export class CameraController {
   private readonly held = { left: false, right: false, up: false, down: false };
@@ -56,20 +61,12 @@ export class CameraController {
   private readonly velocity: PanVelocity = { vx: 0, vy: 0 };
   private readonly scratchTarget: GroundPoint = { x: 0, z: 0 };
   private drag: { id: number; x: number; y: number } | undefined;
-  private readonly abort = new AbortController();
 
-  constructor(private readonly options: CameraControllerOptions) {
-    const { canvas } = options;
-    const signal = this.abort.signal;
-    canvas.addEventListener("wheel", this.onWheel, { passive: false, signal });
-    canvas.addEventListener("pointerdown", this.onPointerDown, { signal });
-    canvas.addEventListener("pointermove", this.onPointerMove, { signal });
-    canvas.addEventListener("pointerup", this.onPointerUp, { signal });
-    canvas.addEventListener("pointercancel", this.onPointerUp, { signal });
-    canvas.addEventListener("contextmenu", this.onContextMenu, { signal });
-    window.addEventListener("keydown", this.onKeyDown, { signal });
-    window.addEventListener("keyup", this.onKeyUp, { signal });
-    window.addEventListener("blur", this.onBlur, { signal });
+  constructor(private readonly options: CameraControllerOptions) {}
+
+  /** True while a pointer drag is panning. */
+  get panning(): boolean {
+    return this.drag !== undefined;
   }
 
   /**
@@ -101,7 +98,6 @@ export class CameraController {
   }
 
   dispose(): void {
-    this.abort.abort();
     if (this.drag) this.releaseDrag(this.drag.id);
     this.releaseHeldKeys();
   }
@@ -124,87 +120,111 @@ export class CameraController {
     scheduler.requestFrame("input");
   }
 
-  private readonly onWheel = (e: WheelEvent): void => {
+  /** Wheel zoom to the cursor (pinch arrives as ctrl-wheel). */
+  handleWheel(e: WheelEvent): void {
     e.preventDefault();
     const factor = wheelZoomFactor(e.deltaY, e.deltaMode, e.ctrlKey);
     if (factor === 1) return;
     const rect = this.options.canvas.getBoundingClientRect();
     this.zoomTo(this.options.camera.ppm * factor, e.clientX - rect.left, e.clientY - rect.top);
-  };
+  }
 
-  private readonly onPointerDown = (e: PointerEvent): void => {
-    // Left, middle and right all pan in D1: there are no tools yet, so all ground is "empty".
-    if (e.button > 2 || this.drag) return;
+  /** Starts a pan drag with this pointer; the router offers only the buttons that pan (right, middle, and left in Select). */
+  handlePointerDown(e: PointerEvent): boolean {
+    if (e.button > 2 || this.drag) return false;
     e.preventDefault();
     this.options.canvas.focus({ preventScroll: true });
     this.options.canvas.setPointerCapture(e.pointerId);
     this.drag = { id: e.pointerId, x: e.clientX, y: e.clientY };
-  };
+    return true;
+  }
 
-  private readonly onPointerMove = (e: PointerEvent): void => {
+  /** Pans while this pointer drags; false when the move is not the camera's. */
+  handlePointerMove(e: PointerEvent): boolean {
     const drag = this.drag;
-    if (!drag || e.pointerId !== drag.id) return;
+    if (!drag || e.pointerId !== drag.id) return false;
     const dx = e.clientX - drag.x;
     const dy = e.clientY - drag.y;
-    if (dx === 0 && dy === 0) return;
+    if (dx === 0 && dy === 0) return true;
     drag.x = e.clientX;
     drag.y = e.clientY;
     this.panContent(dx, dy);
     this.options.scheduler.requestFrame("input");
-  };
+    return true;
+  }
 
-  private readonly onPointerUp = (e: PointerEvent): void => {
-    if (this.drag && e.pointerId === this.drag.id) this.releaseDrag(e.pointerId);
-  };
+  handlePointerUp(e: PointerEvent): boolean {
+    if (!this.drag || e.pointerId !== this.drag.id) return false;
+    this.releaseDrag(e.pointerId);
+    return true;
+  }
 
-  private readonly onContextMenu = (e: MouseEvent): void => {
-    e.preventDefault();
-  };
-
-  private readonly onKeyDown = (e: KeyboardEvent): void => {
+  /** WASD/arrows, Q/E, +/− and Home; true when the key was the camera's. */
+  handleKeyDown(e: KeyboardEvent): boolean {
     // macOS sends no keyup for keys released while Cmd is down, so a pan key
     // held into a Cmd chord would stick; drop held keys once Cmd goes down.
     if (e.metaKey && this.heldCodes.size > 0) this.releaseHeldKeys();
-    if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || isEditable(e.target)) return;
+    if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || isEditable(e.target)) return false;
     const { camera, scheduler } = this.options;
     if (PAN_KEYS[e.code]) {
       e.preventDefault();
       this.heldCodes.add(e.code);
       this.syncHeld();
       scheduler.setContinuous("camera-anim", true);
-      return;
+      return true;
     }
     if (e.code === "KeyQ" || e.code === "KeyE") {
-      if (e.repeat) return;
+      if (e.repeat) return true;
       // E steps yaw up (the camera orbits counter-clockwise seen from above), Q down.
       camera.rotate(e.code === "KeyE" ? 1 : -1);
       scheduler.setContinuous("camera-anim", true);
       scheduler.requestFrame("input");
-      return;
+      return true;
     }
     const zoomDirection = e.key === "+" || e.key === "=" || e.code === "NumpadAdd" ? 1 : e.key === "-" || e.key === "_" || e.code === "NumpadSubtract" ? -1 : 0;
     if (zoomDirection !== 0) {
       e.preventDefault();
       this.zoomTo(nextNamedZoom(camera.ppm, zoomDirection), camera.cssWidth / 2, camera.cssHeight / 2);
-      return;
+      return true;
     }
     if (e.code === "Home") {
       e.preventDefault();
       this.recentre();
+      return true;
     }
-  };
+    return false;
+  }
 
-  private readonly onKeyUp = (e: KeyboardEvent): void => {
-    // Keys released during a Cmd chord never sent keyup (see onKeyDown).
+  handleKeyUp(e: KeyboardEvent): void {
+    // Keys released during a Cmd chord never sent keyup (see handleKeyDown).
     if (e.key === "Meta") this.releaseHeldKeys();
     else if (this.heldCodes.delete(e.code)) this.syncHeld();
-  };
+  }
+
+  /** Stops panning with a key the router now gives to a tool (the arrows when Track activates). */
+  releaseKey(code: string): void {
+    if (this.heldCodes.delete(code)) this.syncHeld();
+  }
 
   /** Keys released while the window is unfocused never send keyup; drop them. */
-  private readonly onBlur = (): void => {
+  handleBlur(): void {
     this.releaseHeldKeys();
     if (this.drag) this.releaseDrag(this.drag.id);
-  };
+  }
+
+  /**
+   * Keeps a point that is drawn at `screen` (CSS px) at least `marginPx`
+   * inside the viewport: the keyboard lattice cursor's camera request. Pans
+   * only as far as needed.
+   */
+  keepInView(screen: { readonly x: number; readonly y: number }, marginPx: number): void {
+    const { camera, scheduler } = this.options;
+    const dx = screen.x < marginPx ? marginPx - screen.x : screen.x > camera.cssWidth - marginPx ? camera.cssWidth - marginPx - screen.x : 0;
+    const dy = screen.y < marginPx ? marginPx - screen.y : screen.y > camera.cssHeight - marginPx ? camera.cssHeight - marginPx - screen.y : 0;
+    if (dx === 0 && dy === 0) return;
+    this.panContent(dx, dy);
+    scheduler.requestFrame("input");
+  }
 
   private releaseHeldKeys(): void {
     this.heldCodes.clear();

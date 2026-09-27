@@ -1,0 +1,94 @@
+import { describe, expect, it } from "vitest";
+import { type KeyInput, WheelStepper, classifyKey, isMacPlatform, precisionHeld } from "./keymap";
+
+function key(k: string, code: string, mods: Partial<KeyInput> = {}): KeyInput {
+  return { key: k, code, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, repeat: false, ...mods };
+}
+
+const select = { trackActive: false, precision: false };
+const track = { trackActive: true, precision: false };
+const precise = { trackActive: true, precision: true };
+
+describe("key routing", () => {
+  it("undoes on Ctrl/Cmd+Z and redoes on Ctrl/Cmd+Shift+Z or Ctrl+Y, case-insensitively, in any tool", () => {
+    for (const ctx of [select, track, precise]) {
+      expect(classifyKey(key("z", "KeyZ", { ctrlKey: true }), ctx)).toEqual({ kind: "undo" });
+      expect(classifyKey(key("Z", "KeyZ", { metaKey: true }), ctx)).toEqual({ kind: "undo" });
+      expect(classifyKey(key("Z", "KeyZ", { ctrlKey: true, shiftKey: true }), ctx)).toEqual({ kind: "redo" });
+      expect(classifyKey(key("z", "KeyZ", { metaKey: true, shiftKey: true }), ctx)).toEqual({ kind: "redo" });
+      expect(classifyKey(key("y", "KeyY", { ctrlKey: true }), ctx)).toEqual({ kind: "redo" });
+      expect(classifyKey(key("Y", "KeyY", { ctrlKey: true }), ctx)).toEqual({ kind: "redo" });
+    }
+    // Cmd+Y is not a redo binding (the issue names Ctrl+Y); a layout's `z` key wins over its position.
+    expect(classifyKey(key("y", "KeyY", { metaKey: true }), select)).toEqual({ kind: "camera" });
+    expect(classifyKey(key("z", "KeyW", { ctrlKey: true }), select)).toEqual({ kind: "undo" });
+  });
+
+  it("selects Track on 1 and routes Esc to the tool", () => {
+    expect(classifyKey(key("1", "Digit1"), select)).toEqual({ kind: "select-track" });
+    expect(classifyKey(key("1", "Numpad1"), track)).toEqual({ kind: "select-track" });
+    expect(classifyKey(key("Escape", "Escape"), track)).toEqual({ kind: "escape" });
+  });
+
+  it("gives the arrows to the lattice cursor only while Track is active; WASD always pans", () => {
+    expect(classifyKey(key("ArrowUp", "ArrowUp"), track)).toEqual({ kind: "cursor", direction: "up" });
+    expect(classifyKey(key("ArrowLeft", "ArrowLeft"), track)).toEqual({ kind: "cursor", direction: "left" });
+    expect(classifyKey(key("ArrowUp", "ArrowUp"), select)).toEqual({ kind: "camera" });
+    expect(classifyKey(key("w", "KeyW"), track)).toEqual({ kind: "camera" });
+  });
+
+  it("starts and commits on Enter, and steps the height on PgUp/PgDn and ] [", () => {
+    expect(classifyKey(key("Enter", "Enter"), track)).toEqual({ kind: "enter" });
+    expect(classifyKey(key("Enter", "NumpadEnter"), track)).toEqual({ kind: "enter" });
+    expect(classifyKey(key("PageUp", "PageUp"), track)).toEqual({ kind: "height", delta: 1 });
+    expect(classifyKey(key("PageDown", "PageDown"), track)).toEqual({ kind: "height", delta: -1 });
+    expect(classifyKey(key("]", "BracketRight"), track)).toEqual({ kind: "height", delta: 1 });
+    expect(classifyKey(key("[", "BracketLeft"), track)).toEqual({ kind: "height", delta: -1 });
+    // Layouts where the bracket sits elsewhere still match by character.
+    expect(classifyKey(key("]", "Digit9", { altKey: false }), track)).toEqual({ kind: "height", delta: 1 });
+    expect(classifyKey(key("Enter", "Enter"), select)).toEqual({ kind: "camera" });
+  });
+
+  it("turns Q/E into end-heading steps only while precision is held; otherwise they rotate the camera", () => {
+    expect(classifyKey(key("q", "KeyQ", { ctrlKey: true }), precise)).toEqual({ kind: "end-heading", delta: -1 });
+    // ⌥E on macOS types a dead key; the physical code still matches.
+    expect(classifyKey(key("Dead", "KeyE", { altKey: true }), precise)).toEqual({ kind: "end-heading", delta: 1 });
+    expect(classifyKey(key("q", "KeyQ"), track)).toEqual({ kind: "camera" });
+    expect(classifyKey(key("e", "KeyE"), select)).toEqual({ kind: "camera" });
+  });
+
+  it("keeps L and F3", () => {
+    expect(classifyKey(key("l", "KeyL"), track)).toEqual({ kind: "labels" });
+    expect(classifyKey(key("F3", "F3"), select)).toEqual({ kind: "perf" });
+  });
+});
+
+describe("wheel routing", () => {
+  it("zooms unless Track is active with Shift (height) or precision (radius)", () => {
+    const w = new WheelStepper();
+    expect(w.classify({ deltaX: 0, deltaY: 100, deltaMode: 0, shiftKey: false }, track)).toEqual({ kind: "camera" });
+    expect(w.classify({ deltaX: 0, deltaY: 100, deltaMode: 0, shiftKey: true }, select)).toEqual({ kind: "camera" });
+    expect(w.classify({ deltaX: 0, deltaY: -100, deltaMode: 0, shiftKey: true }, track)).toEqual({ kind: "height", steps: 1 });
+    expect(w.classify({ deltaX: 0, deltaY: 100, deltaMode: 0, shiftKey: false }, precise)).toEqual({ kind: "radius", steps: -1 });
+  });
+
+  it("accumulates trackpad deltas into whole notches and counts line events as one step each", () => {
+    const w = new WheelStepper();
+    const small = { deltaX: 0, deltaY: -30, deltaMode: 0, shiftKey: false };
+    const steps = [0, 1, 2, 3].map(() => w.classify(small, precise));
+    expect(steps.map((s) => ("steps" in s ? s.steps : null))).toEqual([0, 0, 0, 1]);
+    expect(w.classify({ deltaX: 0, deltaY: 3, deltaMode: 1, shiftKey: false }, precise)).toEqual({ kind: "radius", steps: -1 });
+    // Shift+wheel reported as horizontal scroll.
+    expect(w.classify({ deltaX: -100, deltaY: 0, deltaMode: 0, shiftKey: true }, track)).toEqual({ kind: "height", steps: 1 });
+  });
+});
+
+describe("platform", () => {
+  it("takes precision from Ctrl, or ⌥ on macOS", () => {
+    expect(precisionHeld({ ctrl: true, alt: false }, false)).toBe(true);
+    expect(precisionHeld({ ctrl: true, alt: false }, true)).toBe(false);
+    expect(precisionHeld({ ctrl: false, alt: true }, true)).toBe(true);
+    expect(isMacPlatform("MacIntel", "")).toBe(true);
+    expect(isMacPlatform("Win32", "Mozilla/5.0 (Windows NT 10.0)")).toBe(false);
+  });
+});
