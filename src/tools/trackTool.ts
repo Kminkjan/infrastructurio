@@ -10,6 +10,7 @@ import {
   type Result,
   type TrackPlan,
   canonicalKey,
+  opposite,
   rotateHeading,
   stepOf,
 } from "../core/sim/api";
@@ -27,7 +28,9 @@ import type { GhostModel, Reduced, ScreenPoint, ToolCtx, ToolEffect, ToolEvent, 
  *
  * Esc steps back one level: Dragging → Anchored, Pressed or Anchored → Idle,
  * Idle → exit to Select. The keyboard cursor (arrows) moves the target one
- * lattice step; Enter starts at the cursor and then commits.
+ * lattice step; Enter starts at the cursor and then commits. Every
+ * activation starts with precision off; the app sends `precision` when the
+ * modifier is actually held.
  *
  * Every re-plan goes through `planTrack`; `preview` (memoized in the app)
  * runs only when the published view changes, that is when the snapped
@@ -38,10 +41,19 @@ import type { GhostModel, Reduced, ScreenPoint, ToolCtx, ToolEffect, ToolEvent, 
  * the end node (ground-following), so a drag across the land lays track on
  * the ground and ]/[ lift or lower the end. Anchoring on existing track
  * starts at that track's height above ground; chaining keeps the steps. A
- * plan that magnetism joined to an existing port takes the port's height,
- * and after it commits the chain ends (Idle): leaving a joined port would
- * need a turnout (D5). A plan ending on an existing node within half a step
- * of that node's height takes its height too (outside precision mode).
+ * plan that magnetism joined to an existing port takes the port's height. A
+ * plan that joins an existing buffer end (by magnetism, or in precision mode
+ * by ending on it) ends the chain when it commits (Idle): leaving a joined
+ * port would need a turnout (D5). A plan that reaches a buffer end along its
+ * own track (reused pieces) leaves it outward, so the chain goes on. A plan
+ * ending on an existing node within half a step of that node's height takes
+ * its height too (outside precision mode).
+ *
+ * After a commit the app executes and sends `refresh`; that re-plan's
+ * announcement leads with the build result, so a screen reader hears both.
+ * An undo or redo sends `refresh` too: when the node a chain leaves from is
+ * no longer in the network (the undo removed the track that ended there), the
+ * chain ends and the tool returns to Idle.
  */
 
 /** Movement beyond this many CSS px turns a press into a drag. */
@@ -81,6 +93,8 @@ export interface TrackToolState {
   /** Keys of what was last published, so unchanged views emit nothing. */
   readonly viewKey: string | null;
   readonly snapKey: string | null;
+  /** A commit's "Built…" text, waiting to lead the announcement of the re-plan that follows it. */
+  readonly built: string | null;
 }
 
 export function initialTrackState(): TrackToolState {
@@ -100,6 +114,7 @@ export function initialTrackState(): TrackToolState {
     verdict: null,
     viewKey: null,
     snapKey: null,
+    built: null,
   };
 }
 
@@ -112,11 +127,12 @@ export function reduceTrackTool(state: TrackToolState, event: ToolEvent, ctx: To
 function step(s: TrackToolState, e: ToolEvent, ctx: ToolCtx, out: ToolEffect[]): TrackToolState {
   switch (e.type) {
     case "activate":
-      return present({ ...initialTrackState(), precision: s.precision, radiusM: s.radiusM }, ctx, out);
+      // Precision starts off: the modifier may have been released while the tool was inactive.
+      return present({ ...initialTrackState(), radiusM: s.radiusM }, ctx, out);
 
     case "deactivate":
       out.push({ type: "ghost", ghost: null }, { type: "tooltip", tooltip: null }, { type: "snap", snap: null }, { type: "highlight", keys: [] });
-      return { ...initialTrackState(), precision: s.precision, radiusM: s.radiusM };
+      return { ...initialTrackState(), radiusM: s.radiusM };
 
     case "pointer-move": {
       let n: TrackToolState = { ...s, target: e.pick, cursor: false };
@@ -229,8 +245,20 @@ function step(s: TrackToolState, e: ToolEvent, ctx: ToolCtx, out: ToolEffect[]):
       return present({ ...s, endHeading: rotateHeading(base, e.delta) }, ctx, out);
     }
 
-    case "refresh":
-      return present({ ...s, viewKey: null }, ctx, out);
+    case "refresh": {
+      const anchor = s.anchor;
+      if (anchor?.heading !== undefined && !nodeExists(ctx.network, anchor.node)) {
+        // The chain's end is gone (an undo removed it, or the build did not land): nothing to continue from.
+        clearView(out);
+        out.push({ type: "announce", text: "Track ended: the end it continued from is gone." });
+        return present(
+          { ...s, phase: "idle", press: null, anchor: null, heightSteps: 0, endHeading: undefined, ignoreRelease: s.press !== null, built: null, viewKey: null },
+          ctx,
+          out,
+        );
+      }
+      return present({ ...s, built: null, viewKey: null }, ctx, out, s.built);
+    }
   }
 }
 
@@ -268,30 +296,56 @@ function commit(s: TrackToolState, ctx: ToolCtx, out: ToolEffect[]): TrackToolSt
     return cur;
   }
   out.push({ type: "execute", command: cur.command });
-  if (plan.snapped) {
-    // Joined an existing port: chaining on from it would need a turnout (D5), so the chain ends here.
-    out.push({ type: "announce", text: `Built and joined the track at (${plan.snapped.q}, ${plan.snapped.r}). ${formatCounts(cur.verdict.counts)}.` });
+  const end = plan.end;
+  if (joinsBuffer(ctx.network, end.node, end.heading)) {
+    // Joined an existing buffer end (magnetism, or a precision plan ending on it): chaining on from it
+    // would need a turnout (D5), so the chain ends here, and Idle shows no plan.
+    clearView(out);
+    out.push({ type: "announce", text: `Built and joined the track at (${end.node.q}, ${end.node.r}). ${formatCounts(cur.verdict.counts)}.` });
     return { ...cur, phase: "idle", anchor: null, heightSteps: 0, endHeading: undefined, plan: null, command: null, verdict: null, viewKey: null };
   }
-  out.push({ type: "announce", text: `Built. ${formatCounts(cur.verdict.counts)}.` });
-  // The app executes, then sends `refresh`, which re-plans from the new end against the new revision.
+  const built = `Built. ${formatCounts(cur.verdict.counts)}.`;
+  out.push({ type: "announce", text: built });
+  // The app executes, then sends `refresh`, which re-plans from the new end against the new revision
+  // and leads its announcement with `built`.
   return {
     ...cur,
-    anchor: { node: plan.end.node, heading: plan.end.heading },
+    anchor: { node: end.node, heading: end.heading },
     endHeading: undefined,
     plan: null,
     command: null,
     verdict: null,
     viewKey: null,
+    built,
   };
+}
+
+/** Clears the ghost, tooltip and highlights (the snap ring stays with the target). */
+function clearView(out: ToolEffect[]): void {
+  out.push({ type: "ghost", ghost: null }, { type: "tooltip", tooltip: null }, { type: "highlight", keys: [] });
+}
+
+/** Whether the network has a node at exactly (q, r, zMm). */
+function nodeExists(network: NetworkView, node: NodeRef): boolean {
+  return nodesAt(network, node.q, node.r).some((n) => n.zMm === node.zMm);
+}
+
+/**
+ * Whether a plan ending at `node` with `heading` joins an existing buffer end
+ * there: it does unless it arrived along the buffer's own track (reused
+ * pieces), in which case it leaves the buffer outward, along `opposite(axis)`.
+ */
+function joinsBuffer(network: NetworkView, node: NodeRef, heading: Heading): boolean {
+  const buffer = nodesAt(network, node.q, node.r).find((n) => n.zMm === node.zMm && n.kind === "buffer");
+  return buffer !== undefined && heading !== opposite(buffer.axis);
 }
 
 /**
  * Re-plans when a plan is due and publishes whatever changed: the snap ring,
- * then the ghost, tooltip, highlights and announcement. Nothing is emitted
- * for a view that has not changed.
+ * then the ghost, tooltip, highlights and announcement (led by `lead` when
+ * given). Nothing is emitted for a view that has not changed.
  */
-function present(s: TrackToolState, ctx: ToolCtx, out: ToolEffect[]): TrackToolState {
+function present(s: TrackToolState, ctx: ToolCtx, out: ToolEffect[], lead: string | null = null): TrackToolState {
   const target = s.target;
   const snapKey = target ? `${target.kind}:${target.node.q},${target.node.r},${target.node.zMm}:${s.cursor ? "k" : "p"}` : null;
   if (snapKey !== s.snapKey) {
@@ -300,9 +354,7 @@ function present(s: TrackToolState, ctx: ToolCtx, out: ToolEffect[]): TrackToolS
 
   const anchor = s.anchor;
   if (!anchor || !target || (s.phase !== "anchored" && s.phase !== "dragging")) {
-    if (s.viewKey !== null) {
-      out.push({ type: "ghost", ghost: null }, { type: "tooltip", tooltip: null }, { type: "highlight", keys: [] });
-    }
+    if (s.viewKey !== null) clearView(out);
     return { ...s, snapKey, plan: null, command: null, verdict: null, viewKey: null };
   }
 
@@ -328,7 +380,7 @@ function present(s: TrackToolState, ctx: ToolCtx, out: ToolEffect[]): TrackToolS
     { type: "ghost", ghost: command ? ghostOf(plan, verdict, ctx.network) : null },
     { type: "tooltip", tooltip },
     { type: "highlight", keys: verdict && !verdict.ok ? existingKeys(ctx.network, verdict.highlight) : [] },
-    { type: "announce", text: tooltip.lines.join(". ") },
+    { type: "announce", text: lead === null ? tooltip.lines.join(". ") : `${lead} ${tooltip.lines.join(". ")}` },
   );
   return { ...s, snapKey, plan, command, verdict, viewKey };
 }
