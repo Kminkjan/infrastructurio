@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { type MouseEvent, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import type { HudActions, HudState, HudStore, HudTooltip } from "./store";
 
@@ -184,6 +184,14 @@ export function StatusLine({ store }: { readonly store: HudStore }) {
   );
 }
 
+/**
+ * A pointer click leaves keyboard focus where it was (usually the canvas), so a clicked Track or Undo
+ * button never captures the Enter meant for the track tool; Tab still reaches every button.
+ */
+function keepFocus(e: MouseEvent): void {
+  e.preventDefault();
+}
+
 export function Toolbar({ store, actions }: { readonly store: HudStore; readonly actions: HudActions }) {
   const tool = useHud(store, (s) => s.tool);
   const canUndo = useHud(store, (s) => s.canUndo);
@@ -196,12 +204,20 @@ export function Toolbar({ store, actions }: { readonly store: HudStore; readonly
         aria-pressed={track}
         aria-keyshortcuts="1"
         title="Track (1); Esc returns to Select"
+        onMouseDown={keepFocus}
         onClick={() => actions.selectTool(track ? "select" : "track")}
       >
         Track<kbd>1</kbd>
       </button>
       <span className="sep" aria-hidden="true" />
-      <button type="button" disabled={!canUndo} aria-keyshortcuts="Control+Z Meta+Z" title="Undo (Ctrl/Cmd+Z)" onClick={() => actions.undo()}>
+      <button
+        type="button"
+        disabled={!canUndo}
+        aria-keyshortcuts="Control+Z Meta+Z"
+        title="Undo (Ctrl/Cmd+Z)"
+        onMouseDown={keepFocus}
+        onClick={() => actions.undo()}
+      >
         Undo
       </button>
       <button
@@ -209,6 +225,7 @@ export function Toolbar({ store, actions }: { readonly store: HudStore; readonly
         disabled={!canRedo}
         aria-keyshortcuts="Control+Shift+Z Meta+Shift+Z Control+Y"
         title="Redo (Ctrl/Cmd+Shift+Z or Ctrl+Y)"
+        onMouseDown={keepFocus}
         onClick={() => actions.redo()}
       >
         Redo

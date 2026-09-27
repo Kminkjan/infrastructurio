@@ -197,6 +197,7 @@ router = new InputRouter({
     return p?.node ?? { q: 0, r: 0, zMm: 0 };
   },
   trackActive: () => construction.activeTool === "track",
+  cursorLeads: () => construction.trackState.cursor,
   dispatch: (event) => construction.dispatch(event),
   onPointer: (x, y, inside) => {
     if (inside) construction.onPointer(x, y);
@@ -354,7 +355,10 @@ if (import.meta.env.DEV) {
       groundZmm: (q: number, r: number) => construction.groundZmm(q, r),
       previewStats: () => construction.previewStats(),
       trackStats: () => trackView.stats,
-      tool: () => ({ active: construction.activeTool, phase: construction.trackState.phase, heightSteps: construction.trackState.heightSteps }),
+      tool: () => {
+        const t = construction.trackState;
+        return { active: construction.activeTool, phase: t.phase, heightSteps: t.heightSteps, cursor: t.cursor };
+      },
       hud: () => store.getSnapshot(),
       /** True once a frame has rendered and no track rebuild is pending. */
       get ready() {
