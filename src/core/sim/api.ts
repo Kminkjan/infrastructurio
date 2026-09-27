@@ -47,6 +47,27 @@ export {
   terrainBoundsM,
   terrainHash,
 } from "../terrain";
+// The static diorama's scenario types (D11a), for the scenery, label and bookmark layers.
+export type {
+  BuildingLot,
+  Crop,
+  DioramaScenery,
+  FenceRun,
+  Field,
+  ForestField,
+  Haystack,
+  Landmark,
+  LotKind,
+  PointMm,
+  SplatPath,
+  Surface,
+  TelegraphPole,
+  Town,
+  TownSize,
+  TreeInstances,
+  TreeSpecies,
+} from "../scenarios/baltic-diorama";
+export { TREE_BIRCH, TREE_PINE, TREE_SPRUCE } from "../scenarios/baltic-diorama";
 
 export interface Scenario {
   readonly terrain: TerrainParams;

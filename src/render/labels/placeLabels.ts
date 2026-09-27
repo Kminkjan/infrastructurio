@@ -1,6 +1,5 @@
 import { Vector3 } from "three";
-import type { DioramaScenery } from "../../core/scenarios/baltic-diorama";
-import type { Terrain } from "../../core/terrain";
+import type { DioramaScenery, Terrain } from "../../core/sim/api";
 import { simToWorld } from "../coords";
 import { sampleTerrainHeightM } from "../terrain/heightfieldRay";
 import { LANDMARK_LABEL_MIN_PPM, type PlaceLabel, TOWN_LABEL_MIN_PPM } from "./LabelLayer";

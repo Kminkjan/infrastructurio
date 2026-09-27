@@ -47,7 +47,8 @@ around 1900 in web + TypeScript + Three.js 2.5D. Owner direction of 2026-09-26 (
 - **Imports:** core → nothing outside core; render, tools and ui → core only via
   `core/sim/api.ts` and `core/geometry/sample.ts`; render never imports ui, ui never three or
   render; app wires everything. Enforced today: core rules, tools free of three/DOM/React/
-  render/ui, render ↛ ui ([architecture](docs/architecture.md) tracks the rest).
+  render/ui, render ↛ ui, and render/tools/ui → core only via those two modules (since D3;
+  [architecture](docs/architecture.md) tracks the rest).
 - **`src/app` + `src/tools`:** `InputRouter` (in `src/app`) gives camera gestures to the
   camera first, the rest to the active tool. Call `sim.preview` only when the snapped key
   changes (LRU of 16); if preview p95 > 8 ms, propose a sim-in-Worker ADR.

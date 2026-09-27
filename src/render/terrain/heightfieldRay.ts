@@ -1,6 +1,5 @@
 import { Vector3, type Vector3Like } from "three";
-import { type Axial, LATTICE_SPACING_M, SQRT3, nearestNode } from "../../core/lattice";
-import { type Terrain, heightDmAt, terrainBoundsM } from "../../core/terrain";
+import { type Axial, LATTICE_SPACING_M, SQRT3, type Terrain, heightDmAt, nearestNode, terrainBoundsM } from "../../core/sim/api";
 import { type SimPoint, simToWorld, worldToSim } from "../coords";
 import { terrainHeightRangeM } from "./terrainGeometry";
 

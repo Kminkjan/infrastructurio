@@ -1,6 +1,5 @@
 import { BufferAttribute, BufferGeometry, Color, Vector3 } from "three";
-import { toWorld } from "../../core/lattice";
-import { type Terrain, nodeOfOffset, terrainBoundsM } from "../../core/terrain";
+import { type Terrain, nodeOfOffset, terrainBoundsM, toWorld } from "../../core/sim/api";
 import { palette } from "../art/palette";
 import { type GroundBounds, lodBandForPpm } from "../camera/isoMath";
 import { simToWorld } from "../coords";

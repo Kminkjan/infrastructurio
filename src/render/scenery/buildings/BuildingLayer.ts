@@ -1,7 +1,6 @@
 import { type BufferGeometry, Group, Matrix4, Mesh, type MeshLambertMaterial, Vector3 } from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import type { BuildingLot, DioramaScenery } from "../../../core/scenarios/baltic-diorama";
-import type { Terrain } from "../../../core/terrain";
+import type { BuildingLot, DioramaScenery, Terrain } from "../../../core/sim/api";
 import { type AssetLod, type AssetRegistry, type MaterialSlot, buildingVariant } from "../../art/AssetRegistry";
 import { type WorldMaterials, materialForSlot } from "../../art/materials";
 import { simToWorld } from "../../coords";

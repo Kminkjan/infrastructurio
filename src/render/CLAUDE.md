@@ -22,8 +22,8 @@ The critical rules below stand alone; repo-wide rules are in the root [CLAUDE.md
   alpha = acc/100 clamped at 1, so a train never visibly overshoots a red signal.
 - **Imports:** `three` (and `three/addons/…`), `core/sim/api.ts` types, and the pure
   `core/geometry/sample.ts`, the single source of curve maths (never re-derive arcs here).
-  **Never `src/ui`** (enforced by `tests/architecture.test.ts`). The core limit is convention
-  until the scan is extended: if you need another core helper, export it through `sim/api.ts`.
+  **Never `src/ui`**, and no other core module (both enforced by `tests/architecture.test.ts`,
+  the core limit since D3): if you need another core helper, re-export it through `sim/api.ts`.
 - **React stays outside the frame loop:** publish to UI stores on change, never per frame.
 
 ## Single sources

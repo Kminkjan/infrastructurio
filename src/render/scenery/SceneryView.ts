@@ -9,8 +9,7 @@ import {
   RedFormat,
   UnsignedByteType,
 } from "three";
-import type { DioramaScenery } from "../../core/scenarios/baltic-diorama";
-import { type Terrain, terrainBoundsM } from "../../core/terrain";
+import { type DioramaScenery, type Terrain, terrainBoundsM } from "../../core/sim/api";
 import type { AssetRegistry } from "../art/AssetRegistry";
 import type { ArtUniforms, WorldMaterials } from "../art/materials";
 import { BuildingLayer } from "./buildings/BuildingLayer";

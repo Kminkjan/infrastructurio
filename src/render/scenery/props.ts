@@ -1,6 +1,5 @@
 import { Color, Group, InstancedMesh, type Material, Matrix4, Quaternion, Vector3 } from "three";
-import type { DioramaScenery } from "../../core/scenarios/baltic-diorama";
-import type { Terrain } from "../../core/terrain";
+import type { DioramaScenery, Terrain } from "../../core/sim/api";
 import type { AssetData, AssetLod, AssetRegistry } from "../art/AssetRegistry";
 import { palette } from "../art/palette";
 import { simToWorld } from "../coords";

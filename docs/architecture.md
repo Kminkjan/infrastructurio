@@ -147,7 +147,7 @@ The allowed import directions are:
 | `Math.sin/cos/tan/asin/acos/atan/atan2/sinh/cosh/tanh/pow/exp/expm1/log*/hypot/cbrt` appear only in `core/geometry/{sample,clearance,templates}.ts` | boundary test | on main |
 | Tools never import three, render, ui or react, and never touch `window`/`document` | boundary test | on main |
 | Render never imports ui | boundary test | on main |
-| Render, tools and ui import core only through `sim/api.ts` (snapshot types and the façade; it re-exports the lattice helpers the edges need) and the pure `geometry/sample.ts`, so curve maths has one source | not yet enforced | from the approved plan. Add it to the test once the exceptions below are cleared. `src/app`, the composition root, may import core directly; `main.ts` does. **D1 exception (2026-09-26):** `render/terrain/{heightfieldRay,terrainGeometry,terrainShading,TerrainView}.ts` import `core/lattice` and `core/terrain` directly, because `sim/api.ts` did not exist in D1. It landed in D2 (2026-09-26) and re-exports the lattice and terrain helpers those files use. **D11a extends the exception:** `render/scenery/`, `render/labels/placeLabels.ts` and `render/camera/bookmarks.ts` import the scenario types from `core/scenarios/baltic-diorama` (and `core/terrain`, `core/lattice`). D2 and D11a were built in parallel, so all of these move to `sim/api.ts` (which then also re-exports the scenario types) and the rule enters the test in the next core or render slice after both merge (owner: D3) |
+| Render, tools and ui import core only through `sim/api.ts` (snapshot types and the façade; it re-exports the lattice, terrain and scenario helpers the edges need) and the pure `geometry/sample.ts`, so curve maths has one source. `src/app`, the composition root, may import core directly; `main.ts` does | boundary test (test files exempt, like every scan) | since D3 (2026-09-27): the D1 and D11a exceptions were cleared when `render/terrain/`, `render/scenery/`, `render/labels/placeLabels.ts` and `render/camera/bookmarks.ts` moved to `sim/api.ts`, which now also re-exports the scenario types |
 | Ui imports neither three nor render | convention | recommendation |
 
 **[tsconfig.core.json](../tsconfig.core.json)**
@@ -173,6 +173,8 @@ The allowed import directions are:
   - a synthetic core file with seven violations yields exactly seven findings;
   - trig inside `geometry/sample.ts` passes;
   - a tool importing three and a render file importing ui are flagged;
+  - render, tool and ui files importing a core module other than `sim/api.ts` or
+    `geometry/sample.ts` are flagged, while render's own `render/core/` and `src/app` pass;
   - a comment mentioning `Math.random()` and a relative import inside core both pass.
 
 There is no linter and no CI, so `npm test` (inside `npm run check`) is the guard, run before

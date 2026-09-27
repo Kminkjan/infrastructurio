@@ -7,6 +7,9 @@ import { describe, expect, it } from "vitest";
  *   three/react, no wall-clock, randomness, DOM or console APIs;
  * - trigonometry and friends only in the whitelisted geometry modules;
  * - src/tools has no three or DOM; src/render never imports src/ui;
+ * - src/render, src/tools and src/ui reach the core only through
+ *   core/sim/api.ts and the pure core/geometry/sample.ts (src/app, the
+ *   composition root, may import the core directly);
  * - no hex colour literal in src/render, src/ui or src/app outside
  *   render/art/palette.ts, the single colour source (art direction "Palette").
  * A negative self-check proves each scanner actually fires.
@@ -87,6 +90,21 @@ function layerViolations(path: string, raw: string): string[] {
   return problems;
 }
 
+/** The only core modules the edges (render, tools, ui) may import. */
+const CORE_GATEWAYS = new Set(["/src/core/sim/api", "/src/core/geometry/sample"]);
+
+/** Render, tools and ui reach the core only through `sim/api.ts` and `geometry/sample.ts`. */
+function coreGatewayViolations(path: string, raw: string): string[] {
+  if (!/^\/src\/(?:render|tools|ui)\//.test(path)) return [];
+  const problems: string[] = [];
+  for (const spec of importSpecifiers(stripComments(raw))) {
+    if (!spec.startsWith(".")) continue;
+    const target = resolveRelative(path, spec).replace(/\.(?:ts|tsx|js)$/, "");
+    if (target.startsWith("/src/core/") && !CORE_GATEWAYS.has(target)) problems.push(`imports core outside sim/api.ts and geometry/sample.ts "${spec}"`);
+  }
+  return problems;
+}
+
 const COLOUR_SOURCE = "/src/render/art/palette.ts";
 
 /** 0xRRGGBB, #RRGGBB or #RGB; longer hex (hash constants like 0x85ebca6b) never matches. */
@@ -115,6 +133,13 @@ describe("architecture boundaries", () => {
     expect(failures).toEqual([]);
   });
 
+  it("keeps render, tools and ui on the core's public surface", () => {
+    const failures = Object.entries(sources)
+      .filter(([path]) => !isTest(path))
+      .flatMap(([path, code]) => coreGatewayViolations(path, code).map((v) => `${path}: ${v}`));
+    expect(failures).toEqual([]);
+  });
+
   it("keeps every colour literal in palette.ts", () => {
     const failures = Object.entries(sources)
       .filter(([path]) => !isTest(path))
@@ -139,6 +164,12 @@ describe("architecture boundaries", () => {
     expect(layerViolations("/src/render/hud.ts", 'import { Hud } from "../ui/Hud";')).not.toEqual([]);
     expect(coreViolations("/src/core/a.ts", '// Math.random() in a comment\nimport { b } from "./b";')).toEqual([]);
     expect(coreViolations("/src/core/track/a.ts", 'import { c } from "../lattice";')).toEqual([]);
+    expect(coreGatewayViolations("/src/render/terrain/x.ts", 'import { toWorld } from "../../core/lattice";')).toHaveLength(1);
+    expect(coreGatewayViolations("/src/tools/track.ts", 'import type { AuthoredState } from "../core/track/authored";')).toHaveLength(1);
+    expect(coreGatewayViolations("/src/ui/Hud.tsx", 'import { x } from "../core/scenarios/baltic-diorama.ts";')).toHaveLength(1);
+    expect(coreGatewayViolations("/src/render/track/x.ts", 'import { toWorld } from "../../core/sim/api";\nimport { samplePiece } from "../../core/geometry/sample";')).toEqual([]);
+    expect(coreGatewayViolations("/src/render/core/x.ts", 'import { FrameScheduler } from "./FrameScheduler";')).toEqual([]);
+    expect(coreGatewayViolations("/src/app/main.ts", 'import { generateTerrain } from "../core/terrain";')).toEqual([]);
     expect(colourViolations("/src/render/scenery/x.ts", "const c = 0xc0643f;")).toHaveLength(1);
     expect(colourViolations("/src/ui/Hud.tsx", 'const s = { color: "#fff", border: "1px solid #d8ccb4" };')).toHaveLength(2);
     expect(colourViolations("/src/app/main.ts", "const n = 0x6d2b79f5; // 0xc0643f in a comment")).toEqual([]);

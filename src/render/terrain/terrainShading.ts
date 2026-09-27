@@ -1,6 +1,5 @@
 import { Color, Vector3 } from "three";
-import { LATTICE_SPACING_M, unit } from "../../core/lattice";
-import type { Terrain } from "../../core/terrain";
+import { LATTICE_SPACING_M, type Terrain, unit } from "../../core/sim/api";
 import { palette } from "../art/palette";
 import { simToWorld } from "../coords";
 import { neighbourHeading, neighbourIndex } from "./offsetGrid";
