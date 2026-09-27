@@ -417,6 +417,12 @@ stacked track readable and pickable.
   - piers placed clear of other tracks.
 - [ ] Earthworks conform: terrain vertices near ground-level track are lowered or raised into
   cuttings and embankments, with ballast skirts.
+  *Partly pulled forward, render only, by the owner decision of 2026-09-27
+  ("earthworks-lite"): D3 track now sits in cuttings and on embankments, with affected
+  terrain triangles refined so it always shows. Ballast skirts are not built, sim terrain
+  and validation are unchanged, and structures and the grade rule stay here. This does not
+  tick the criterion
+  ([ADR 0010 earthworks-lite finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-earthworks-lite)).*
 - [ ] Occlusion aids: H hides decks, U shows an underground x-ray and C cycles stacked hits.
   Proxy picking uses the DECK and TUNNEL layer bits.
 - [ ] The Bridge and Tunnel toolbar modes reuse the D3 track tool with a forced structure.

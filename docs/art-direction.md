@@ -110,11 +110,17 @@ lines, end-height tags, rejection highlight and undo flash use the existing buil
 UI tokens; the HUD reads them as CSS custom properties that `src/app` sets from `palette.ts`
 at start-up (`src/ui` never imports render).
 
+**Earthworks-lite (2026-09-27):** two in-house tokens join the ground group:
+**earthwork face `#9E8A6C`** (`earthworkFace`, cut and fill slopes) and **earthwork bed
+`#7B705E`** (`earthworkBed`, the formation beside the ballast, darker so the ballast reads
+on it). The table now has 73 tokens, 74 with `forestFloor`. They were chosen in-house and
+are not yet judged at a look gate. See [Terrain and water](#terrain-and-water).
+
 | Group | Colours |
 |---|---|
 | grass | `#8FA66B`, light `#A9BA7E`, shade `#6E8752`, meadow `#C2BE7C` |
 | forest | spruce `#3F5A3C`/`#4F6B45`, pine crown `#5A7048`, deciduous `#7E9A4F`/`#93A85A`, birch trunk `#E8E2D0` |
-| ground | soil `#A88F6A`, dirt road `#B8A07A`, cobbles `#A39C90`/`#8E877B`, rock `#9A9486`, forest floor `#71704F` (D11a, in-house) |
+| ground | soil `#A88F6A`, dirt road `#B8A07A`, cobbles `#A39C90`/`#8E877B`, rock `#9A9486`, forest floor `#71704F` (D11a, in-house), earthwork face `#9E8A6C` and bed `#7B705E` (earthworks-lite, in-house) |
 | fields | rye `#C9B26B`, hay `#BFB27A`, crop `#9DAE6A`, fallow `#A38B62` |
 | track | ballast `#8C8578`/`#7A7368`, sleepers `#5A4636`, rail top `#B7B3AA`, sides `#55524D` |
 | walls | stucco `#E9DFC8`, ochre `#E3CFA6`, blush `#D9C3B0`, sage `#C9D3C5`, lime white `#F1ECE0`, brick `#9C5A44`, timber `#8A6E55`/`#6C5A48` |
@@ -231,6 +237,19 @@ at start-up (`src/ui` never imports render).
     and embankments, and adds ballast skirts.
   - This is **render-only**: the sim's terrain heights, and the validation that reads them,
     never change.
+  - **Earthworks-lite status (2026-09-27; the owner pulled D4's conform forward; look not
+    judged):**
+    - Ground track sits on a 6 m flat bed at its own height, 0.15 m under the ballast top,
+      with 1 : 1.5 side slopes to natural ground. Cuts win over fills. Moves up to 5 cm stay
+      natural.
+    - Affected lattice triangles are refined 4 × 4, so the track always shows, curves
+      included.
+    - The terrain shader paints moved ground by slope: `earthworkBed` on the flat,
+      `earthworkFace` on the slopes. The weight ramps from 5 cm to 50 cm of movement and is
+      clamped per fragment, so a cutting's edge is a clean line. Fields, roads, forest floor
+      and the AO tint fade out there.
+    - Ballast skirts are not built. The numbers and the mesh choice are in the
+      [ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-earthworks-lite).
 - **Water:** opaque (no transparency sorting), depth-tinted from `#6F9AA0` to deep `#4D7A84`,
   with foam `#D8E3DC` along shores.
 - **Lattice overlay:**
@@ -280,7 +299,8 @@ and arcs of the `NetworkView` render prims. Curves are sampled through
   the [ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-d3-ground-following));
   the far-LOD stripe is a centre band ±0.85 m wide in the
   sleeper colour (a vertex attribute and the `trackStripe` chunk), and the rails stay. Turnout
-  timbers, blades and earthworks are not built yet.
+  timbers, blades and earthworks are not built yet. (Earthworks since 2026-09-27: see
+  [Terrain and water](#terrain-and-water).)
 
 ## Structures
 
@@ -323,6 +343,11 @@ choose the type per span, first match wins:
 - **Scenery gives way to infrastructure.** Recommended rule: trees and props inside a piece's
   corridor (ballast plus a margin) hide on that network revision, and return on undo or
   demolish. The design passes do not specify this yet; D3/D4 settles it.
+  - Earthworks-lite (2026-09-27, a default to test): trees and props hide where their trunk
+    or post stands within 5 m of a ground-track centreline (the 3 m bed plus 2 m), or where
+    earthworks moved the ground by more than 10 cm, and return on undo.
+  - Field strips fade out over moved ground. Buildings are not moved: on the diorama, 8.5%
+    of test plans have earthworks that reach a building lot.
 - **Ambient animation** (sway, windmill sails, chimney smoke) runs at 30 fps and stops under
   reduced motion or power saver. Train motion, blades and steam are simulation feedback and
   are not ambient.
@@ -433,6 +458,10 @@ true bogies.
   or redo flashes the added pieces in the snap green and the removed ones in red for 400 ms
   (held, not faded, under reduced motion). The snap ring is a 9 px screen-constant billboard in
   the snap green: filled on an endpoint, hollow on a free node, with a fork glyph on track.
+- **Earthworks-lite (2026-09-27):** the ghost is not conformed while dragging. The parts of a
+  plan under the natural ground show only through the 0.2 see-through pass until the plan
+  is built, and then the terrain is cut under them. On the diorama that is 25% of
+  zero-step curve ribbon samples, and 0.3% of straight ones.
 - Recommended: give ribbons a minimum screen width so blocks still read at Region and Far.
   D7 sets the value.
 
@@ -630,7 +659,7 @@ slice named.
 | Shadow radius per preset: 3 (recipe) vs 2 (Medium) | D11b |
 | Masonry and structural-steel palette tokens; bridge type over land above 20 m | D4 |
 | A palette token for the chain signal's partial aspect; the dot → arm switch-over ppm; the colour-blind overlay values; the minimum ribbon width | D7 |
-| Scenery clearing along track corridors | D3/D4 |
+| Scenery clearing along track corridors (a default since earthworks-lite, 2026-09-27: 5 m, see [Trees and scenery](#trees-and-scenery); buildings still unhandled) | D3/D4 |
 | Moiré check on sleepers at Default (blocked until D3 track exists; the per-tree budget was set in D11a: 60–120 / 24–30) | D11a |
 | Chimney smoke and shore foam (deferred in D11a: smoke anchors exist, nothing is drawn yet) | D11b (proposed) |
 | The sun's screen direction: D1's sun casts shadows right and slightly up the screen, while this page says lower right | Look Gate A (owner) |
