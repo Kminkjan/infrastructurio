@@ -100,8 +100,11 @@ describe("track view", () => {
 
   it("hides sleepers and shows the ballast stripe below 4 ppm", () => {
     const t = setup(true);
+    t.sim.execute({ type: "build-track", pieces: straights(10, 5, 4), structure: "auto" });
+    t.view.sync(t.sim.network());
     t.view.setLod(6);
     expect(t.view.currentLod).toBe("near");
+    expect(layer(t.view, "track sleepers")?.visible).toBe(true);
     t.view.setLod(3);
     expect(layer(t.view, "track sleepers")?.visible).toBe(false);
     expect(t.materials.stripe.uTrackStripe.value).toBe(1);
@@ -110,6 +113,37 @@ describe("track view", () => {
     expect(t.materials.stripe.uTrackStripe.value).toBe(0);
     t.view.dispose();
   });
+
+  for (const multiDraw of [true, false]) {
+    const kind = multiDraw ? "batched" : "chunked";
+
+    it(`keeps the far-LOD sleepers hidden through rebuilds, and an empty batch out of the render (${kind})`, () => {
+      const t = setup(multiDraw);
+      const sleepers = () => layer(t.view, "track sleepers");
+      t.view.setLod(3);
+      // Back to near LOD with no track: the batched mesh has no attributes yet and must stay out of the render.
+      t.view.setLod(12);
+      if (multiDraw) expect(sleepers()?.visible).toBe(false);
+      t.view.setLod(3);
+      // Building (and undoing) at far LOD leaves the sleepers hidden; the ballast shows.
+      t.sim.execute({ type: "build-track", pieces: straights(10, 5, 4), structure: "auto" });
+      t.view.sync(t.sim.network());
+      expect(sleepers()?.visible).toBe(false);
+      expect(layer(t.view, "track ballast")?.visible).toBe(true);
+      t.sim.execute({ type: "build-track", pieces: straights(14, 5, 2), structure: "auto" });
+      t.sim.execute({ type: "undo" });
+      t.view.sync(t.sim.network());
+      expect(sleepers()?.visible).toBe(false);
+      t.view.setLod(12);
+      expect(sleepers()?.visible).toBe(true);
+      // Emptied at near LOD: the batched mesh hides again.
+      t.sim.execute({ type: "undo" });
+      t.view.sync(t.sim.network());
+      if (multiDraw) expect(sleepers()?.visible).toBe(false);
+      t.view.dispose();
+      t.materials.dispose();
+    });
+  }
 
   it("rebuilds everything after invalidate", () => {
     const t = setup(false);

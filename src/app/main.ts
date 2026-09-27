@@ -278,18 +278,24 @@ const tweak = showTweakPanel(params)
     })
   : undefined;
 
-// The camera state last frame, so a still pointer re-picks when the view moves under it.
-const lastView = { x: Number.NaN, z: Number.NaN, ppm: Number.NaN, yaw: Number.NaN };
+// The camera state last frame, so a still pointer re-picks when the view moves under it, and the
+// screen-anchored overlays (end-height tags, the cursor's tooltip) move only when the projection changed.
+const lastView = { x: Number.NaN, z: Number.NaN, ppm: Number.NaN, yaw: Number.NaN, width: Number.NaN, height: Number.NaN };
 
 scheduler.onFrame((frame) => {
   controller.update(frame);
   const moved = camera.target.x !== lastView.x || camera.target.z !== lastView.z || camera.ppm !== lastView.ppm || camera.yaw !== lastView.yaw;
+  const resized = camera.cssWidth !== lastView.width || camera.cssHeight !== lastView.height;
   if (moved) {
     lastView.x = camera.target.x;
     lastView.z = camera.target.z;
     lastView.ppm = camera.ppm;
     lastView.yaw = camera.yaw;
     router?.repick();
+  }
+  if (resized) {
+    lastView.width = camera.cssWidth;
+    lastView.height = camera.cssHeight;
   }
   // Static diffs by revision (time-sliced past 8 ms), then the track LOD.
   trackView.sync(sim.network());
@@ -308,8 +314,10 @@ scheduler.onFrame((frame) => {
   host.syncSize();
   host.renderer.render(scene, camera.camera);
   labels.update(camera, camera.camera);
-  ghost.updateTags(camera);
-  construction.onFrame();
+  if (moved || resized) {
+    ghost.updateTags(camera);
+    construction.onViewChange();
+  }
   perf.sample(frame);
 });
 scheduler.requestFrame("init");

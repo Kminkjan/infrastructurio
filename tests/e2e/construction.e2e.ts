@@ -117,6 +117,53 @@ test("the keyboard cursor keeps its target while the view follows it, with the m
   await undoToEmpty(page);
 });
 
+test("the end-height tag and the cursor's tooltip follow the camera, and rest with it", async ({ page }) => {
+  await openDiorama(page);
+  const { q, r } = await findDryRun(page, 8, 0.3);
+  await lookAtNode(page, q + 4, r, 6);
+  const start = await nodeScreen(page, q, r);
+  await page.mouse.move(start.x, start.y);
+  await page.keyboard.press("1");
+  await page.mouse.move(start.x + 1, start.y);
+  await page.keyboard.press("Enter");
+  // The keyboard cursor holds the plan (so a pan re-plans nothing); six steps up make the ghost elevated.
+  for (let i = 0; i < 6; i++) await page.keyboard.press("ArrowRight");
+  for (let i = 0; i < 6; i++) await page.keyboard.press("PageUp");
+  const tag = page.locator(".ghost-height-tag").nth(1);
+  await expect(tag).toBeVisible();
+  await expect(tag).toHaveText("+6 m");
+  const tagAt = () => tag.evaluate((el) => el.style.transform);
+  const tipAt = () => page.evaluate(() => document.querySelector<HTMLElement>("#hud")?.style.getPropertyValue("--hud-pointer-x") ?? "");
+  const tag0 = await tagAt();
+  const tip0 = await tipAt();
+  // WASD pans in Track too.
+  await page.keyboard.down("d");
+  await page.waitForTimeout(300);
+  await page.keyboard.up("d");
+  await expect.poll(tagAt).not.toBe(tag0);
+  await expect.poll(tipAt).not.toBe(tip0);
+  expect((await snapshot(page)).cursor).toBe(true);
+  // Once the camera rests (the pan eases out), so do they.
+  let last = "";
+  await expect
+    .poll(async () => {
+      const v = await cameraView(page);
+      const now = `${v.x},${v.z}`;
+      const settled = now === last;
+      last = now;
+      return settled;
+    }, { intervals: [200] })
+    .toBe(true);
+  const tag1 = await tagAt();
+  const tip1 = await tipAt();
+  await page.waitForTimeout(300);
+  expect(await tagAt()).toBe(tag1);
+  expect(await tipAt()).toBe(tip1);
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  expect((await snapshot(page)).pieces).toBe(0);
+});
+
 test("Enter reaches the track tool after the toolbar was used, and Tab + Enter still works on the toolbar", async ({ page }) => {
   await openDiorama(page);
   const { q, r } = await findDryRun(page, 8, 0.3);
