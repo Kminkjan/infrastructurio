@@ -311,6 +311,63 @@ Playwright, 1280 × 800 at DPR 1, Apple M5 Pro, ANGLE Metal). The status of this
 - **Not established:** the owner's reading of any variant, the mid laptop, real DPR 2
   (headless Chrome kept the canvas at its CSS size) and the Low preset.
 
+## Findings (2026-09-27, render pass iteration)
+
+Recorded on branch `codex/render-earthworks-terrain`, code at `b864b05` (from `329b69a`,
+draft PR [#83](https://github.com/Kminkjan/infrastructurio/pull/83)). The trigger was owner
+feedback on look `b` with earthworks, as relayed to the implementing agent: the owner picked
+"Facets too strong/noisy" and wrote "The groundwork/dirt seems very pixely", then "Still a bit
+wonky". The look side is in
+[art direction](../art-direction.md#render-pass-iteration-2026-09-27) and the geometry in the
+[ADR 0010 finding](0010-triangular-lattice-track-geometry.md#findings-2026-09-27-render-pass-iteration).
+The evidence is automated tests (Vitest in Node) and an **agent** browser run (headless
+Chrome through Playwright, 1280 × 800 at DPR 1, Apple M5 Pro, ANGLE Metal). The status of this
+ADR stays **Proposed**; nothing here is a look verdict.
+- **Decision 3 held: still one terrain material and isolated chunks,** with new cache keys.
+  - [`earthwork`](../../src/render/art/shaderChunks/earthwork.ts) (`terrain-earthwork-v2`)
+    reads a vec3 attribute: the encoded potential, the departure, the centreline distance.
+    It declares the attribute, the varying and two weight helpers (lip, earthwork) once per
+    shader, behind a `TERRAIN_EARTHWORK` define. Its colours are grass, a 12% grass-light
+    tint on steep slopes, `earthworkFace` on the lower batter of deep cuts, and
+    `earthworkBed` on a cut shoulder.
+  - The splat gained an `earthwork` option (`terrain-splat-v4…-earthwork`), which the terrain
+    material always sets. It fades fields, roads, forest floor and the AO tint by the
+    earthwork weight, and the slope soil by the lip.
+    - Without options the splat is still D11a's `terrain-splat-v2`, byte-identical.
+    - The terrain material's key changes for every look, `d11a` too, but natural ground
+      renders as before.
+  - The relief chunk (`terrain-relief-v2`) fades its facets by the lip, under the same
+    define.
+  - [`groundDetail`](../../src/render/art/shaderChunks/groundDetail.ts) gained a soft edge
+    for the tone patches and meadow flecks, patch mixes and fleck cut levels as settings, and
+    a soil mask. At its defaults, and in look `a`, it is as before.
+  - Every new piece has a float64 mirror under test.
+- **"Smooth terrain" versus facets.** Look `b` keeps its facets (the owner's choice), at 0.8
+  instead of 2.5, and they are gone on earthworks, whose refined triangles they drew as
+  stair-steps. Look `b`'s ground detail was calmed:
+  - patches 26 m, mixes 0.08/0.07, soft edges;
+  - flecks 0.5 at cut levels 0.97 → 0.80;
+  - tufts 0.2.
+
+  The before and after table is in art direction. Looks `a` and `c` are unchanged, except that
+  `c` still follows `b` plus contours.
+- **Decision 6 held.** No post-processing, the same lighting recipe, and no palette token
+  added or changed. No texture was added. Two tokens (`earthworkFace`, `earthworkBed`) have
+  narrower roles.
+- **Cost** (agent development readings, not gate B; two runs of each build, each figure the
+  mean of 60 back-to-back renders closed by a `readPixels`).
+  - Look `b` at 1280 × 800 moved by −0.02 to +0.03 ms per frame across the eight captured
+    views (for example Region grassland 0.782/0.772 → 0.762/0.760 ms, bookmark 4
+    1.022/1.018 → 1.043/1.040 ms).
+  - At 2560 × 1600 it moved by at most +0.06 ms.
+  - Draw calls are identical.
+  - The initial JS grew from 285.89 to 287.31 kB gzip.
+  - The vec3 attribute triples the attribute memory of every terrain chunk: 12 instead of
+    4 bytes per vertex, zeros on natural ground. Not measured on the GPU.
+- **Not established:** the owner's reading; Look Gates A and B; the mid laptop, real DPR 2 and
+  the Low preset. Nor whether the soft patch edges (median ±3.5 m on the noise mirror) read as
+  calm or, again, as soft blotches.
+
 ## Revisit when
 
 - Look Gate A scores low on mood, cohesion or originality in a way parameters cannot fix
@@ -331,3 +388,6 @@ Playwright, 1280 × 800 at DPR 1, Apple M5 Pro, ANGLE Metal). The status of this
 - 2026-09-27: terrain look variant findings added (a relief chunk, the splat's crisp and
   detail options, contested smooth-terrain shading in variant `b`, agent frame costs); status
   unchanged, still Proposed.
+- 2026-09-27: render pass iteration findings added (the earthwork chunk's vec3 attribute and
+  grass-first colours, the splat's earthwork option, facets faded on earthworks, look `b`
+  calmed, agent frame costs before and after); status unchanged, still Proposed.

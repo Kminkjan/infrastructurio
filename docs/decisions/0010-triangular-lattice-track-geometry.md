@@ -1080,6 +1080,97 @@ Proposed: the owner decision pulls a render criterion forward and accepts no ADR
     plane over it (zero-step plans never cut below it);
   - timings on the gate hardware.
 
+## Findings (2026-09-27, render pass iteration)
+
+Recorded on branch `codex/render-earthworks-terrain`, code at `b864b05` (from `329b69a`,
+draft PR [#83](https://github.com/Kminkjan/infrastructurio/pull/83)). The trigger was owner
+feedback on the earthworks above, as relayed to the implementing agent: "The groundwork/dirt
+seems very pixely", then "Still a bit wonky". The look side is in
+[art direction](../art-direction.md#render-pass-iteration-2026-09-27). Measurements are
+automated (Vitest 4.1.10, Node 26.7.0, macOS 26.6.2, Apple M5 Pro) unless labelled agent
+(Playwright 1.63.0, headless Chrome, same machine). The status of this ADR stays Proposed.
+- **The rule, made smooth** ([`earthworks.ts`](../../src/render/terrain/earthworks.ts)). The
+  mechanism of the earthworks-lite finding stands; four details changed.
+  - **Crest and toe.** The side slope rises e(d) = ease(d − W) / S. `ease` is 0 on the
+    formation, x² / 2b over b = 2 m, then x − b/2: 1 : 1.5 with a rounded crest or toe and no
+    kink. The formation stays flat to W = 3 m.
+  - **Daylight line.** The natural surface is clamped between L = z − e and U = z + e by
+    mid + sign(x)·smin(|x|, half, k), with a polynomial smooth minimum over k = 0.6 m of height,
+    narrowed to 2·min(|x|, half) so shallow ground keeps its sign.
+    - It never leaves [L, U] and is exact on the formation.
+    - Where the envelopes of two tracks conflict (L ≥ U) it takes U: cuts still win.
+  - **Leave natural.** The hard 5 cm step is a soft band: moves up to 5 cm stay natural,
+    moves from 10 cm are drawn in full, with a smoothstep between. So the ground within the
+    band lies at most about 5.4 cm above the bed (calculated).
+  - **Water.** Fills continue their slope under the water. Round 1's cap, 10 cm under the
+    surface, left a shelf whose edge dropped over one 1.25 m sub-triangle.
+  - The reach grew by b/2 + S·k = 1.9 m, to cover the round-offs.
+- **The visibility guarantee holds** (same test and population as round 1, at PLANS = 3000;
+  the committed suite runs 300). The fresh population is 3,000 plans with 52,114 pieces;
+  round 1 recorded 51,886 pieces, so only fresh numbers are compared here.
+  - No rail-top sample is buried, at LOD0 or LOD1, for any piece kind. The least clearance
+    is 0.323–0.367 m.
+  - Ballast-top edges: 0% buried at LOD0; 0.004% (shifts) and 0.001% (straights) at LOD1,
+    the far band.
+  - Before (natural LOD0 surface): curve rail tops buried 26.811% (worst 14.14 m).
+  - The argument is unchanged. Under the ballast top every drawn vertex lies within
+    1.25 + 1.6 m of the centreline, inside the flat 3 m formation, where the clamp gives the
+    bed exactly.
+- **Mesh** ([`earthworkMesh.ts`](../../src/render/terrain/earthworkMesh.ts)).
+  - **Normals.** A moved vertex's normal is the smooth natural normal tilted by the
+    least-squares gradient of the departure D = C − N over its six sub-lattice neighbours.
+    - Round 1 blended in the raw drawn-surface normal over the first 30 cm of movement. That
+      normal carries the 5 m lattice facets, and the relief chunk's ×5 slope gain magnified
+      them into teeth along the lip (agent capture: they vanish at gain 1).
+    - D is smooth and exactly 0 on natural ground, so no blend threshold is needed. Test: a
+      6 m bank has upright normals on its bed and 33.7° ± 0.05° on its straight slope.
+  - **Colour attribute.** It is now a vec3: the encoded potential max(N − U, L − N)
+    (|N − U| where the envelopes conflict), the signed departure, and the centreline
+    distance.
+    - The potential is unclamped and piecewise smooth, so linear interpolation keeps its
+      contours.
+    - Plain corners that refined triangles reuse carry their true values. Unmoved vertices,
+      fans among them, carry no earthwork colour weight (tested).
+  - **Colours.** Moved vertices blend toward a dry bake, the land recipe without the shore
+    soil (on water nodes, taken at the water level), as they move 5–60 cm. A fill standing in
+    a lake is no longer coloured as the underwater bed. The D11a bake and the look bake stay
+    bit-identical to `329b69a` (checked).
+  - Watertightness, the drawn-heightfield equality (within 1 mm), undo byte-exactness, the
+    seams and the winding tests all pass unchanged.
+- **No cliff at the shore.**
+  - Unit test: on a synthetic shore, no drawn sub-triangle is steeper than 1 : 1.5 (× 1.02)
+    and none lies flat at the water plane.
+  - Agent e2e: the owner's scene, laid with the real pointer (a drag (50, 203) → (34, 246)).
+    - The rails stay clear, and within 20 m of the curve's shore end the steepest 0.5 m step
+      over underwater natural ground is 0.664.
+    - It finds no flat shelf at 10 cm under the water. The same test finds 30 shelf samples
+      on `329b69a`.
+  - Nothing is drawn flat at the water plane, so nothing z-fights it.
+- **Rebuild cost** (dev measurements, not gates; five runs each, the same session).
+  - 10-piece edits in
+    [`EarthworksView.test.ts`](../../src/render/terrain/EarthworksView.test.ts):
+    - `329b69a`: median 1.81–1.91 ms, p95 4.24–4.91 ms (the median of the five runs'
+      p95s is 4.38 ms);
+    - `b864b05`: median 2.05–2.29 ms, p95 4.63–6.45 ms (4.83 ms);
+    - undo p95 1.14–1.28 ms against 1.16–1.28 ms.
+  - A 505-piece network: the full rebuild takes 57.2–61.8 ms at `329b69a` and 59.9–67.2 ms
+    at `b864b05`; its longest 8 ms slice is 8.83–9.61 ms and 9.76–11.63 ms. The cause is
+    5,987 refined LOD0 triangles against 4,898 (+22%), from the round-off bands.
+  - An earlier session's baseline was noisier: p95 4.45–6.05 ms, 4.92 ms across runs.
+  - Agent browser: 20 warmed edit and undo cycles of the hill curve, three alternating runs
+    each.
+    - Edits: medians 5.95/6.15/5.95 ms at `329b69a` and 6.6/6.35/6.45 ms at `b864b05`,
+      about +0.4 ms.
+    - Undos: 1.7–3.4 ms and 1.7–3.7 ms.
+    - `renderer.info.memory.geometries` 94 → 95 on both builds.
+  - Gate B8 (provisional, ≤ 3 ms p95; authoritative only in the
+    [acceptance gates](../evidence/m4/2026-09-26-acceptance-gates.md)) stays at risk, a
+    little more than before. The levers are unchanged: defer LOD1 until the far band shows,
+    split heavy chunks. A narrower reach margin is a third.
+- **Not established:** the owner's reading of the new shapes; the look gates; timings on the
+  gate hardware. Nor how the track's rounded end-cap earthworks read: at a shore node they
+  form a small rounded nose into the water, as in round 1.
+
 ## Revisit when
 
 - The D3 feel check finds construction unsatisfying for reasons that planner tuning, chained
@@ -1133,3 +1224,8 @@ Proposed: the owner decision pulls a render criterion forward and accepts no ADR
   earthworks conform forward in the renderer, the conform rule, three mesh options measured,
   visibility before and after, cut and fill depths, scenery, picking, the ghost decision,
   rebuild costs); status unchanged, still Proposed.
+- 2026-09-27: render pass iteration findings added (the smooth conform rule: an eased crest
+  and toe, a smooth daylight clamp, a soft leave-natural band and fills continued under
+  water; departure-gradient normals, the vec3 colour attribute and the dry bake; visibility
+  re-measured on 3,000 plans; the shore e2e; rebuild costs before and after); status
+  unchanged, still Proposed.

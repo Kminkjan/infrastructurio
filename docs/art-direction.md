@@ -829,3 +829,109 @@ Needs a dated art-direction amendment ('smooth shading for terrain')."
   - Look Gate A's legibility score, which is still pending;
   - how `b` reads together with earthworks, since the owner chose without them;
   - the cost on the mid laptop and at real DPR 2.
+
+## Render pass iteration (2026-09-27)
+
+**Status (2026-09-27, agent):** built on branch `codex/render-earthworks-terrain`, code at
+`b864b05` (from `329b69a`, draft PR [#83](https://github.com/Kminkjan/infrastructurio/pull/83)).
+**Not judged:** the owner reads the result, and nothing here is a Look Gate result. The
+sections above stay as written. This section supersedes the earthworks-lite shading bullets
+under [Terrain and water](#terrain-and-water) and the earthworks-lite token roles under
+[Palette](#palette), and it amends look `b`'s parameters in
+[Terrain look variants](#terrain-look-variants-2026-09-27). The geometry numbers are in the
+[ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-render-pass-iteration)
+and the shader and cost notes in the
+[ADR 0013 finding](decisions/0013-rendering-and-art-pipeline.md#findings-2026-09-27-render-pass-iteration).
+
+**Owner feedback (2026-09-27, as relayed to the implementing agent).** Looking at a Close-zoom
+screenshot of a curve that crosses a hill in a cutting and then runs on an embankment down
+toward a lake shore, over look `b`, the owner picked "Facets too strong/noisy" and wrote:
+"The groundwork/dirt seems very pixely", then "Still a bit wonky".
+
+The relaying agent's notes on the screenshot (its description, not the owner's words):
+- sawtooth crests, daylight lines and colour edges along the 1.25 m refined triangles;
+- stepped vertical faces where the fill meets the shore;
+- large bare brown areas on the fill and the cut faces;
+- noisy ground: facet bands, hard-edged yellowish patches, flecks.
+
+The goals it set: the track never hidden; earthworks that read as smooth, deliberate miniature
+landforms at Close, Default and Region; and ground that is crisp but calm.
+
+**What changed** (code: [`earthworks.ts`](../src/render/terrain/earthworks.ts),
+[`earthworkMesh.ts`](../src/render/terrain/earthworkMesh.ts),
+[`shaderChunks/earthwork.ts`](../src/render/art/shaderChunks/earthwork.ts),
+[`terrainLook.ts`](../src/render/terrain/terrainLook.ts)):
+- **Rounded landforms.** The side slope eases into 1 : 1.5 over 2 m past the formation edge,
+  and meets natural ground through a smooth clamp over 0.6 m of height (about 1.8 m of plan
+  on flat ground), instead of at two kinks. The 5 cm "leave natural" step became a soft band
+  from 5 to 10 cm. The formation is still flat to 3 m, so the track stays clear.
+- **Smooth shading and colour edges.** A moved vertex takes the smooth natural normal, tilted by
+  the gradient of how far the ground moved. So the relief's slope gain no longer magnifies
+  triangle noise along the lip. The colour weight is a ramp of an unclamped potential, how far
+  the natural ground lies outside the cut and fill envelopes. It interpolates exactly across
+  the triangles, and the shader cuts it per fragment, so no colour edge follows a triangle.
+  The facets fade out over the refined lip.
+- **No cliffs at the water.** Fills continue their slope under the water, where the opaque
+  water plane hides them, instead of stopping on a shelf 10 cm under it. Made ground takes the
+  land colour without the shore soil tint, never the underwater bed's. A bank reaches the
+  water grassed, down to the ground detail's thin wet line.
+- **Grassed banks.** Earthworks keep the surrounding grass and its detail. Fields, roads,
+  forest floor, the AO tint and the slope soil fade out on them. Steep earthwork slopes move
+  12% toward grass light. `earthworkFace` (at most 85%) shows only in cuts deeper than about
+  1.5 m (fading in from 1.2 to 2.2 m of cut), and only on their lower batter, up to about 2 m
+  above the formation (fading out from 1.5 to 2.5 m). So a deep cutting reads as a fresh lower
+  face under a grassed upper slope, however deep it is. `earthworkBed` is a shoulder
+  2.4 → 3.0 m from the centreline where the formation is cut, merging into that face.
+  Embankment tops stay grassed up to the ballast. Two variants were rejected on agent
+  captures: a shoulder on fills (it drew a thin detached line on the fill side of
+  cross-slopes), and a steepness gate on the bare earth (it drew a thin line on short
+  downhill cut faces).
+- **Palette.** No token was added or changed. `earthworkFace` and `earthworkBed` keep their
+  values in the narrower roles above; the banks use `grass` and `grassLight`.
+- **Calmer ground (look `b`, still the default).** Look `a` keeps its values exactly.
+
+| Look `b` setting | Before (the owner's pick, `3e8a8d3`) | After |
+|---|---|---|
+| Facet weight (fade 1.5–2.5 ppm) | 2.5 | 0.8 |
+| Slope gain, levelling tangent | 5, 1 | 5, 1 (unchanged: the hills keep reading) |
+| Tone patch amount, cell | 0.7, 16 m | 1, 26 m |
+| Patch mix toward grass light / shade (effective) | 0.18 / 0.12 at 70%: 0.126 / 0.084 | 0.08 / 0.07 |
+| Patch and fleck edge | one pixel | a soft cut of ±0.08 noise units: median ±3.5 m for patches, ±1.9 m for flecks (measured on the noise mirror) |
+| Meadow flecks: amount, cut levels | 1, 0.95 → 0.72 | 0.5, 0.97 → 0.80 |
+| Tufts (share of 1.6 m cells) | 0.35 | 0.2 |
+| Slope soil, waterline | 1, 1 | 1, 1 (the slope soil is masked on earthworks) |
+
+**Agent observations** (headless Chrome through Playwright 1.63.0, 1280 × 800 at DPR 1, Apple
+M5 Pro, ANGLE Metal; `CAPTURE=1 RENDER_ITER_LABEL=<label> npx playwright test
+--project=capture renderIter`, images in the gitignored `test-results/render-iter/before/`
+from `329b69a` and `after/` from `b864b05`). The owner's scene was laid with the real pointer:
+a drag (50, 203) → (34, 246) on the lake's east shore gives ten straights, then an R 180 curve
+cutting up to 5.3 m into a hill flank and ending on a fill of up to 2.4 m at the shore. These
+are agent notes, not a look verdict:
+- **Close** (`curve-close`, `cutting-close`, `shore-close`, `shore-zoom` at 24 ppm):
+  - *before*: stair-stepped crests and colour edges about 15 px apart, brown faces and bed,
+    diagonal facet bands, hard-edged yellowish flecks;
+  - *after*: smooth rounded lips, grassed faces with a brown lower batter and a narrow
+    shoulder along the cut, and calm grass with faint facets. In a 2× crop the stair-steps
+    are gone, but a faint, soft ripple remains in the shading of the outer lip on the shadowed
+    side. At the shore, the bank runs into the water as a slope.
+  - The track's end sits 10 cm above the water, so the rounded nose around it lies inside the
+    waterline detail's wet band and reads brown, like the natural shore rim.
+- **Default and Region** (`curve-default`, `curve-region`): the cutting reads as a soft
+  light-and-shade groove with thin brown bands at Default. At Region it is a subtle groove
+  rather than round 1's brown leaf, and the track stays visible. The tone patches no longer
+  read as blotches.
+- **One yaw step** (`curve-close-yaw1`): the relief turns with the sun and the banks stay smooth.
+- **Bookmarks 1–4** (`bookmark-*`): the town, the river and the far view are unchanged except
+  for calmer grass tones.
+- **Regression scenes** (`test-results/earthworks/after-*`: the round-1 hill curve, a
+  cross-slope straight, Far through Close): no stair-steps, and the 10 m cut shows a brown
+  lower batter under a grassed face.
+- No page errors or warnings in any run.
+
+**Open (not established here):** how the owner reads any of this; Look Gates A and B;
+legibility; the mid laptop, real DPR 2 and the Low preset. The soft patch edges (median
+±3.5 m) risk drifting back toward the soft blotches the owner found "too blurry/flat" before
+look `b`; their contrast is low (8% and 7%), and the tufts and relief carry the crispness.
+Whether cut faces should show earth at all, and whether embankment tops should show a shoulder,
+are open to the owner.
