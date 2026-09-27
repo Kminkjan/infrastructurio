@@ -120,6 +120,8 @@ export interface EarthworkPiece extends PieceReach {
   readonly arcEnds: Float64Array;
   /** The reach at LOD1 (at least the LOD0 reach): sized from the relief scan widened by LOD1_SCAN_MARGIN_M. */
   readonly lod1: PieceReach;
+  /** The centreline's own plan box (the reach boxes grow it), for skipping points out of reach. */
+  readonly centreBox: { readonly minX: number; readonly minY: number; readonly maxX: number; readonly maxY: number };
 }
 
 /** The piece's reach at a LOD. */
@@ -160,6 +162,7 @@ export function earthworkPiece(terrain: Terrain, piece: PieceInput): EarthworkPi
     maxX: maxX + reach,
     maxY: maxY + reach,
     lod1: { reachM: reach1, minX: minX - reach1, minY: minY - reach1, maxX: maxX + reach1, maxY: maxY + reach1 },
+    centreBox: { minX, minY, maxX, maxY },
   };
 }
 
@@ -666,12 +669,19 @@ export class ChunkPass {
     const r = reachAt(p, this.lat.lod);
     const rsA = Math.max(this.rs0, Math.ceil(r.minY / rowM));
     const rsB = Math.min(this.rs0 + this.height - 1, Math.floor(r.maxY / rowM));
+    // A point farther than the reach from the centreline's box is farther from the centreline: each row only spans
+    // the x range within the reach (plus a micrometre, so rounding never drops a point the reach would keep).
+    const c = p.centreBox;
+    const out = r.reachM + 1e-6;
     let evaluated = 0;
     for (let rs = rsA; rs <= rsB; rs++) {
       const parity = rs & 1;
       const y = sub * rs * HALF_SQRT3;
-      const csA = Math.max(this.cs0, Math.ceil(r.minX / sub - parity / 2));
-      const csB = Math.min(this.cs0 + this.width - 1, Math.floor(r.maxX / sub - parity / 2));
+      const dy = y < c.minY ? c.minY - y : y > c.maxY ? y - c.maxY : 0;
+      if (dy >= out) continue;
+      const w = Math.sqrt(out * out - dy * dy);
+      const csA = Math.max(this.cs0, Math.ceil(r.minX / sub - parity / 2), Math.ceil((c.minX - w) / sub - parity / 2));
+      const csB = Math.min(this.cs0 + this.width - 1, Math.floor(r.maxX / sub - parity / 2), Math.floor((c.maxX + w) / sub - parity / 2));
       const rowBase = (rs - this.rs0) * this.width - this.cs0;
       for (let cs = csA; cs <= csB; cs++) {
         const x = sub * (cs + parity / 2);
