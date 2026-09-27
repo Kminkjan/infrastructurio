@@ -90,8 +90,10 @@ export const D11A_TERRAIN_COLOURS: TerrainColourOptions = {
 export function computeTerrainShading(t: Terrain, colours: TerrainColourOptions = D11A_TERRAIN_COLOURS): TerrainShading {
   const waterDistance = computeWaterDistance(t);
   const heights = colours.normalSmoothing > 0 ? smoothHeightsDm(t, colours.normalSmoothing) : t.heightsDm;
-  const colors = computeNodeColors(t, waterDistance, colours);
-  return { normals: computeNodeNormals(t, heights), colors, waterDistance, dryColors: computeDryColors(t, colors, waterDistance, colours) };
+  // One land recipe for both bakes: building it runs the ±25 m mean (two passes over the map) and a land-range scan.
+  const land = landColourer(t, colours);
+  const colors = computeNodeColors(t, waterDistance, colours, land);
+  return { normals: computeNodeNormals(t, heights), colors, waterDistance, dryColors: computeDryColors(t, colors, waterDistance, colours, land) };
 }
 
 /**
@@ -219,10 +221,9 @@ export function computeNodeNormals(t: Terrain, heightsDm: ArrayLike<number> = t.
  * down; and an underwater bed that darkens toward deep water, which shows as a
  * wet band where the shoreline triangles cross the water surface.
  */
-export function computeNodeColors(t: Terrain, waterDistance: Uint8Array, o: TerrainColourOptions = D11A_TERRAIN_COLOURS): Float32Array {
+export function computeNodeColors(t: Terrain, waterDistance: Uint8Array, o: TerrainColourOptions = D11A_TERRAIN_COLOURS, land: LandColourer = landColourer(t, o)): Float32Array {
   const { columns, rows, heightsDm, waterLevelDm } = t;
   const colors = new Float32Array(columns * rows * 3);
-  const land = landColourer(t, o);
   const soil = new Color(palette.soil);
   const deep = new Color(palette.waterDeep);
   const c = new Color();
@@ -248,9 +249,8 @@ export function computeNodeColors(t: Terrain, waterDistance: Uint8Array, o: Terr
  * every water node (taken at the water level), recoloured by the land recipe with no soil.
  * Other nodes keep their colour exactly.
  */
-export function computeDryColors(t: Terrain, colors: Float32Array, waterDistance: Uint8Array, o: TerrainColourOptions = D11A_TERRAIN_COLOURS): Float32Array {
+export function computeDryColors(t: Terrain, colors: Float32Array, waterDistance: Uint8Array, o: TerrainColourOptions = D11A_TERRAIN_COLOURS, land: LandColourer = landColourer(t, o)): Float32Array {
   const out = Float32Array.from(colors);
-  const land = landColourer(t, o);
   const c = new Color();
   for (let index = 0; index < t.heightsDm.length; index++) {
     if ((waterDistance[index] ?? WATER_DISTANCE_FAR) >= SOIL_BY_RING.length) continue;
@@ -263,6 +263,9 @@ export function computeDryColors(t: Terrain, colors: Float32Array, waterDistance
   return out;
 }
 
+/** The land colour recipe for one terrain and recipe (`landColourer`): pure, so the node and dry bakes can share one. */
+type LandColourer = (col: number, row: number, h: number, ring: number, out: Color) => Color;
+
 /**
  * The land colour recipe as a function of a node (col, row), a height `h` (dm) and a ring
  * distance to water: grass patches between shade, base and light plus a little per-node
@@ -270,7 +273,7 @@ export function computeDryColors(t: Terrain, colors: Float32Array, waterDistance
  * below the ±25 m mean (baked AO), lighter on ridges (off in D11a) and slightly darker low
  * down.
  */
-function landColourer(t: Terrain, o: TerrainColourOptions): (col: number, row: number, h: number, ring: number, out: Color) => Color {
+function landColourer(t: Terrain, o: TerrainColourOptions): LandColourer {
   const { columns, heightsDm, waterLevelDm } = t;
   const mean = localMeanHeights(t, AO_RADIUS);
   let minLand = Infinity;

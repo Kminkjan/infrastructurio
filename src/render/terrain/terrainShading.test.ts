@@ -7,6 +7,7 @@ import { simToWorld } from "../coords";
 import {
   D11A_TERRAIN_COLOURS,
   WATER_DISTANCE_FAR,
+  computeDryColors,
   computeNodeColors,
   computeNodeNormals,
   computeTerrainShading,
@@ -157,5 +158,17 @@ describe("terrain shading", () => {
     expect(grassy / shore).toBeGreaterThan(0.99);
     expect(land).toBeGreaterThan(500);
     expect(greener).toBe(land);
+  });
+
+  it("builds the land recipe once per bake, with the bytes each colour pass gives on its own", () => {
+    // Review finding (PR #83): computeTerrainShading built the land recipe twice (the ±25 m mean and the land
+    // range scan each time). It now shares one; the colours must not change by a bit, for D11a and a variant.
+    const t = generateTerrain({ seed: "baltic-diorama", ...DEFAULT_TERRAIN_SIZE });
+    for (const colours of [TERRAIN_LOOKS.d11a.colours, TERRAIN_LOOKS.b.colours]) {
+      const shading = computeTerrainShading(t, colours);
+      const alone = computeNodeColors(t, shading.waterDistance, colours);
+      expect(shading.colors).toEqual(alone);
+      expect(shading.dryColors).toEqual(computeDryColors(t, alone, shading.waterDistance, colours));
+    }
   });
 });

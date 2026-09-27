@@ -4,7 +4,7 @@ import { type AssetData, type AssetLod, type AssetRegistry } from "../art/AssetR
 import { palette } from "../art/palette";
 import { simToWorld } from "../coords";
 import { sampleTerrainHeightM } from "../terrain/heightfieldRay";
-import type { ClearableLayer } from "./clearance";
+import { type ClearableLayer, commitClearedMeshes, refreshInstanceBounds, writeClearedInstance } from "./clearance";
 import { MeshBuilder } from "./meshBuilder";
 
 /**
@@ -184,9 +184,6 @@ interface TreeChunkMeshes {
   readonly lod1: InstancedMesh;
 }
 
-/** The 3×3 basis entries of a column-major 4×4 matrix (translation and the w row stay). */
-const BASIS_ELEMENTS = [0, 1, 2, 4, 5, 6, 8, 9, 10] as const;
-
 /** Zoom tiers: LOD0 per chunk, LOD1 per chunk, LOD1 whole-map (no shadows). */
 export type TreeTier = 0 | 1 | 2;
 
@@ -215,6 +212,8 @@ export class TreeLayer implements ClearableLayer {
   private readonly placed: Float32Array;
   private readonly cleared: Uint8Array;
   private readonly dirty = new Set<InstancedMesh>();
+  /** Each chunk's LOD0 mesh → its LOD1 twin, which shares the LOD0 matrix attribute. */
+  private readonly lod1Of = new Map<InstancedMesh, InstancedMesh>();
 
   constructor(
     private readonly trees: TreeInstances,
@@ -306,6 +305,7 @@ export class TreeLayer implements ClearableLayer {
       }
       lod1.visible = false;
       this.meshes.push({ lod0, lod1 });
+      this.lod1Of.set(lod0, lod1);
     }
     for (const mesh of this.farMeshes) {
       mesh.castShadow = false;
@@ -346,21 +346,24 @@ export class TreeLayer implements ClearableLayer {
     return true;
   }
 
-  /** Uploads instance matrices changed by `setCleared` and refreshes their bounds. */
+  /** Uploads instance matrices changed by `setCleared` and refreshes the chunk meshes' bounds. */
   commitCleared(): void {
-    for (const mesh of this.dirty) {
-      mesh.instanceMatrix.needsUpdate = true;
-      mesh.computeBoundingSphere();
-      mesh.computeBoundingBox();
-      // LOD1 chunk meshes share LOD0's matrix attribute: refresh their bounds too.
-      for (const m of this.meshes) {
-        if (m.lod0 !== mesh) continue;
-        m.lod1.computeBoundingSphere();
-        m.lod1.computeBoundingBox();
-      }
-    }
-    this.dirty.clear();
+    commitClearedMeshes(this.dirty, this.rebound);
   }
+
+  /**
+   * Bounds after a clearing change: a chunk mesh and its LOD1 twin (which shares the LOD0
+   * matrix attribute) are recomputed. A far mesh keeps the bounds it was built with: they
+   * hold every placed tree, a collapse only shrinks what they must hold and a restore
+   * writes a placed matrix back, so they stay valid without a pass over the whole map's
+   * instances.
+   */
+  private readonly rebound = (mesh: InstancedMesh): void => {
+    if (this.farMeshes.includes(mesh)) return;
+    refreshInstanceBounds(mesh);
+    const twin = this.lod1Of.get(mesh);
+    if (twin) refreshInstanceBounds(twin);
+  };
 
   /** Whether tree `i` is currently cleared. */
   isCleared(i: number): boolean {
@@ -368,11 +371,7 @@ export class TreeLayer implements ClearableLayer {
   }
 
   private writeInstance(mesh: InstancedMesh, k: number, tree: number, cleared: boolean): void {
-    const array = mesh.instanceMatrix.array as Float32Array;
-    const placed = this.placed.subarray(16 * tree, 16 * tree + 16);
-    array.set(placed, 16 * k);
-    // Column-major: zero the 3×3 basis, keep the translation.
-    if (cleared) for (const e of BASIS_ELEMENTS) array[16 * k + e] = 0;
+    writeClearedInstance(mesh, k, this.placed, 16 * tree, cleared);
     this.dirty.add(mesh);
   }
 

@@ -407,7 +407,9 @@ const AFFECTED_UP = 2;
  * The earthworks pass for one terrain chunk at one LOD, over the chunk's
  * triangles plus a one-triangle ring around it (so fans along a seam agree with
  * the neighbouring chunk). Holds its scratch between runs, so passes allocate
- * little; read its results before the next `run`.
+ * little; read its results before the next `run`. The refined triangles' drawn
+ * heights are pooled: ordinal i has id `refinedIds[i]` and its SUB_VERTS
+ * heights (`subIndex` order) at `refinedHeights[SUB_VERTS · i]`.
  */
 export class ChunkPass {
   terrain!: Terrain;
@@ -419,7 +421,10 @@ export class ChunkPass {
   i1 = 0;
   j0 = 0;
   j1 = 0;
-  readonly refined: RefinedTriangles = new Map();
+  /** Refined triangles of the chunk from the last run, and their pooled ids and heights (valid below the count). */
+  refinedCount = 0;
+  refinedIds = new Int32Array(0);
+  refinedHeights = new Float32Array(0);
   stats: ChunkPassStats = { refined: 0, fans: 0, maxCutM: 0, maxFillM: 0, evaluated: 0 };
 
   // Sub-lattice scratch over the chunk and its ring, indexed (rs − rs0)·width + (cs − cs0) with cs = Qs + floor(Rs/2).
@@ -472,7 +477,7 @@ export class ChunkPass {
     this.j0 = chunkY * lat.chunkCells;
     this.i1 = Math.min(this.i0 + lat.chunkCells, lat.columns - 1);
     this.j1 = Math.min(this.j0 + lat.chunkCells, lat.rows - 1);
-    this.refined.clear();
+    this.refinedCount = 0;
     this.stats = { refined: 0, fans: 0, maxCutM: 0, maxFillM: 0, evaluated: 0 };
     if (this.i1 <= this.i0 || this.j1 <= this.j0) return false;
     this.prepare();
@@ -618,7 +623,8 @@ export class ChunkPass {
       const rowBase = (rs - this.rs0) * this.width - this.cs0;
       for (let cs = csA; cs <= csB; cs++) {
         const x = sub * (cs + parity / 2);
-        const n = nearestOnPiece(p, x, y, this.near);
+        // The hot loop calls `sample.ts` directly (the `nearestOnPiece` wrapper measured ~5% of a rebuild here).
+        const n = nearestOnCentreline(p, x, y, this.near);
         evaluated += 1;
         if (n.d >= p.reachM) continue;
         const bed = bedAt(p, n.s);
@@ -711,20 +717,34 @@ export class ChunkPass {
     const [first, last] = this.activeRows;
     forEachChunkTriangle(this.i0, this.i1, first, last + 1, (Q, R, up) => {
       if (this.isRefined(Q, R, up)) {
-        const heights = new Float32Array(SUB_VERTS);
+        if (refined >= this.refinedIds.length) this.growRefined();
+        const heights = this.refinedHeights;
+        const at = SUB_VERTS * refined;
         for (let b = 0; b <= REFINE; b++) {
           for (let a = 0; a + b <= REFINE; a++) {
             subAxial(Q, R, up, a, b, s);
-            heights[subIndex(a, b)] = this.drawnAt(s.qs, s.rs);
+            heights[at + subIndex(a, b)] = this.drawnAt(s.qs, s.rs);
           }
         }
-        this.refined.set(triangleId(Q, R, up), heights);
+        this.refinedIds[refined] = triangleId(Q, R, up);
         refined += 1;
       } else if (this.fanEdges(Q, R, up) !== 0) {
         fans += 1;
       }
     });
+    this.refinedCount = refined;
     this.stats = { ...this.stats, refined, fans };
+  }
+
+  /** Doubles the pooled refined storage, keeping what it holds. */
+  private growRefined(): void {
+    const capacity = Math.max(256, 2 * this.refinedIds.length);
+    const ids = new Int32Array(capacity);
+    ids.set(this.refinedIds);
+    const heights = new Float32Array(capacity * SUB_VERTS);
+    heights.set(this.refinedHeights);
+    this.refinedIds = ids;
+    this.refinedHeights = heights;
   }
 
   /**
@@ -781,7 +801,8 @@ export function forEachChunkTriangle(i0: number, i1: number, j0: number, j1: num
  * except inside refined triangles, where it interpolates their sub-lattice
  * heights. It is exactly what the chunk meshes draw, so picking and scenery
  * read the conformed ground the player sees. Refined triangles are stored
- * by id; `EarthworksView` swaps a chunk's set when it rebuilds the chunk.
+ * by id (views into one height buffer per chunk); `EarthworksView` swaps a
+ * chunk's set when it rebuilds the chunk.
  */
 export class DrawnHeightfield {
   readonly lat: LodLattice;
@@ -790,6 +811,8 @@ export class DrawnHeightfield {
   minZ = Infinity;
   maxZ = -Infinity;
   private readonly waterLevelM: number;
+  /** Each chunk's refined triangle ids, by chunk key, so a rebuild deletes only that chunk's own. */
+  private readonly chunkIds = new Map<number, Int32Array>();
 
   constructor(
     readonly terrain: Terrain,
@@ -799,25 +822,31 @@ export class DrawnHeightfield {
     this.waterLevelM = terrain.waterLevelDm / 10;
   }
 
-  /** Replaces the refined triangles of chunk (cx, cy) with `refined`. */
-  setChunk(chunkX: number, chunkY: number, refined: RefinedTriangles): void {
-    const lat = this.lat;
-    const i0 = chunkX * lat.chunkCells;
-    const j0 = chunkY * lat.chunkCells;
-    const i1 = Math.min(i0 + lat.chunkCells, lat.columns - 1);
-    const j1 = Math.min(j0 + lat.chunkCells, lat.rows - 1);
-    if (this.triangles.size > 0) {
-      forEachChunkTriangle(i0, i1, j0, j1, (Q, R, up) => {
-        this.triangles.delete(triangleId(Q, R, up));
-      });
+  /**
+   * Replaces the refined triangles of the pass's chunk with the pass's (run at this LOD).
+   * Only that chunk's previous triangles are deleted, and a chunk that had none and gets
+   * none costs a lookup; the new heights are copied into one buffer for the chunk.
+   */
+  setChunk(pass: ChunkPass): void {
+    if (pass.lat.lod !== this.lat.lod) throw new Error(`setChunk: a LOD${pass.lat.lod} pass for a LOD${this.lat.lod} heightfield`);
+    const key = pass.chunkY * 65536 + pass.chunkX;
+    const old = this.chunkIds.get(key);
+    const n = pass.refinedCount;
+    if (old === undefined && n === 0) return;
+    if (old !== undefined) {
+      for (let i = 0; i < old.length; i++) this.triangles.delete(old[i] ?? 0);
+      this.chunkIds.delete(key);
     }
-    for (const [id, heights] of refined) {
-      this.triangles.set(id, heights);
-      for (const h of heights) {
-        if (h < this.minZ) this.minZ = h;
-        if (h > this.maxZ) this.maxZ = h;
-      }
+    if (n === 0) return;
+    const ids = pass.refinedIds.slice(0, n);
+    const heights = pass.refinedHeights.slice(0, n * SUB_VERTS);
+    for (let i = 0; i < n; i++) this.triangles.set(ids[i] ?? 0, heights.subarray(SUB_VERTS * i, SUB_VERTS * (i + 1)));
+    for (let i = 0; i < heights.length; i++) {
+      const h = heights[i] ?? 0;
+      if (h < this.minZ) this.minZ = h;
+      if (h > this.maxZ) this.maxZ = h;
     }
+    this.chunkIds.set(key, ids);
   }
 
   /** Drawn height (m) at sim plan (x, y), NaN off the LOD's grid. Allocation-free. */
@@ -897,7 +926,7 @@ export function conformTerrain(terrain: Terrain, network: { readonly pieces: rea
     const [x, y] = key.split(",").map(Number) as [number, number];
     const box = ChunkPass.chunkBox(terrain, lod, x, y);
     if (!pass.run(terrain, lod, x, y, piecesTouching(pieces, box))) continue;
-    field.setChunk(x, y, new Map(pass.refined));
+    field.setChunk(pass);
   }
   return field;
 }

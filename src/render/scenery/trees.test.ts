@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Color, InstancedMesh, MeshLambertMaterial, SRGBColorSpace } from "three";
 import { convexInwardFacing, inwardFacing, sameGeometry, triangleCount, windingMismatches } from "../../../tests/support/geometry";
 import { makeTerrain } from "../../../tests/support/makeTerrain";
@@ -224,6 +224,38 @@ describe("tree layer", () => {
     layer.setCleared(1, false);
     layer.commitCleared();
     all.forEach((m, i) => expect(Array.from(m.instanceMatrix.array)).toEqual(Array.from(before[i]!)));
+    layer.dispose();
+    registry.dispose();
+  });
+
+  it("refreshes a cleared tree's chunk bounds, LOD1 twin included, and leaves the whole-map far meshes' bounds alone", () => {
+    // Review finding (PR #83): each commit scanned every chunk mesh for each dirty one and re-bounded the far meshes,
+    // each several thousand instances on the diorama. A collapse only shrinks what those bounds must hold.
+    const registry = new AssetRegistry();
+    registerTreeAssets(registry);
+    const layer = new TreeLayer(trees, terrain, registry, new MeshLambertMaterial());
+    const chunk = layer.group.getObjectByName("trees by chunk")!.children as InstancedMesh[];
+    const far = layer.group.getObjectByName("trees far")!.children as InstancedMesh[];
+    const farSpies = far.map((m) => vi.spyOn(m, "computeBoundingSphere"));
+    const farBounds = far.map((m) => m.boundingSphere?.clone());
+    // Tree 0 (spruce, chunk (0, 0)): meshes 0 (LOD0) and 1 (its LOD1 twin).
+    expect(layer.setCleared(0, true)).toBe(true);
+    layer.commitCleared();
+    for (const spy of farSpies) expect(spy).not.toHaveBeenCalled();
+    far.forEach((m, i) => expect(m.boundingSphere?.equals(farBounds[i]!)).toBe(true));
+    // The chunk pair shares one attribute; both carry the bounds of the one tree still standing there.
+    const fresh = new InstancedMesh(chunk[0]!.geometry, chunk[0]!.material, chunk[0]!.count);
+    fresh.instanceMatrix = chunk[0]!.instanceMatrix;
+    fresh.computeBoundingSphere();
+    expect(chunk[0]!.boundingSphere?.equals(fresh.boundingSphere!)).toBe(true);
+    const twin = new InstancedMesh(chunk[1]!.geometry, chunk[1]!.material, chunk[1]!.count);
+    twin.instanceMatrix = chunk[1]!.instanceMatrix;
+    twin.computeBoundingSphere();
+    expect(chunk[1]!.boundingSphere?.equals(twin.boundingSphere!)).toBe(true);
+    // Far bounds still hold every standing tree once the tree comes back.
+    layer.setCleared(0, false);
+    layer.commitCleared();
+    for (const spy of farSpies) expect(spy).not.toHaveBeenCalled();
     layer.dispose();
     registry.dispose();
   });

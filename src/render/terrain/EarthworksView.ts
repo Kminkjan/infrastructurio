@@ -257,6 +257,6 @@ export class EarthworksView {
     }
     this.maxCutM = Math.max(this.maxCutM, pass.stats.maxCutM);
     this.maxFillM = Math.max(this.maxFillM, pass.stats.maxFillM);
-    (lod === 0 ? this.heightfield : this.heightfieldLod1).setChunk(x, y, new Map(pass.refined));
+    (lod === 0 ? this.heightfield : this.heightfieldLod1).setChunk(pass);
   }
 }
