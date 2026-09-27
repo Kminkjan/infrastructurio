@@ -2,6 +2,7 @@ import { Color, MeshLambertMaterial } from "three";
 import type { MaterialSlot } from "./AssetRegistry";
 import { palette } from "./palette";
 import { type ShaderChunk, installChunks } from "./shaderChunks/chunk";
+import { type EarthworkUniforms, createEarthworkChunk, createEarthworkUniforms, syncEarthworkColors } from "./shaderChunks/earthwork";
 import { type EdgeFadeUniforms, createEdgeFadeChunk, createEdgeFadeUniforms, hazeForToneMapping } from "./shaderChunks/edgeFade";
 import { createFoliageTintChunk } from "./shaderChunks/foliageTint";
 import { type GrainUniforms, GRAIN_AMOUNT, createGrainChunk, createGrainUniforms } from "./shaderChunks/grain";
@@ -30,6 +31,7 @@ export interface ArtUniforms {
   readonly waterGrain: GrainUniforms;
   readonly edge: EdgeFadeUniforms;
   readonly splat: SplatUniforms;
+  readonly earthwork: EarthworkUniforms;
 }
 
 /** Water takes half the grain, so the surface reads calm. */
@@ -42,6 +44,7 @@ export function createArtUniforms(bounds: { minX: number; minZ: number; maxX: nu
     waterGrain: createGrainUniforms(WATER_GRAIN),
     edge: createEdgeFadeUniforms(bounds),
     splat: createSplatUniforms(),
+    earthwork: createEarthworkUniforms(),
   };
   syncArtColors(u, 1);
   return u;
@@ -53,6 +56,7 @@ const haze = new Color();
 export function syncArtColors(u: ArtUniforms, exposure: number): void {
   hazeForToneMapping(haze.setHex(palette.haze), exposure, u.edge.uEdgeHaze.value);
   syncSplatColors(u.splat);
+  syncEarthworkColors(u.earthwork);
 }
 
 /** Wind sway on or off (reduced motion turns it off, and the ambient reason with it). */
@@ -60,9 +64,9 @@ export function setSwayEnabled(u: ArtUniforms, on: boolean): void {
   u.sway.uSwayAmplitude.value = on ? SWAY_AMPLITUDE_M : 0;
 }
 
-/** Chunks after the lattice on the terrain material. */
+/** Chunks after the lattice on the terrain material (the earthwork fade right after the splat it fades). */
 export function terrainChunks(u: ArtUniforms): ShaderChunk[] {
-  return [createSplatChunk(u.splat), createGrainChunk(u.grain), createEdgeFadeChunk(u.edge)];
+  return [createSplatChunk(u.splat), createEarthworkChunk(u.earthwork), createGrainChunk(u.grain), createEdgeFadeChunk(u.edge)];
 }
 
 /** Chunks after the lattice on the water material. */

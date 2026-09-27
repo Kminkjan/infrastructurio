@@ -15,6 +15,8 @@ describe("palette", () => {
       grass: 0x8fa66b, grassLight: 0xa9ba7e, grassShade: 0x6e8752, meadow: 0xc2be7c,
       spruce: 0x3f5a3c, spruceLight: 0x4f6b45, pineCrown: 0x5a7048, deciduous: 0x7e9a4f, deciduousLight: 0x93a85a, birchTrunk: 0xe8e2d0,
       soil: 0xa88f6a, dirtRoad: 0xb8a07a, cobble: 0xa39c90, cobbleDark: 0x8e877b, rock: 0x9a9486,
+      // earthworks-lite (2026-09-27, in-house like forestFloor; recorded in art direction)
+      earthworkFace: 0x9e8a6c, earthworkBed: 0x7b705e,
       rye: 0xc9b26b, hay: 0xbfb27a, crop: 0x9dae6a, fallow: 0xa38b62,
       ballast: 0x8c8578, ballastShoulder: 0x7a7368, sleeper: 0x5a4636, railTop: 0xb7b3aa, railSide: 0x55524d,
       stucco: 0xe9dfc8, ochre: 0xe3cfa6, blush: 0xd9c3b0, sage: 0xc9d3c5, limeWhite: 0xf1ece0, brick: 0x9c5a44, timber: 0x8a6e55, timberDark: 0x6c5a48,

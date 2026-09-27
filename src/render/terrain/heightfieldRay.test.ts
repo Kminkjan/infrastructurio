@@ -6,6 +6,8 @@ import { createPrng } from "../../core/util/prng";
 import { makeTerrain } from "../../../tests/support/makeTerrain";
 import { ISO_PITCH_RAD, cameraBasis } from "../camera/isoMath";
 import { simToWorld, worldToSim } from "../coords";
+import { type PieceSpec, resolvePiece } from "../../core/sim/api";
+import { conformTerrain } from "./earthworks";
 import { intersectTerrain, raycastTerrain, sampleTerrainHeightM } from "./heightfieldRay";
 import { forEachLatticeTriangle } from "./offsetGrid";
 
@@ -107,5 +109,31 @@ describe("heightfield ray", () => {
     }
     expect(worst).toBeLessThan(0.01);
     expect(nodeMismatches).toBe(0);
+  });
+
+  it("marches the drawn (earthworks) surface when given one, so the cursor lands on a cutting's floor", () => {
+    // Flat ground at 20 m, a run along row 20 at 17 m: a 3 m cutting with a 6 m floor.
+    const t = makeTerrain(60, 40, () => 200);
+    const pieces = Array.from({ length: 12 }, (_, i) => {
+      const res = resolvePiece({ kind: "straight", from: { q: 5 + i, r: 20, zMm: 17_000 }, heading: 0, z1Mm: 17_000 } as PieceSpec);
+      if (!res.ok) throw new Error(res.failure.message);
+      return { key: res.piece.key, prims: res.piece.prims, z0Mm: 17_000, z1Mm: 17_000 };
+    });
+    const field = conformTerrain(t, { pieces });
+    const aim = { x: 5 * (11 + 10), y: 20 * 2.5 * Math.sqrt(3) + 1 };
+    for (let k = 0; k < 6; k++) {
+      const back = cameraBasis((k * Math.PI) / 3, ISO_PITCH_RAD).back;
+      const target = simToWorld(aim.x, aim.y, 17);
+      const origin = target.clone().add(new Vector3(back.x, back.y, back.z).multiplyScalar(120));
+      const dir = new Vector3(-back.x, -back.y, -back.z);
+      const out = new Vector3();
+      expect(raycastTerrain(t, origin, dir, out, field)).toBe(true);
+      expect(out.distanceTo(target)).toBeLessThan(0.01);
+      // The sim's own heights put the same ray on the natural ground, metres away on the plan.
+      expect(raycastTerrain(t, origin, dir, out)).toBe(true);
+      const sim = worldToSim(out);
+      expect(sim.z).toBeCloseTo(20, 6);
+      expect(Math.hypot(sim.x - aim.x, sim.y - aim.y)).toBeGreaterThan(3);
+    }
   });
 });

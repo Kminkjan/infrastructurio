@@ -29,9 +29,9 @@ describe("world materials", () => {
     m.dispose();
   });
 
-  it("gives the terrain splat, grain and edge fade, and the water a calmer grain and edge fade", () => {
+  it("gives the terrain splat, the earthwork fade after it, grain and edge fade, and the water a calmer grain and edge fade", () => {
     const u = createArtUniforms(bounds);
-    expect(terrainChunks(u).map((c) => c.key)).toEqual(["terrain-splat-v2", "grain-v1", "edge-fade-v1"]);
+    expect(terrainChunks(u).map((c) => c.key)).toEqual(["terrain-splat-v2", "terrain-earthwork-v1", "grain-v1", "edge-fade-v1"]);
     expect(waterChunks(u).map((c) => c.key)).toEqual(["grain-v1", "edge-fade-v1"]);
     expect(u.waterGrain.uGrainAmount.value).toBeLessThan(u.grain.uGrainAmount.value);
   });
