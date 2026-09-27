@@ -31,7 +31,7 @@ import { SceneryView, registerSceneryAssets } from "../render/scenery/SceneryVie
 import { SceneryClearance } from "../render/scenery/clearance";
 import { EarthworksView } from "../render/terrain/EarthworksView";
 import { TerrainView } from "../render/terrain/TerrainView";
-import { raycastTerrain, sampleTerrainHeightM } from "../render/terrain/heightfieldRay";
+import { raycastTerrain, visibleGroundM } from "../render/terrain/heightfieldRay";
 import { LatticeOverlay } from "../render/terrain/latticeMaterial";
 import { terrainLodForPpm, terrainWorldBounds } from "../render/terrain/terrainGeometry";
 import { TERRAIN_LOOKS, applyTerrainLook, setTerrainAnisotropy, terrainChunkOptions } from "../render/terrain/terrainLook";
@@ -150,13 +150,12 @@ const earthworks = new EarthworksView({
 });
 const waterLevelM = terrain.waterLevelDm / 10;
 /**
- * The surface under the ghost's drop lines and end-height tags: the terrain, or the water plane over a lower bed,
- * matching the tool's ground at nodes (`groundMmAt`), so a tag over water reads the height above the water.
+ * The surface under the ghost's drop lines and end-height tags: the drawn terrain (the earthworks' conformed LOD0
+ * surface, which picking marches too), or the water plane over a lower bed, so a line meets a cutting's floor where
+ * it is drawn and a tag over water reads the height above the water (PR #83 review). Off earthworks it is the
+ * tool's ground at nodes (`groundMmAt`), which stays the sim-facing height.
  */
-const groundM = (x: number, y: number): number | undefined => {
-  const h = sampleTerrainHeightM(terrain, x, y);
-  return h === undefined ? undefined : Math.max(h, waterLevelM);
-};
+const groundM = (x: number, y: number): number | undefined => visibleGroundM(earthworks.heightfield, waterLevelM, x, y);
 const ghost = new GhostView(viewport, groundM);
 const highlight = new HighlightView();
 const flash = new FlashView(reducedMotion);

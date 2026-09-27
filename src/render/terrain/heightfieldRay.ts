@@ -75,6 +75,18 @@ export interface HeightSampler {
   readonly maxZ: number;
 }
 
+/**
+ * The ground the player sees at sim plan (x, y), metres: the drawn surface (`surface`, the
+ * earthworks' conformed heightfield, natural wherever nothing is refined), or the water
+ * plane over a lower bed; undefined off the map. The ghost's drop lines and end-height
+ * tags measure against it (PR #83 review), so they meet a cutting's floor or an
+ * embankment's crest where it is drawn; sim-facing heights keep the tool's `groundMmAt`.
+ */
+export function visibleGroundM(surface: Pick<HeightSampler, "heightAtM">, waterLevelM: number, x: number, y: number): number | undefined {
+  const h = surface.heightAtM(x, y);
+  return Number.isNaN(h) ? undefined : Math.max(h, waterLevelM);
+}
+
 /** The ray being marched, in sim space with a unit direction; module scratch so marching never allocates. */
 const ray = {
   o: { x: 0, y: 0, z: 0 } as SimPoint,

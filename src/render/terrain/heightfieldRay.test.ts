@@ -8,7 +8,7 @@ import { ISO_PITCH_RAD, cameraBasis } from "../camera/isoMath";
 import { simToWorld, worldToSim } from "../coords";
 import { type PieceSpec, resolvePiece } from "../../core/sim/api";
 import { DrawnHeightfield, conformTerrain } from "./earthworks";
-import { intersectTerrain, raycastTerrain, sampleTerrainHeightM } from "./heightfieldRay";
+import { intersectTerrain, raycastTerrain, sampleTerrainHeightM, visibleGroundM } from "./heightfieldRay";
 import { forEachLatticeTriangle } from "./offsetGrid";
 
 /** Two-sided Möller–Trumbore: ray parameter of the hit, or undefined. */
@@ -156,5 +156,27 @@ describe("heightfield ray", () => {
       if (!Number.isNaN(natural)) defined += 1;
     }
     expect(defined).toBeGreaterThan(15_000);
+  });
+
+  it("gives the ghost the ground the player sees: a cutting's floor, not the natural hill; the water over a lower bed", () => {
+    // Review finding (PR #83): the ghost's drop lines and end-height tags read the natural heights while picking read
+    // the drawn ones, so over a cutting they pointed metres above its floor. Flat ground at 20 m with a lake bed at
+    // 9 m west of column 10 (water at 10 m), and a run along row 20 at 17 m: a 3 m cutting with a 6 m floor.
+    const t = makeTerrain(60, 40, (_q, _r, col) => (col < 10 ? 90 : 200));
+    const pieces = Array.from({ length: 12 }, (_, i) => {
+      const res = resolvePiece({ kind: "straight", from: { q: 15 + i, r: 20, zMm: 17_000 }, heading: 0, z1Mm: 17_000 } as PieceSpec);
+      if (!res.ok) throw new Error(res.failure.message);
+      return { key: res.piece.key, prims: res.piece.prims, z0Mm: 17_000, z1Mm: 17_000 };
+    });
+    const field = conformTerrain(t, { pieces });
+    const water = t.waterLevelDm / 10;
+    const y0 = 20 * 2.5 * Math.sqrt(3);
+    // On the floor beside the track: the drawn 17 m, where the sim's heights say 20 m.
+    expect(sampleTerrainHeightM(t, 5 * (21 + 10), y0 + 1)).toBeCloseTo(20, 9);
+    expect(visibleGroundM(field, water, 5 * (21 + 10), y0 + 1)).toBeCloseTo(17, 5);
+    // Away from the earthworks it is the natural ground, bit for bit; over the lake, the water plane; off the map, nothing.
+    expect(visibleGroundM(field, water, 200, 40)).toBe(sampleTerrainHeightM(t, 200, 40));
+    expect(visibleGroundM(field, water, 20, 40)).toBe(10);
+    expect(visibleGroundM(field, water, -5, 40)).toBeUndefined();
   });
 });
