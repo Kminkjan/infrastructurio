@@ -255,7 +255,8 @@ describe("two-bend fits of a free end", () => {
           const best = all.reduce((m, c) => (order(c, m) < 0 ? c : m));
           const got = bestTwoBend(d0, delta, undefined, CAP_360, tau)[0];
           expect(got && describeSegs(got), `d0 ${d0}, delta (${q}, ${r})`).toBe(best && describeSegs(best));
-          // Where no single bend reaches the node, the planner ends there with that fit (valid on the empty map).
+          // Where no single bend reaches the node or any of its six neighbours, the planner ends there with that
+          // fit (valid on the empty map); a single bend a node off wins otherwise (owner decision 2026-09-27).
           const plan = w.plan({ from: start, fromHeading: d0, to: { xMm: p.x, yMm: p.y }, dzMm: 0, magnetism: true });
           if (plan.fit !== "two-bend") continue;
           expect(plan.end?.node).toMatchObject({ q: start.q + q, r: start.r + r });
@@ -265,7 +266,8 @@ describe("two-bend fits of a free end", () => {
         }
       }
     }
-    // Guards against a degenerate sweep (182 planned two-bend fits when written).
+    // Guards against a degenerate sweep (182 planned two-bend fits when written, and still 182 once one bend a
+    // node off beats two bends).
     expect(planned).toBeGreaterThan(100);
   });
 });

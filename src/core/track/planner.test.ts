@@ -4,8 +4,8 @@ import { makeTerrain } from "../../../tests/support/makeTerrain";
 import { randomChain, randomNode } from "../../../tests/support/trackGen";
 import { MIN_HEIGHT_SEPARATION_MM } from "../geometry/clearance";
 import { type NodeRef, type PieceSpec, resolvePiece } from "../geometry/piece";
-import { type RadiusClassM, type ShiftSide, type Turn, RADIUS_CLASSES_M } from "../geometry/templates";
-import { type Heading, HEADINGS, SQRT3, nearestNode, opposite, rotateHeading, stepOf } from "../lattice";
+import { CURVE_TEMPLATES, type RadiusClassM, SHIFT_SIDES, type ShiftSide, type Turn, RADIUS_CLASSES_M, shiftTemplate } from "../geometry/templates";
+import { type Axial, type Heading, HEADINGS, SQRT3, isPrimary, nearestNode, opposite, rotateHeading, stepOf } from "../lattice";
 import { createSim } from "../sim/api";
 import { type Command, type Result, type World, createWorld } from "../sim/world";
 import { DEFAULT_TERRAIN_SIZE, type Terrain, generateTerrain, groundMmAt, isWaterAt, nodeOfOffset, offsetOfNode, terrainBoundsM } from "../terrain";
@@ -20,6 +20,7 @@ import {
   type TrackPlan,
   apportionMm,
   compareCandidates,
+  twoBendFits,
   twoBendOrder,
 } from "./planner";
 
@@ -434,6 +435,28 @@ const CASES: readonly DragCase[] = [
     end: { node: node(24, 83), heading: 5 },
     label: "R 90 m · 30 km/h · 0.0%",
     lengthMm: 263_975,
+  },
+  // One bend a node off (owner decision 2026-09-27): before two bends onto the pointer's node.
+  {
+    // A forward-cone kink (a free start, 25°, 100 m): no single bend reaches the pointer's node (73, 70), two
+    // bends do (30° right, then 60° left, R 60); a single bend reaches its neighbour (74, 69), 3.78 m off.
+    name: "one bend a node off: where only two bends reach the pointer's node, one bend to a neighbour wins",
+    drag: { from: node(60, 60), to: at(60, 60, 90_631, 42_262), dzMm: 0, magnetism: true },
+    fit: "one-bend",
+    pieces: [...straights(60, 60, 1, 6), curve(66, 66, 1, -1, 90, 0)],
+    end: { node: node(74, 69), heading: 0 },
+    label: "R 90 m · 30 km/h · 0.0%",
+    lengthMm: 101_834,
+  },
+  {
+    // The pointer's node (87, 66) takes two R 60 bends onto heading 2; one reaches its neighbour (86, 67).
+    name: "precision: an end heading that one bend reaches only a node off gives that bend, not two onto the node",
+    drag: { from: node(60, 60), fromHeading: 0, to: at(60, 60, 147_721, 26_047), dzMm: 0, magnetism: false, precision: { radiusM: 60, endHeading: 2 } },
+    fit: "one-bend",
+    pieces: [...straights(60, 60, 0, 19), curve(79, 60, 0, 2, 60, 0)],
+    end: { node: node(86, 67), heading: 2 },
+    label: "R 60 m · 25 km/h · 0.0%",
+    lengthMm: 158_550,
   },
   {
     // 30 m ahead, 60 m left: inside the 60 m turning circle, where no fit of one or two bends reaches.
@@ -886,7 +909,8 @@ describe("planTrack on the ground: track follows the terrain", () => {
     );
     await annotate(`${nodes} nodes, none below or above the ground; ${curved} plans with curves or shifts; ${((100 * steep) / pieces).toFixed(1)}% of ${pieces} pieces over 35‰`);
     // Guards against a degenerate generator (when written: 6,882 nodes, 137 plans with curves or shifts;
-    // 7,486 and 187 since the two-bend fallback, whose U-turns follow the ground like every plan).
+    // 7,486 and 187 since the two-bend fallback, whose U-turns follow the ground like every plan; 7,511 and
+    // 186 since one bend a node off beats two bends).
     expect(nodes).toBeGreaterThan(4000);
     expect(curved).toBeGreaterThan(50);
   });
@@ -1233,7 +1257,7 @@ describe("planner properties", () => {
       },
     );
     // Guards that the generator reaches reuse and magnetism (13 and 16 of 150 runs when written; 17 and 16
-    // since the two-bend fallback).
+    // since the two-bend fallback; 16 and 16 since one bend a node off beats two bends).
     expect(reusedSome).toBeGreaterThanOrEqual(5);
     expect(snappedSome).toBeGreaterThanOrEqual(5);
   });
@@ -1301,15 +1325,21 @@ describe("planner properties", () => {
     const w = world();
     for (const fromHeading of [0, 1, undefined] as const) {
       let onNode = 0;
+      let twoBend = 0;
+      let twoOnNode = 0;
       const offsets: number[] = [];
       for (let deg = -60; deg <= 60; deg += 5) {
         for (let distM = 40; distM <= 200; distM += 10) {
-          const a = (((fromHeading === 1 ? 30 : 0) + deg) * Math.PI) / 180;
-          const to = at(60, 60, Math.round(distM * 1000 * Math.cos(a)), Math.round(distM * 1000 * Math.sin(a)));
+          const to = conePointer(fromHeading, deg, distM);
           const plan = w.plan({ from: node(60, 60), ...(fromHeading === undefined ? {} : { fromHeading }), to, dzMm: 0, magnetism: true });
           if (!plan.end) throw new Error(`no plan at ${deg}°, ${distM} m`);
           const n = nearestNode({ x: to.xMm / 1000, y: to.yMm / 1000 });
-          if (plan.end.node.q === n.q && plan.end.node.r === n.r) onNode += 1;
+          const hit = plan.end.node.q === n.q && plan.end.node.r === n.r;
+          if (hit) onNode += 1;
+          if (plan.fit === "two-bend") {
+            twoBend += 1;
+            if (hit) twoOnNode += 1;
+          }
           const e = at(plan.end.node.q, plan.end.node.r);
           offsets.push(Math.hypot(e.xMm - to.xMm, e.yMm - to.yMm) / 1000);
         }
@@ -1317,11 +1347,15 @@ describe("planner properties", () => {
       offsets.sort((x, y) => x - y);
       const q = (f: number) => (offsets[Math.min(offsets.length - 1, Math.floor(f * offsets.length))] ?? Number.NaN).toFixed(2);
       await annotate(
-        `start heading ${fromHeading ?? "free"}: end on the pointer's node ${((100 * onNode) / offsets.length).toFixed(1)}% of ${offsets.length}; end to pointer median ${q(0.5)} m, p95 ${q(0.95)} m, max ${q(1)} m`,
+        `start heading ${fromHeading ?? "free"}: end on the pointer's node ${((100 * onNode) / offsets.length).toFixed(1)}% of ${offsets.length}; end to pointer median ${q(0.5)} m, p95 ${q(0.95)} m, max ${q(1)} m; ${twoBend} two-bend plans, ${twoOnNode} on the pointer's node`,
       );
       // A plan ends within one node cell (2.887 m) of the pointer at least half the time.
       expect(Number(q(0.5))).toBeLessThanOrEqual(2.887);
       if (fromHeading === undefined) expect(onNode / offsets.length).toBeGreaterThan(0.8);
+      // One bend a node off beats two bends onto the node (owner decision 2026-09-27): two bends landed on the
+      // pointer's node 12, 2 and 8 times here before (free, 0, 1; the KINKS list). The two-bend plans left in
+      // this cone (2 and 4 with a fixed heading) are 120° turns toward a pointer inside the turning circle.
+      expect(twoOnNode).toBe(0);
     }
   });
 });
@@ -1396,17 +1430,18 @@ describe("planTrack: two bends in one drag", () => {
     const w = world();
     for (const fromHeading of [0, 1, undefined] as const) {
       let onNode = 0;
+      let twoBend = 0;
       let behind = 0;
       let uTurns = 0;
       const offsets: number[] = [];
       for (let deg = -175; deg <= 180; deg += 5) {
         for (let distM = 40; distM <= 200; distM += 10) {
-          const a = (((fromHeading === 1 ? 30 : 0) + deg) * Math.PI) / 180;
-          const to = at(60, 60, Math.round(distM * 1000 * Math.cos(a)), Math.round(distM * 1000 * Math.sin(a)));
+          const to = conePointer(fromHeading, deg, distM);
           const plan = w.plan({ from: node(60, 60), ...(fromHeading === undefined ? {} : { fromHeading }), to, dzMm: 0, magnetism: true });
           if (!plan.end) throw new Error(`no plan at ${deg}°, ${distM} m`);
           const n = nearestNode({ x: to.xMm / 1000, y: to.yMm / 1000 });
           if (plan.end.node.q === n.q && plan.end.node.r === n.r) onNode += 1;
+          if (plan.fit === "two-bend") twoBend += 1;
           const e = at(plan.end.node.q, plan.end.node.r);
           offsets.push(Math.hypot(e.xMm - to.xMm, e.yMm - to.yMm) / 1000);
           if (fromHeading !== undefined && Math.abs(deg) > 90) {
@@ -1418,12 +1453,190 @@ describe("planTrack: two bends in one drag", () => {
       offsets.sort((x, y) => x - y);
       const q = (f: number) => (offsets[Math.min(offsets.length - 1, Math.floor(f * offsets.length))] ?? Number.NaN).toFixed(2);
       await annotate(
-        `start heading ${fromHeading ?? "free"}: end on the pointer's node ${((100 * onNode) / offsets.length).toFixed(1)}% of ${offsets.length}; end to pointer median ${q(0.5)} m, p95 ${q(0.95)} m, max ${q(1)} m` +
+        `start heading ${fromHeading ?? "free"}: end on the pointer's node ${((100 * onNode) / offsets.length).toFixed(1)}% of ${offsets.length}; end to pointer median ${q(0.5)} m, p95 ${q(0.95)} m, max ${q(1)} m; ${twoBend} two-bend plans` +
           (fromHeading === undefined ? "" : `; ${uTurns} of ${behind} pointers behind end on a U-turn`),
       );
       // Every drag gives a plan (no pointer is out of reach any more), and every pointer behind a fixed heading turns back.
       expect(offsets).toHaveLength(72 * 17);
       if (fromHeading !== undefined) expect(uTurns).toBe(behind);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// One bend a node off (owner decision 2026-09-27, "prefer one bend, a node off"): where no single bend reaches
+// the pointer's node, a single bend ending on one of its six neighbours beats two bends onto the node.
+
+/** The follow sweeps' pointer from (60, 60): `deg` from the start heading (from heading 0 for a free start), `distM` out. */
+function conePointer(fromHeading: Heading | undefined, deg: number, distM: number): PlanPointMm {
+  const a = (((fromHeading === 1 ? 30 : 0) + deg) * Math.PI) / 180;
+  return at(60, 60, Math.round(distM * 1000 * Math.cos(a)), Math.round(distM * 1000 * Math.sin(a)));
+}
+
+/**
+ * The 22 drags of the forward-cone sweep that ended with two bends on the pointer's node before this rule
+ * (12 free, 2 on heading 0, 8 on heading 1; a probe at c699393): [start heading, bearing °, distance m].
+ */
+const KINKS: readonly (readonly [Heading | undefined, number, number])[] = [
+  [0, -60, 110],
+  [0, 60, 110],
+  [1, -60, 110],
+  [1, -5, 100],
+  [1, -5, 110],
+  [1, 0, 160],
+  [1, 0, 170],
+  [1, 5, 100],
+  [1, 5, 110],
+  [1, 60, 110],
+  ...([-35, -30, -25, 25, 30, 35] as const).flatMap((deg) => (Math.abs(deg) === 30 ? [160, 170] : [100, 110]).map((distM) => [undefined, deg, distM] as const)),
+];
+
+/** The six neighbours of a node, 5 m away (ring 1). */
+function ring1(n: Axial): Axial[] {
+  return HEADINGS.filter((h) => isPrimary(h)).map((h) => ({ q: n.q + stepOf(h).q, r: n.r + stepOf(h).r }));
+}
+
+const CAP_360 = (radiusM: RadiusClassM): boolean => radiusM <= 360;
+
+/** k with (q, r) = k·s, or undefined. */
+function multipleOfStep(q: number, r: number, s: Axial): number | undefined {
+  const k = s.q !== 0 ? q / s.q : r / s.r;
+  return Number.isInteger(k) && k * s.q === q && k * s.r === r ? k + 0 : undefined;
+}
+
+/**
+ * Whether one bend from `from` on heading d0 ends exactly on `to`, by enumerating the straights before the
+ * bend (up to 80): a run of straights, a shift, or a curve template, with straights before and after. An
+ * oracle apart from the planner's 2 × 2 solve.
+ */
+function singleBendReaches(from: Axial, d0: Heading, to: Axial, allow: (radiusM: RadiusClassM) => boolean, endHeading?: Heading): boolean {
+  const dq = to.q - from.q;
+  const dr = to.r - from.r;
+  const s0 = stepOf(d0);
+  if (endHeading === undefined || endHeading === d0) {
+    if ((multipleOfStep(dq, dr, s0) ?? 0) >= 1) return true;
+    for (const side of SHIFT_SIDES) {
+      const t = shiftTemplate(d0, side);
+      if ((multipleOfStep(dq - t.dq, dr - t.dr, s0) ?? -1) >= 0) return true;
+    }
+  }
+  for (const t of CURVE_TEMPLATES) {
+    if (t.heading !== d0 || !allow(t.radiusM) || (endHeading !== undefined && t.endHeading !== endHeading)) continue;
+    const s1 = stepOf(t.endHeading);
+    for (let n = 0; n <= 80; n++) if ((multipleOfStep(dq - t.dq - n * s0.q, dr - t.dr - n * s0.r, s1) ?? -1) >= 0) return true;
+  }
+  return false;
+}
+
+/** Plan distance from the pointer to a node, mm. */
+function offsetMm(to: PlanPointMm, n: Axial): number {
+  const e = at(n.q, n.r);
+  return Math.hypot(e.xMm - to.xMm, e.yMm - to.yMm);
+}
+
+describe("planTrack: one bend a node off before two bends", () => {
+  it("ends each forward-cone kink with one bend on the nearest neighbour one bend reaches, not two onto the node", async ({ annotate }) => {
+    const w = world();
+    const from = node(60, 60);
+    const offsets: number[] = [];
+    for (const [fromHeading, deg, distM] of KINKS) {
+      const name = `start heading ${fromHeading ?? "free"}, ${deg}°, ${distM} m`;
+      const to = conePointer(fromHeading, deg, distM);
+      const n = nearestNode({ x: to.xMm / 1000, y: to.yMm / 1000 });
+      const plan = w.plan({ from, ...(fromHeading === undefined ? {} : { fromHeading }), to, dzMm: 0, magnetism: true });
+      const d0 = plan.pieces[0]?.heading;
+      if (d0 === undefined || !plan.end) throw new Error(`no plan: ${name}`);
+      // The case the rule is for: no single bend reaches the pointer's node, and two bends do (the plan until now).
+      expect(singleBendReaches(from, d0, n, CAP_360), name).toBe(false);
+      expect(twoBendFits(d0, { q: n.q - from.q, r: n.r - from.r }, undefined, { allowRadius: CAP_360 }).length, name).toBeGreaterThan(0);
+      // Now one bend, ending on the neighbour nearest the pointer among those one bend reaches.
+      expect(plan.fit, name).not.toBe("two-bend");
+      const reached = ring1(n).filter((m) => singleBendReaches(from, d0, m, CAP_360));
+      expect(reached, name).toContainEqual({ q: plan.end.node.q, r: plan.end.node.r });
+      const nearest = Math.min(...reached.map((m) => offsetMm(to, m)));
+      expect(Math.abs(offsetMm(to, plan.end.node) - nearest), name).toBeLessThan(1e-6);
+      expect(w.run(build(plan.pieces), false), name).toMatchObject({ ok: true });
+      offsets.push(nearest / 1000);
+    }
+    offsets.sort((x, y) => x - y);
+    await annotate(`${KINKS.length} kinks, now one bend each: end to pointer median ${(offsets[Math.floor(offsets.length / 2)] ?? Number.NaN).toFixed(2)} m, max ${(offsets[offsets.length - 1] ?? Number.NaN).toFixed(2)} m`);
+    // Ring 1 lies within 7.64 m of any pointer (5 m plus a node cell's corner); these end 3.03–5.63 m off.
+    expect(offsets[offsets.length - 1]).toBeLessThan(7640);
+    expect(offsets).toHaveLength(22);
+  });
+
+  it("keeps two bends on the pointer's node when one bend reaches none of its neighbours", () => {
+    const w = world();
+    const cases: readonly { name: string; drag: Drag; allow: (radiusM: RadiusClassM) => boolean; endHeading?: Heading }[] = [
+      { name: "a 120° turn (a drag-table case)", drag: { from: node(40, 40), fromHeading: 0, to: at(36, 65), dzMm: 0, magnetism: true }, allow: CAP_360 },
+      {
+        // The drag-table S-curve ends here, a node from its own pointer; this pointer sits on that end node.
+        name: "precision R 120 onto heading 0, 30 m to the side (an S-curve)",
+        drag: { from: node(40, 40), fromHeading: 0, to: at(66, 48), dzMm: 0, magnetism: false, precision: { radiusM: 120, endHeading: 0 } },
+        allow: (r) => r === 120,
+        endHeading: 0,
+      },
+    ];
+    for (const c of cases) {
+      const n = nearestNode({ x: c.drag.to.xMm / 1000, y: c.drag.to.yMm / 1000 });
+      for (const m of [n, ...ring1(n)]) expect(singleBendReaches(c.drag.from, 0, m, c.allow, c.endHeading), `${c.name}: (${m.q}, ${m.r})`).toBe(false);
+      const plan = w.plan(c.drag);
+      expect(plan.fit, c.name).toBe("two-bend");
+      expect(plan.end?.node, c.name).toMatchObject(n);
+    }
+  });
+
+  it("keeps the nearest reached neighbour when its fits are invalid: validity never moves the end", () => {
+    // A piece arriving at the first drag-table kink's end (74, 69) on heading 4 makes every plan ending there a
+    // kinked join. Magnetism off, so the drag does not snap to that piece's buffer end.
+    const w = world(straights(75, 68, 4, 1));
+    const drag: Drag = { from: node(60, 60), to: at(60, 60, 90_631, 42_262), dzMm: 0, magnetism: false };
+    const plan = w.plan(drag);
+    expect(plan.pieces).toEqual(world().plan(drag).pieces);
+    expect(plan.end?.node).toEqual(node(74, 69));
+    expect(w.run(build(plan.pieces), false)).toMatchObject({ ok: false, reason: { code: "kinked-join" } });
+    // One bend to another neighbour of the pointer's node (73, 70) would be valid: the plan still shows the nearest.
+    const other = w.plan({ from: node(60, 60), fromHeading: 1, to: at(74, 70), dzMm: 0, magnetism: false });
+    expect(other.fit).toBe("one-bend");
+    expect(other.end?.node).toEqual(node(74, 70));
+    expect(w.run(build(other.pieces), false)).toMatchObject({ ok: true });
+  });
+
+  it("plans node-off drags deterministically, whatever order the track was built in", () => {
+    // Existing track: the line and the bridge over it, and a run the heading-1 plans retrace from the start.
+    const setup = [...LINE, ...OVER, ...straights(60, 60, 1, 6)];
+    const drags: Drag[] = KINKS.map(([fromHeading, deg, distM]) => ({
+      from: node(60, 60),
+      ...(fromHeading === undefined ? {} : { fromHeading }),
+      to: conePointer(fromHeading, deg, distM),
+      dzMm: 0,
+      magnetism: true,
+    }));
+    drags.push(...CASES.filter((c) => c.name.includes("a node off")).map((c) => c.drag));
+    const reference = world(setup);
+    const expected = drags.map((d) => reference.plan(d));
+    expect(drags.map((d) => reference.plan(d))).toEqual(expected);
+    expect(drags.map((d) => world(setup).plan(d))).toEqual(expected);
+    // Guards that the drags still end a node off with one bend and retrace the run (19 and 15 of 24 when
+    // written). The run makes the start a buffer end, so free drags leave on heading 1 or 7 there; the two at
+    // −35° then lie 65° right of heading 1 and take two bends: at 100 m inside the turning circle (the ring
+    // search), at 110 m on the pointer's node, since one bend reaches none of its neighbours.
+    const nodeOff = expected.filter((p, i) => {
+      const to = drags[i]?.to;
+      const n = to && nearestNode({ x: to.xMm / 1000, y: to.yMm / 1000 });
+      return n && p.end && p.fit !== "two-bend" && ring1(n).some((m) => m.q === p.end?.node.q && m.r === p.end.node.r);
+    });
+    const reused = expected.filter((p) => p.counts.reused > 0);
+    expect(nodeOff.length).toBeGreaterThan(10);
+    expect(reused.length).toBeGreaterThan(5);
+    forAll(
+      { seed: "node-off-build-order", runs: 10 },
+      (prng) => shuffled(prng, setup),
+      (order) => {
+        const w = world();
+        for (const spec of order) expectOk(w.run(build([spec]), true));
+        expect(drags.map((d) => w.plan(d))).toEqual(expected);
+      },
+    );
   });
 });

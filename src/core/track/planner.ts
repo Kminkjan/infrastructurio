@@ -36,9 +36,10 @@ import { type Counts, type TrackContext, heightsAt, resolveStructure, validate }
  * same side (two rows), solved in closed form per template pair
  * (`solveThree`). A fixed end (an existing port, position and heading both
  * fixed) takes them alongside one-bend fits. A free end takes them only as a
- * fallback, when no one-bend fit reaches its target (owner decision
- * 2026-09-27): then the end heading is free, d2 = d0 + t1 + t2 with each turn
- * ±30° to ±90°, so one drag turns up to 180° (hairpins, U-turns, S-curves).
+ * fallback, when no one-bend fit reaches its target or a node next to it
+ * (owner decisions 2026-09-27): then the end heading is free, d2 = d0 + t1 +
+ * t2 with each turn ±30° to ±90°, so one drag turns up to 180° (hairpins,
+ * U-turns, S-curves).
  *
  * **Start heading d0.** `drag.fromHeading` when set. Otherwise, when
  * `drag.from` is an existing buffer end, whichever of the two headings plain
@@ -50,11 +51,19 @@ import { type Counts, type TrackContext, heightsAt, resolveStructure, validate }
  *
  * **Target node (pointer snapping).** The pointer's nearest lattice node N
  * when a one-bend fit reaches it (exactly the selection from before the
- * two-bend fallback), else when a two-bend fit does, so the plan ends under
- * the tool's snap ring and follows the pointer within one node cell
- * (≤ 2.89 m). No fit of one or two bends (each at most 90°) reaches inside
- * the 60 m turning circles beside the start, or behind it nearer its line
- * than twice the smallest radius (120 m), so otherwise:
+ * two-bend fallback), so the plan ends under the tool's snap ring, within
+ * one node cell (≤ 2.89 m) of the pointer. Else one bend a node off (owner
+ * decision 2026-09-27, "prefer one bend, a node off"; `oneBendNodeOff`): the
+ * one-bend fits ending on the neighbour of N nearest the pointer among the
+ * six (ring 1, 5 m from N) that a one-bend fit reaches and that reach
+ * halfway along the drag (see below), so the end sits under 7.64 m from the
+ * pointer; the nodes one secondary step (8.66 m) from N are left out.
+ * Only then two bends, at N when a two-bend fit reaches it. Where one bend
+ * misses N by a lattice step, two bends would land on N exactly, with a small
+ * kink (30° one way, then 60° back, at R 60–90). No fit of one or two bends
+ * (each at most 90°) reaches inside the 60 m turning circles beside the
+ * start, or behind it nearer its line than twice the smallest radius
+ * (120 m), so otherwise:
  * - a pointer behind the start (behind the line through it square to d0)
  *   gets the U-turn end nearest it (`nearestUTurnEnd`, exact, no range limit):
  *   the track turns back toward it on its side, whatever the distance;
@@ -114,7 +123,9 @@ import { type Counts, type TrackContext, heightsAt, resolveStructure, validate }
  * **Precision** (`drag.precision`): magnetism off, curves only of the given
  * radius class (both bends of a two-bend fit), and with `endHeading` only
  * candidates ending on that heading: one bend when one reaches the target,
- * else two (an S-curve back onto d0, say). Everything stays on the lattice.
+ * else one bend a node off (the same ring-1 rule, with that radius class and
+ * end heading), else two (an S-curve back onto d0, say). Everything stays on
+ * the lattice.
  *
  * **Elevation: track follows the ground** (owner decision, 2026-09-27, for
  * D3; D4 revisits it with the 35‰ rule and earthworks). The start z is
@@ -706,7 +717,8 @@ function compareSignatures(a: Candidate, b: Candidate): number {
 
 /**
  * The rank of a free end's two-bend fits (the fallback when no single bend
- * reaches the target), best first; see "Two bends" in the module comment.
+ * reaches the target or a node next to it), best first; see "Two bends" in
+ * the module comment.
  * Exported for the oracle test.
  */
 export function twoBendOrder(arcTurnSteps: number): (a: Candidate, b: Candidate) => number {
@@ -1180,6 +1192,44 @@ function nearestHeading(dx: number, dy: number): Heading {
 }
 
 /**
+ * Ring 1 around a node: its six lattice neighbours, one primary step (5 m)
+ * away, so an end there lies under 7.64 m from a pointer in the node's cell.
+ * The six nodes one secondary step (8.66 m) away are left out: ending there
+ * would put a plan up to 11.5 m from the pointer, well past the owner's
+ * "about 5 m".
+ */
+const RING_1: readonly Axial[] = HEADINGS.filter((h) => isPrimary(h)).map((h) => stepOf(h));
+
+/**
+ * One bend a node off (owner decision 2026-09-27, "prefer one bend, a node
+ * off"), tried when no single bend reaches the pointer's node N and before
+ * any two-bend fit: the single-bend fits (`fits`) ending on the ring-1 node
+ * nearest the pointer among those that `accept` takes (the halfway rule,
+ * which also excludes the start) and that a single bend reaches. Ring 1 is
+ * one ring, so the plan distance alone orders its nodes; the fits of every
+ * node at exactly the nearest distance are returned together, for the usual
+ * single-bend selection (valid first, then `compareCandidates`) to rank.
+ * Distance comes first, so validity never moves the end to a farther
+ * neighbour. Empty when no neighbour is reached.
+ */
+function oneBendNodeOff(p: PlanXY, n: Axial, accept: (node: Axial) => boolean, fits: (node: Axial) => Candidate[]): Candidate[] {
+  const ring = RING_1.map((s) => ({ q: n.q + s.q, r: n.r + s.r }))
+    .filter(accept)
+    .map((node) => ({ node, d2: dist2(p, node.q, node.r) }))
+    .sort((a, b) => a.d2 - b.d2);
+  const out: Candidate[] = [];
+  let nearest = Infinity;
+  for (const { node, d2 } of ring) {
+    if (d2 > nearest) break;
+    const found = fits(node);
+    if (found.length === 0) continue;
+    out.push(...found);
+    nearest = d2;
+  }
+  return out;
+}
+
+/**
  * The node nearest the pointer that `reaches` accepts: N itself when it
  * does, else an exact search ring by ring around N (ring k lies at least
  * k·4330 mm from N, so the search stops once that bound, less N's own
@@ -1329,6 +1379,10 @@ export function planTrack(ctx: PlannerContext, drag: Drag): TrackPlan {
   // One bend reaching the pointer's node: the selection as before the two-bend fallback, exactly.
   const atPointer = oneBend(n);
   if (atPointer.length > 0) return finish(ctx, choose(ctx, from, endZMm, atPointer), null);
+  // Else one bend a node off, before two bends (owner decision 2026-09-27, "prefer one bend, a node off").
+  const halfway = reachesHalfway(pointer, from);
+  const nodeOff = oneBendNodeOff(pointer, n, halfway, oneBend);
+  if (nodeOff.length > 0) return finish(ctx, choose(ctx, from, endZMm, nodeOff), null);
   // Otherwise two bends in one drag (owner decision 2026-09-27).
   const tau = arcTurn(pointer, from, d0);
   const twoAtPointer = bestTwoBend(d0, sub(n, from), endHeading, rules, tau);
@@ -1338,7 +1392,6 @@ export function planTrack(ctx: PlannerContext, drag: Drag): TrackPlan {
   if (uTurns && frameOf(pointer, from, d0).ahead < 0) {
     target = nearestUTurnEnd(pointer, from, d0, rules);
   } else {
-    const halfway = reachesHalfway(pointer, from);
     const twoReach = twoBendReach(d0, endHeading, rules);
     target = nearestReachable(pointer, n, (node) => halfway(node) && (oneBend(node).length > 0 || twoReach(sub(node, from))));
     if (!target && uTurns) target = nearestUTurnEnd(pointer, from, d0, rules);
