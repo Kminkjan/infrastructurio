@@ -3,7 +3,7 @@ import { type PieceSpec, resolvePiece } from "../geometry/piece";
 import { CURVE_TEMPLATES } from "../geometry/templates";
 import { generateTerrain, nodeOfOffset, offsetOfNode, terrainBoundsM } from "../terrain";
 import { emptyAuthored } from "./authored";
-import { REASON_CODES, RULES, RULE_ORDER, createTrackIndex, resolveStructure, validate } from "./validate";
+import { REASON_CODES, RULES, RULE_ORDER, createTrackIndex, heightsAt, indexAdd, indexRemove, resolveStructure, validate } from "./validate";
 
 const terrain = generateTerrain({ seed: "d2-validate", columns: 60, rows: 52 });
 const ctx = () => ({ terrain, authored: emptyAuthored(), index: createTrackIndex() });
@@ -49,5 +49,29 @@ describe("construction validator", () => {
   it("accepts an empty build and an empty demolish as no-ops", () => {
     expect(validate(ctx(), { kind: "build", specs: [], structure: "ground" })).toMatchObject({ ok: true, counts: { new: 0, reused: 0 } });
     expect(validate(ctx(), { kind: "demolish", keys: [] })).toMatchObject({ ok: true, diff: { added: [], removed: [] } });
+  });
+
+  it("indexes the committed node heights per lattice position, ascending, as pieces come and go", () => {
+    const straight = (q: number, z0Mm: number, z1Mm: number) => {
+      const res = resolvePiece({ kind: "straight", from: { q, r: 10, zMm: z0Mm }, heading: 0, z1Mm });
+      if (!res.ok) throw new Error(res.failure.message);
+      return res.piece;
+    };
+    const low = straight(10, 0, 100);
+    const next = straight(11, 100, 200);
+    const high = straight(11, 7000, 7000);
+    const index = createTrackIndex([high, low, next]);
+    expect(heightsAt(index, 11, 10)).toEqual([100, 7000]);
+    expect(heightsAt(index, 10, 10)).toEqual([0]);
+    expect(heightsAt(index, 13, 10)).toEqual([]);
+    // (11, 10, 100) stays while `next` still ends there.
+    indexRemove(index, low);
+    expect(heightsAt(index, 11, 10)).toEqual([100, 7000]);
+    expect(heightsAt(index, 10, 10)).toEqual([]);
+    indexRemove(index, next);
+    expect(heightsAt(index, 11, 10)).toEqual([7000]);
+    indexAdd(index, low);
+    expect(heightsAt(index, 11, 10)).toEqual([100, 7000]);
+    expect(index.heights).toEqual(createTrackIndex([low, high]).heights);
   });
 });

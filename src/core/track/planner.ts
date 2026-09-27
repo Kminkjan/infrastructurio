@@ -1,3 +1,4 @@
+import { MIN_HEIGHT_SEPARATION_MM } from "../geometry/clearance";
 import { type NodeRef, type PieceSpec, canonicalKey, compareNodes, isNodeRef, nodeKey, nodeRef } from "../geometry/piece";
 import {
   CURVE_TEMPLATES,
@@ -14,7 +15,7 @@ import {
 } from "../geometry/templates";
 import { type Axial, HEADINGS, type Heading, SQRT3, isHeading, nearestNode, opposite, rotateHeading, stepLengthMm, stepOf, unit } from "../lattice";
 import { divFloor } from "../util/int";
-import { type Counts, type TrackContext, resolveStructure, validate } from "./validate";
+import { type Counts, type TrackContext, heightsAt, resolveStructure, validate } from "./validate";
 
 /**
  * The planner (simulation model §8, ADR 0010 decision 7): turns a drag the
@@ -79,11 +80,17 @@ import { type Counts, type TrackContext, resolveStructure, validate } from "./va
  * heading (single bend). Everything stays on the lattice.
  *
  * **Elevation.** The start z is `from.zMm`; the end z is `from.zMm + dzMm`,
- * or the port's z when the end joins a port. The change is apportioned over
- * the pieces in proportion to their lengths by largest remainder (Hamilton):
- * each piece gets ⌊|dz|·len/L⌋ mm, and the leftover millimetres go to the
- * largest remainders, ties to the earlier piece. Negative dz mirrors
- * positive, so every piece's grade is within 1 mm of its share.
+ * or the port's z when the end joins a port. An intermediate node where the
+ * authored track already has a node within 6.5 m of the plan's height there
+ * is pinned to that node's height, so a drag that retraces or extends sloped
+ * track reuses the pieces it overlaps (node identity includes z, so a height
+ * off by a millimetre would miss their keys); `profileOf` has the exact
+ * rule and the choice among several heights. Between consecutive pins
+ * (start, pinned nodes, end) the change is apportioned over the pieces in
+ * proportion to their lengths by largest remainder (Hamilton): each piece
+ * gets ⌊|dz|·len/L⌋ mm, and the leftover millimetres go to the largest
+ * remainders, ties to the earlier piece. Negative dz mirrors positive, so
+ * every piece's grade is within 1 mm of its share of its span.
  */
 
 /** A point on the sim plan, integer mm (x east, y north). */
@@ -504,28 +511,123 @@ export function apportionMm(total: number, weights: readonly number[]): number[]
   return shares.map((s) => (total < 0 ? 0 - s : s) + 0);
 }
 
-function specsOf(from: NodeRef, endZMm: number, shapes: readonly Shape[]): PieceSpec[] {
-  const rises = apportionMm(endZMm - from.zMm, shapes.map((s) => s.lengthMm));
+/** The piece of `shape` from node (q, r, z0Mm) to height z1Mm, frozen. */
+function specAt(shape: Shape, q: number, r: number, z0Mm: number, z1Mm: number): PieceSpec {
+  const at = nodeRef(q, r, z0Mm);
+  const seg = shape.seg;
+  return Object.freeze(
+    seg.kind === "straight"
+      ? { kind: "straight", from: at, heading: seg.heading, z1Mm }
+      : seg.kind === "curve"
+        ? { kind: "curve", from: at, heading: seg.t.heading, turn: seg.t.turn, radiusM: seg.t.radiusM, variant: seg.t.variant, z1Mm }
+        : { kind: "shift", from: at, heading: seg.t.heading, side: seg.t.side, z1Mm },
+  );
+}
+
+function isExisting(ctx: PlannerContext, spec: PieceSpec): boolean {
+  const key = canonicalKey(spec);
+  return key !== undefined && ctx.authored.pieces.has(key);
+}
+
+/**
+ * Node heights along a path, z[0] = `from.zMm` … z[n] = `endZMm` (see
+ * "Elevation" in the module comment). Walking from the start, an
+ * intermediate node where the authored track already has nodes is pinned to
+ * one of their heights, h, when it lies within `MIN_HEIGHT_SEPARATION_MM`
+ * (6.5 m) of the reference: the straight line by cumulative length from the
+ * last pin to the end. Nearer than that the path would clash with that track
+ * anyway (`tracks-too-close`), so pinning can only let it share the node or
+ * reuse the piece; farther, the path passes over or under the track (a
+ * grade separation) and keeps its own height. The comparison is exact:
+ * |h − ref| · span, with span the length from the last pin to the end, is an
+ * integer of at most about 1e14 (safe).
+ *
+ * Several heights within reach (a bridge over a track, D4) are ranked, first
+ * wins: the height whose incoming piece (from the previous node, when that is
+ * the start or a pin) is an existing piece; then one whose outgoing piece to
+ * an existing height at the next node (or to the end height) is; then the
+ * nearest to the reference; then the lower. Only the authored heights and the
+ * path decide, never insertion order, so the profile is deterministic.
+ *
+ * The rise between consecutive pins is then apportioned over their pieces by
+ * length (`apportionMm`, largest remainder).
+ */
+function profileOf(ctx: PlannerContext, from: NodeRef, endZMm: number, shapes: readonly Shape[]): number[] {
+  const n = shapes.length;
+  const qs: number[] = [from.q];
+  const rs: number[] = [from.r];
+  const cum: number[] = [0];
+  shapes.forEach((s, i) => {
+    qs.push((qs[i] ?? 0) + s.dq);
+    rs.push((rs[i] ?? 0) + s.dr);
+    cum.push((cum[i] ?? 0) + s.lengthMm);
+  });
+  const total = cum[n] ?? 0;
+  const z: number[] = Array.from({ length: n + 1 }, () => 0);
+  z[0] = from.zMm;
+  z[n] = endZMm;
+  const pins: number[] = [0];
+  let p = 0;
+  for (let i = 1; i < n; i++) {
+    const q = qs[i] ?? 0;
+    const r = rs[i] ?? 0;
+    const heights = heightsAt(ctx.index, q, r);
+    if (heights.length === 0) continue;
+    const zp = z[p] ?? 0;
+    const span = total - (cum[p] ?? 0);
+    const refScaled = zp * span + (endZMm - zp) * ((cum[i] ?? 0) - (cum[p] ?? 0));
+    const distOf = (h: number): number => Math.abs(h * span - refScaled);
+    const near = heights.filter((h) => distOf(h) < MIN_HEIGHT_SEPARATION_MM * span);
+    const first = near[0];
+    if (first === undefined) continue;
+    let best = first;
+    if (near.length > 1) {
+      // Only now are piece keys looked up: one height within reach needs no ranking.
+      const incoming = shapes[i - 1];
+      const outgoing = shapes[i];
+      const nextHeights = i + 1 === n ? [endZMm] : heightsAt(ctx.index, qs[i + 1] ?? 0, rs[i + 1] ?? 0);
+      const rankOf = (h: number): number =>
+        p === i - 1 && incoming && isExisting(ctx, specAt(incoming, qs[p] ?? 0, rs[p] ?? 0, zp, h))
+          ? 0
+          : outgoing && nextHeights.some((h1) => isExisting(ctx, specAt(outgoing, q, r, h, h1)))
+            ? 1
+            : 2;
+      let bestRank = rankOf(first);
+      let bestDist = distOf(first);
+      for (const h of near.slice(1)) {
+        const rank = rankOf(h);
+        const dist = distOf(h);
+        // Heights come ascending, so keeping the first of equals gives ties to the lower.
+        if (rank < bestRank || (rank === bestRank && dist < bestDist)) {
+          best = h;
+          bestRank = rank;
+          bestDist = dist;
+        }
+      }
+    }
+    z[i] = best;
+    pins.push(i);
+    p = i;
+  }
+  pins.push(n);
+  for (let k = 1; k < pins.length; k++) {
+    const a = pins[k - 1] ?? 0;
+    const b = pins[k] ?? 0;
+    const rises = apportionMm((z[b] ?? 0) - (z[a] ?? 0), shapes.slice(a, b).map((s) => s.lengthMm));
+    for (let i = a; i < b - 1; i++) z[i + 1] = (z[i] ?? 0) + (rises[i - a] ?? 0);
+  }
+  return z;
+}
+
+function specsOf(ctx: PlannerContext, from: NodeRef, endZMm: number, shapes: readonly Shape[]): PieceSpec[] {
+  const z = profileOf(ctx, from, endZMm, shapes);
   const out: PieceSpec[] = [];
   let q = from.q;
   let r = from.r;
-  let z = from.zMm;
   shapes.forEach((shape, i) => {
-    const z1Mm = z + (rises[i] ?? 0);
-    const at = nodeRef(q, r, z);
-    const seg = shape.seg;
-    out.push(
-      Object.freeze(
-        seg.kind === "straight"
-          ? { kind: "straight", from: at, heading: seg.heading, z1Mm }
-          : seg.kind === "curve"
-            ? { kind: "curve", from: at, heading: seg.t.heading, turn: seg.t.turn, radiusM: seg.t.radiusM, variant: seg.t.variant, z1Mm }
-            : { kind: "shift", from: at, heading: seg.t.heading, side: seg.t.side, z1Mm },
-      ),
-    );
+    out.push(specAt(shape, q, r, z[i] ?? 0, z[i + 1] ?? 0));
     q += shape.dq;
     r += shape.dr;
-    z = z1Mm;
   });
   return out;
 }
@@ -627,7 +729,7 @@ function choose(ctx: PlannerContext, from: NodeRef, endZMm: number, candidates: 
     const cand = ranked[i];
     if (!cand) break;
     const shapes = shapesOf(cand.segs);
-    const chosen: Chosen = { cand, shapes, specs: specsOf(from, endZMm, shapes) };
+    const chosen: Chosen = { cand, shapes, specs: specsOf(ctx, from, endZMm, shapes) };
     top ??= chosen;
     if (validate(ctx, { kind: "build", specs: chosen.specs, structure }).ok) return chosen;
   }

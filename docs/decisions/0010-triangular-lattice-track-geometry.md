@@ -407,6 +407,59 @@ Recorded while implementing D3's core half on branch `codex/d3-planner`
   - joining at turnouts (D5);
   - timings on the gate hardware, or agreement across JavaScript engines.
 
+## Findings (2026-09-27, D3 height pinning)
+
+Recorded on branch `codex/d3-construction-tool`
+([#82](https://github.com/Kminkjan/infrastructurio/pull/82);
+[#67](https://github.com/Kminkjan/infrastructurio/issues/67)). Automated evidence only,
+Vitest 4.1.10, Node 26.7.0 on macOS 26.6.2 (Apple M5 Pro); the status of this ADR stays
+Proposed.
+- **Defect.** The planner split a drag's height change over the whole path. Where the drag
+  overlapped sloped existing track, the shared inner nodes came out millimetres off the
+  existing heights. Node identity includes z, so the overlapping pieces missed their keys,
+  and the plan was rejected (`kinked-join` or `tracks-too-close`) instead of reusing them.
+  Endpoint-to-endpoint reuse already worked: the start is the existing node, and the tool
+  snaps the end height.
+- **Rule (a default to test).** Walking from the start, an inner node where the authored
+  track has nodes takes one of their heights. It must lie within 6.5 m (the clearance
+  height) of the line, by length, from the last pinned node to the end.
+  - Nearer than that the plan would clash anyway. From 6.5 m on it passes over or under
+    (a grade separation) and keeps its own height; 6.5 m exactly counts as clear, as in
+    the clearance rule.
+  - Between consecutive pins (start, pinned nodes, end) the rise is split by length with
+    largest remainder, as before.
+  - The start and end heights, `Drag` and `TrackPlan` are unchanged.
+- **Several heights at one (q, r)** (a bridge over track, possible from D4). First wins:
+  the height whose incoming piece, from a pinned previous node, already exists; then one
+  whose outgoing piece, to an existing height at the next node or the end, already exists;
+  then the nearest to the line; then the lower. Only the authored heights and the path
+  decide, so the choice does not depend on build order.
+- **Index.** The track index now keeps the committed node heights per (q, r)
+  incrementally (`heightsAt` in [`track/validate.ts`](../../src/core/track/validate.ts)).
+  The planner looks up piece keys only when two or more heights are in reach.
+- **Tests (automated).**
+  - Eight new planner tests: a sloped extension (8 reused, 3 new), a partial retrace from
+    outside the run (6 reused, 4 new), the split between pins, the 6.5 m boundary, both
+    multi-height rules, build order with undo and redo, and a seeded property. In 150 runs
+    the property saw 65 retraces of random sloped chains, 52 of them extending the chain,
+    all at the chain's heights. There is also one index test.
+  - The seven sloped cases and both seeded properties on existing track (level and sloped)
+    fail on the previous planner.
+- **Performance, a dev measurement and not a gate.** Three runs each of
+  [`sim/perf.test.ts`](../../src/core/sim/perf.test.ts) before and after, on the same
+  machine. The two ranges overlap:
+  - `planTrack` median: 0.083–0.085 ms before, 0.084–0.088 ms after;
+  - worst-case median: 1.720–1.912 ms before, 1.749–1.972 ms after.
+- **Not established:**
+  - the feel of dragging over existing track (the owner's D3 feel check);
+  - D4's grade rule. A pin can make the pieces beside it steeper than the drag's average,
+    and D4 will reject pieces over 35‰;
+  - a later pin moving an earlier node. The line runs to the end because the next pin is
+    not yet known on the walk. A later pin can therefore move an unpinned node's final
+    height back within 6.5 m of existing track, where it clashes. No test builds that case;
+  - multi-height layouts beyond the constructed tests. D3 builds them only as level track
+    6.5 m or more above other track (`auto` resolves to ground).
+
 ## Revisit when
 
 - The D3 feel check finds construction unsatisfying for reasons that planner tuning, chained
@@ -438,3 +491,6 @@ Recorded while implementing D3's core half on branch `codex/d3-planner`
 - 2026-09-27: D3 planner findings added (exact candidate counts, start-heading, snapping,
   selection and magnetism choices, two-bend fits, follow and performance measurements);
   status unchanged, still Proposed.
+- 2026-09-27: D3 height-pinning findings added (inner nodes pinned to existing node heights
+  within 6.5 m, the multi-height order, the per-position height index); status unchanged,
+  still Proposed.

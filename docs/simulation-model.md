@@ -54,7 +54,7 @@ Module paths are relative to `src/core/`. Tracking keys D1–D13 come from
 | Static diorama scenery | `scenarios/` | — | D11a | **Implemented** in D11a: seeded, integer-only layout for the lookdev spike (no sim behaviour), 21 test cases with a golden hash |
 | Pieces and templates | `geometry/templates.ts`, `piece.ts`, `sample.ts` | S2 | D2 | **Implemented** in D2: 12 straights, 720 oriented curves, 24 shifts; closure and reachability tested ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d2-track-model)) |
 | Authored state, validation, clearance, history | `track/`, `geometry/clearance.ts` | S3 | D2, D4 | **Implemented** in D2 for the 11 D2-owned codes; grade and terrain/structure rules (D4) are ordered placeholders that pass |
-| Planner | `track/planner.ts` | S4 | D3 | **Implemented** in D3's core half (2026-09-27, branch `codex/d3-planner`): one-bend, shift and two-bend fits, magnetism, precision, elevation; 40 test cases (§8) |
+| Planner | `track/planner.ts` | S4 | D3 | **Implemented** in D3's core half (2026-09-27, branch `codex/d3-planner`): one-bend, shift and two-bend fits, magnetism, precision, elevation (pinned to existing node heights on `codex/d3-construction-tool`); 48 test cases (§8) |
 | Derived network, entity commands | `network/derive.ts`, `graph.ts` | S5 | D2, D5–D7 | **Partial**: D2's `derive` (through and buffer nodes, sections split at buffers); junctions and entities planned |
 | Pathfinding | `network/pathfind.ts` | S6 | D8 | Planned |
 | Trains and movement | `trains/` | S7 | D8 | Planned |
@@ -327,9 +327,9 @@ and its [version 2 note](decisions/0010-triangular-lattice-track-geometry.md#fin
 new/reused counts and a label. `build-track` then carries those pieces.
 
 **Status 2026-09-27 (automated, D3 core branch `codex/d3-planner`):** implemented in
-[`track/planner.ts`](../src/core/track/planner.ts), with 40 test cases in
-[`planner.test.ts`](../src/core/track/planner.test.ts) (a 23-case drag table, ranking and
-elevation tests, seeded properties) and a planner measurement in
+[`track/planner.ts`](../src/core/track/planner.ts), with 48 test cases in
+[`planner.test.ts`](../src/core/track/planner.test.ts) (a 23-case drag table, ranking,
+elevation and height-pinning tests, seeded properties) and a planner measurement in
 [`sim/perf.test.ts`](../src/core/sim/perf.test.ts). The choices this section left open are
 under "As built" below; numbers and limits are in the
 [ADR 0010 D3 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-d3-planner).
@@ -349,8 +349,9 @@ Whether dragging feels right is not established: that is the owner's D3 feel che
   fixed. The planner then fits two bends with straights between them, to join the port.
 - **Magnetism.** The drag snaps to existing endpoints and ports within 3 nodes.
 - **Elevation.** The height change is spread over the nodes in proportion to cumulative
-  length, using largest-remainder rounding to integer mm. The start z comes from the
-  snapped node; the end z comes from the height keys.
+  length, using largest-remainder rounding to integer mm, between the heights of existing
+  nodes the drag passes ("As built" below). The start z comes from the snapped node; the
+  end z comes from the height keys.
 - **Counter.** Keys already present count as reused, the rest as new. An all-reused drag is
   a no-op: `execute` changes nothing and records no history entry.
 - **Precision mode** (Ctrl, or ⌥ on macOS):
@@ -384,8 +385,15 @@ Whether dragging feels right is not established: that is the owner's D3 feel che
     precision fixes the end heading.
   - **Precision:** curves only of the chosen radius class. An end heading keeps only
     single-bend fits that end on it.
-  - **Elevation:** largest remainder over the per-piece rises, weighted by piece length,
-    ties to the earlier piece. A descent mirrors the climb.
+  - **Elevation:** an intermediate node where existing track has a node within 6.5 m (the
+    clearance height) of the line from the last pinned node to the end takes that node's
+    height, so a drag that retraces or extends sloped track reuses the pieces it overlaps.
+    From 6.5 m on, the drag passes over or under and keeps its own height. With several
+    heights in reach, a height whose incoming piece already exists wins, then one whose
+    outgoing piece does, then the nearest, then the lower. Between pins (start, pinned
+    nodes, end): largest remainder over the per-piece rises, weighted by piece length, ties
+    to the earlier piece. A descent mirrors the climb
+    ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-d3-height-pinning)).
   - **Malformed drags:** a non-integer start, non-finite pointer, or invalid heading or
     radius throws a `TypeError`. It is a programmer error, like a malformed command.
 

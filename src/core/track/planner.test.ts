@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { forAll, pick, shuffled } from "../../../tests/support/forall";
 import { makeTerrain } from "../../../tests/support/makeTerrain";
 import { randomChain, randomNode } from "../../../tests/support/trackGen";
+import { MIN_HEIGHT_SEPARATION_MM } from "../geometry/clearance";
 import { type NodeRef, type PieceSpec, resolvePiece } from "../geometry/piece";
 import { type RadiusClassM, type ShiftSide, type Turn, RADIUS_CLASSES_M } from "../geometry/templates";
 import { type Heading, HEADINGS, SQRT3, nearestNode, opposite, rotateHeading, stepOf } from "../lattice";
@@ -117,6 +118,26 @@ function climbing(q: number, r: number, heading: Heading, heights: readonly numb
 
 /** An east-running line on row 60, q 100–110: buffer ends (100, 60) (west, arrive heading 0) and (110, 60) (east, arrive heading 6). */
 const LINE = straights(100, 60, 0, 10);
+
+/** A level track at 27 m crossing LINE at (108, 60), 7 m above it (clear of it by the 6.5 m rule): two nodes there. */
+const OVER = straights(108, 56, 2, 8, 27_000);
+
+/**
+ * A sloped run on row 40, q 40–48, as two drags of different grade (+100 mm, then +170 mm per 5 m), so no
+ * single largest-remainder split reproduces its inner heights. Buffer ends (40, 40) at 20 m and (48, 40) at 21.08 m.
+ */
+const SLOPE_Z = [20_000, 20_100, 20_200, 20_300, 20_400, 20_570, 20_740, 20_910, 21_080] as const;
+const SLOPE = climbing(40, 40, 0, SLOPE_Z);
+
+/** Existing node heights by lattice position "q,r", from the network view. */
+function heightsOf(w: World): Map<string, number[]> {
+  const out = new Map<string, number[]>();
+  for (const n of w.network().nodes) {
+    const k = `${n.q},${n.r}`;
+    out.set(k, [...(out.get(k) ?? []), n.zMm]);
+  }
+  return out;
+}
 
 interface DragCase {
   readonly name: string;
@@ -479,6 +500,115 @@ describe("planTrack drag cases", () => {
   });
 });
 
+describe("planTrack on sloped track: heights pinned to existing nodes", () => {
+  it("extends a sloped run: the overlap takes the run's heights and is reused, only the extension is new", () => {
+    const w = world(SLOPE);
+    const drag: Drag = { from: node(40, 40), fromHeading: 0, to: at(51, 40), dzMm: 1580, magnetism: true };
+    const plan = w.plan(drag);
+    // Pinned at q 41–48; the last 500 mm spread over the three new pieces: 167, 167, 166.
+    expect(plan.pieces).toEqual([...SLOPE, ...climbing(48, 40, 0, [21_080, 21_247, 21_414, 21_580])]);
+    expect(plan.counts).toEqual({ new: 3, reused: 8 });
+    expect(plan.end).toEqual({ node: node(51, 40, 21_580), heading: 0 });
+    expect(expectOk(w.run(build(plan.pieces), true)).counts).toEqual(plan.counts);
+    // One split over the whole drag (the old rule) puts (41, 40) at 20,144 mm, not 20,100: every overlapping
+    // piece misses its key, and the first one leaves the run's start node beside the existing piece.
+    const rises = apportionMm(1580, Array<number>(11).fill(5000));
+    const unpinned = climbing(40, 40, 0, rises.reduce((zs, dz) => [...zs, (zs[zs.length - 1] ?? 0) + dz], [Z]));
+    expect(unpinned[0]?.z1Mm).toBe(20_144);
+    expect(world(SLOPE).run(build(unpinned), false)).toMatchObject({ ok: false, reason: { code: "kinked-join" } });
+  });
+
+  it("retraces part of a sloped run from outside it: the approach is new, the overlap reused", () => {
+    const w = world(SLOPE);
+    // It ends on the run's through node (46, 40) at that node's height, as the tool's vertical magnetism gives it.
+    const plan = w.plan({ from: node(36, 40, 19_450), fromHeading: 0, to: at(46, 40), dzMm: 20_740 - 19_450, magnetism: true });
+    // 550 mm up to the pin at (40, 40): 137.5 per piece, so 138, 138, 137, 137 (ties to the earlier piece).
+    expect(plan.pieces).toEqual(climbing(36, 40, 0, [19_450, 19_588, 19_726, 19_863, ...SLOPE_Z.slice(0, 7)]));
+    expect(plan.counts).toEqual({ new: 4, reused: 6 });
+    expect(expectOk(w.run(build(plan.pieces), true)).counts).toEqual(plan.counts);
+  });
+
+  it("spreads the rise between consecutive pins by largest remainder, by length", () => {
+    // Two sloped stubs on row 44 with a five-piece gap: q 40–42 (20.0 → 20.2 m) and q 47–49 (20.903 → 21.103 m).
+    const w = world([...climbing(40, 44, 0, [20_000, 20_100, 20_200]), ...climbing(47, 44, 0, [20_903, 21_003, 21_103])]);
+    const plan = w.plan({ from: node(40, 44), fromHeading: 0, to: at(52, 44), dzMm: 1404, magnetism: true });
+    const rises = plan.pieces.map((p) => p.z1Mm - p.from.zMm);
+    expect(rises.slice(0, 2)).toEqual([100, 100]);
+    // 703 mm over five 5 m pieces between the pins at q 42 and 47: 140.6 each, so three get 141.
+    expect(rises.slice(2, 7)).toEqual(apportionMm(703, Array<number>(5).fill(5000)));
+    expect(rises.slice(2, 7)).toEqual([141, 141, 141, 140, 140]);
+    expect(rises.slice(7, 9)).toEqual([100, 100]);
+    // 301 mm from the last pin to the end: 101, 100, 100.
+    expect(rises.slice(9)).toEqual([101, 100, 100]);
+    expect(plan.counts).toEqual({ new: 8, reused: 4 });
+    expect(expectOk(w.run(build(plan.pieces), true)).counts).toEqual(plan.counts);
+  });
+
+  it("passes 6.5 m or more over track without pinning (a grade separation), and pins nearer", () => {
+    const w = world(LINE);
+    const across = (zMm: number) => w.plan({ from: node(105, 55, zMm), fromHeading: 2, to: at(105, 65), dzMm: 0, magnetism: true });
+    // Exactly 6.5 m above the line's node (105, 60): clear of it, so the level plan builds over it.
+    const clear = across(26_500);
+    expect(clear.pieces).toEqual(straights(105, 55, 2, 10, 26_500));
+    expect(expectOk(w.run(build(clear.pieces), false)).counts).toEqual({ new: 10, reused: 0 });
+    // 6 m above would clash anyway, so the plan meets the node; a crossing at a node is not buildable yet.
+    const low = across(26_000);
+    expect(low.pieces[4]?.z1Mm).toBe(20_000);
+    expect(low.pieces[5]?.from.zMm).toBe(20_000);
+    expect(w.run(build(low.pieces), false)).toMatchObject({ ok: false, reason: { code: "kinked-join" } });
+  });
+
+  it("with a bridge over the track at a node, a retrace keeps the track's height there (its piece exists)", () => {
+    const w = world([...LINE, ...OVER]);
+    // A contrived 8 m climb puts the reference at (108, 60) at 24 m: nearer the bridge (27 m) than the track
+    // (20 m) and within 6.5 m of both, so only the existing piece (107, 60) → (108, 60) decides.
+    const plan = w.plan({ from: node(100, 60), fromHeading: 0, to: at(109, 60), dzMm: 8000, magnetism: true });
+    expect(plan.pieces).toEqual([...straights(100, 60, 0, 8), { kind: "straight", from: node(108, 60), heading: 0, z1Mm: 28_000 }]);
+    expect(plan.counts).toEqual({ new: 1, reused: 8 });
+  });
+
+  it("where no piece matches, takes the nearest of several heights, ties to the lower", () => {
+    const w = world([...LINE, ...OVER]);
+    // A level diagonal (heading 1) through (108, 60), where the line (20 m) and the bridge (27 m) both have nodes.
+    const heightAt108 = (zMm: number) => w.plan({ from: node(104, 56, zMm), fromHeading: 1, to: at(112, 64), dzMm: 0, magnetism: true }).pieces[3]?.z1Mm;
+    expect(heightAt108(24_000)).toBe(27_000);
+    expect(heightAt108(23_000)).toBe(20_000);
+    expect(heightAt108(23_500)).toBe(20_000);
+    // Beyond 6.5 m of both (13.5 m is 6.5 m under the line), the plan keeps its own height.
+    expect(heightAt108(13_500)).toBe(13_500);
+  });
+
+  it("pins the same heights whatever order the track was built in, and after undo and redo", () => {
+    const setup = [...SLOPE, ...LINE, ...OVER];
+    const drags: readonly Drag[] = [
+      { from: node(40, 40), fromHeading: 0, to: at(51, 40), dzMm: 1580, magnetism: true },
+      { from: node(36, 40, 19_450), fromHeading: 0, to: at(46, 40), dzMm: 1290, magnetism: true },
+      { from: node(100, 60), fromHeading: 0, to: at(109, 60), dzMm: 8000, magnetism: true },
+      { from: node(104, 56, 24_000), fromHeading: 1, to: at(112, 64), dzMm: 0, magnetism: true },
+    ];
+    const reference = world(setup);
+    const expected = drags.map((d) => reference.plan(d));
+    expect(drags.map((d) => reference.plan(d))).toEqual(expected);
+    forAll(
+      { seed: "pin-build-order", runs: 20 },
+      (prng) => shuffled(prng, setup),
+      (order) => {
+        const w = world();
+        for (const spec of order) expectOk(w.run(build([spec]), true));
+        expect(drags.map((d) => w.plan(d))).toEqual(expected);
+      },
+    );
+    // Undoing the run's last piece unpins (48, 40); redoing it restores the plan.
+    const w = world();
+    for (const spec of setup) expectOk(w.run(build([spec]), true));
+    const last = SLOPE.length - 1;
+    for (let i = setup.length - 1; i >= last; i--) expectOk(w.run({ type: "undo" }, true));
+    expect(w.plan(drags[0] as Drag).counts).toEqual({ new: 4, reused: 7 });
+    for (let i = setup.length - 1; i >= last; i--) expectOk(w.run({ type: "redo" }, true));
+    expect(drags.map((d) => w.plan(d))).toEqual(expected);
+  });
+});
+
 // ---------------------------------------------------------------------------
 
 function endOf(pieces: readonly PieceSpec[]): { node: NodeRef; heading: Heading } {
@@ -608,8 +738,8 @@ function staysOnLand(terrain: Terrain, pieces: readonly PieceSpec[]): boolean {
   });
 }
 
-/** Structural facts every non-empty plan must satisfy. */
-function checkShape(plan: TrackPlan, drag: Drag): void {
+/** Structural facts every non-empty plan must satisfy, given the existing node heights by "q,r". */
+function checkShape(plan: TrackPlan, drag: Drag, existing: ReadonlyMap<string, readonly number[]> = new Map()): void {
   const first = plan.pieces[0];
   expect(first?.from).toEqual(drag.from);
   let at = drag.from;
@@ -626,9 +756,34 @@ function checkShape(plan: TrackPlan, drag: Drag): void {
   expect(plan.lengthMm).toBe(length);
   const endZ = plan.snapped ? plan.snapped.zMm : drag.from.zMm + drag.dzMm;
   expect(plan.end?.node.zMm).toBe(endZ);
-  // Heights follow the largest-remainder split of the rise over the piece lengths.
+  // Heights: the start, the end and every node the plan shares with existing track are pins, and the rise
+  // between consecutive pins follows the largest-remainder split by length. Every other node keeps 6.5 m or
+  // more from the existing heights at its (q, r), measured from the line by length from the last pin to the end.
+  const nodes = [drag.from, ...plan.pieces.map((p) => endOf([p]).node)];
   const lengths = plan.pieces.map((p) => lengthOf([p]));
-  expect(plan.pieces.map((p) => p.z1Mm - p.from.zMm)).toEqual(apportionMm(endZ - drag.from.zMm, lengths));
+  const rises = plan.pieces.map((p) => p.z1Mm - p.from.zMm);
+  const cum = lengths.reduce((acc, l) => [...acc, (acc[acc.length - 1] ?? 0) + l], [0]);
+  const last = nodes.length - 1;
+  const zOf = (i: number) => nodes[i]?.zMm ?? Number.NaN;
+  const pins = [0];
+  for (let i = 1; i < last; i++) {
+    const n = nodes[i];
+    const heights = n ? (existing.get(`${n.q},${n.r}`) ?? []) : [];
+    if (heights.includes(zOf(i))) {
+      pins.push(i);
+      continue;
+    }
+    const p = pins[pins.length - 1] ?? 0;
+    const span = (cum[last] ?? 0) - (cum[p] ?? 0);
+    const ref = zOf(p) * span + (zOf(last) - zOf(p)) * ((cum[i] ?? 0) - (cum[p] ?? 0));
+    for (const h of heights) expect(Math.abs(h * span - ref)).toBeGreaterThanOrEqual(MIN_HEIGHT_SEPARATION_MM * span);
+  }
+  pins.push(last);
+  for (let k = 1; k < pins.length; k++) {
+    const a = pins[k - 1] ?? 0;
+    const b = pins[k] ?? 0;
+    expect(rises.slice(a, b)).toEqual(apportionMm(zOf(b) - zOf(a), lengths.slice(a, b)));
+  }
   expect(plan.label).toMatch(/^(Straight|Shift|R (60|90|120|180|240|360) m) · \d+ km\/h · \d+\.\d%$/);
   if (plan.snapped) expect(plan.end?.node).toEqual(plan.snapped);
   if (drag.precision) {
@@ -729,7 +884,7 @@ describe("planner properties", () => {
         expect(a.plan(drag)).toEqual(plan);
         expect(b.plan(drag)).toEqual(plan);
         if (plan.fit === "none") return;
-        checkShape(plan, drag);
+        checkShape(plan, drag, heightsOf(a));
         if (plan.counts.reused > 0) reusedSome += 1;
         if (plan.snapped) snappedSome += 1;
         const view = a.network();
@@ -749,6 +904,63 @@ describe("planner properties", () => {
     // Guards that the generator reaches reuse and magnetism (13 and 16 of 150 runs when written).
     expect(reusedSome).toBeGreaterThanOrEqual(5);
     expect(snappedSome).toBeGreaterThanOrEqual(5);
+  });
+
+  it("on sloped track: retracing or extending a chain's leading straights reuses them at the chain's heights", () => {
+    const terrain = flatTerrain(PROP_SIZE);
+    let retraced = 0;
+    let extended = 0;
+    forAll(
+      { seed: "plan-sloped-track", runs: 150 },
+      (prng) => {
+        // Chains as generated: mostly level with some 100–175 mm steps per piece, some 7 m up.
+        const chains = Array.from({ length: 1 + prng.nextInt(6) }, () => randomChain(prng, PROP_SIZE, 8));
+        const chain = pick(prng, chains);
+        const head = chain[0];
+        if (!head) throw new Error("empty chain");
+        let k = 0;
+        while (chain[k]?.kind === "straight" && chain[k]?.heading === head.heading) k += 1;
+        if (k === 0) return { chains, chain, k, drag: randomDrag(prng, pick(prng, chain).from) };
+        // Along the leading straights and 0–3 nodes beyond; the end on the chain's height there, plus a climb
+        // or descent of up to 175 mm per extra piece.
+        const e = prng.nextInt(4);
+        const s = stepOf(head.heading);
+        const zK = chain[k - 1]?.z1Mm ?? head.from.zMm;
+        const dzMm = zK - head.from.zMm + e * (prng.nextInt(351) - 175);
+        const to = at(head.from.q + s.q * (k + e), head.from.r + s.r * (k + e));
+        return { chains, chain, k, drag: { from: head.from, fromHeading: head.heading, to, dzMm, magnetism: prng.nextInt(2) === 0 } };
+      },
+      ({ chains, chain, k, drag }) => {
+        const a = world([], terrain);
+        const b = world([], terrain);
+        const built = chains.map((c) => {
+          const ra = a.run(build(c), true);
+          expect(b.run(build(c), true)).toEqual(ra);
+          return ra.ok;
+        });
+        const plan = a.plan(drag);
+        expect(a.plan(drag)).toEqual(plan);
+        expect(b.plan(drag)).toEqual(plan);
+        if (plan.fit === "none") return;
+        checkShape(plan, drag, heightsOf(a));
+        const previewed = a.run(build(plan.pieces), false);
+        expect(b.run(build(plan.pieces), true)).toEqual(previewed);
+        if (previewed.ok) expect(previewed.counts).toEqual(plan.counts);
+        // Where the plan runs over the built chain's leading straights (magnetism or validity may pick another
+        // shape), it takes their heights, so it reuses them.
+        const overlap = plan.pieces.slice(0, k);
+        const lead = chain.slice(0, k);
+        const sameShape = overlap.length === k && overlap.every((p, i) => p.kind === lead[i]?.kind && p.heading === lead[i]?.heading && p.from.q === lead[i]?.from.q && p.from.r === lead[i]?.from.r);
+        if (k === 0 || !built[chains.indexOf(chain)] || !sameShape) return;
+        expect(overlap).toEqual(lead);
+        expect(plan.counts.reused).toBeGreaterThanOrEqual(k);
+        retraced += 1;
+        if (plan.pieces.length > k) extended += 1;
+      },
+    );
+    // Guards that the generator reaches the case (65 retraces, 52 of them extending, of 150 runs when written).
+    expect(retraced).toBeGreaterThanOrEqual(20);
+    expect(extended).toBeGreaterThanOrEqual(10);
   });
 
   it("follows the pointer in the forward cone (a dev measurement, not a gate)", async ({ annotate }) => {
