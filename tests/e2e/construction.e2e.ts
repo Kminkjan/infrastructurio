@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { dragBetween, findDryRun, lookAtNode, nodeScreen, openDiorama, snapshot, undoToEmpty } from "./hook";
+import { dragBetween, findDryRun, lookAtNode, nodeAtOffset, nodeScreen, openDiorama, snapshot, undoToEmpty } from "./hook";
 
 /**
  * D3 construction e2e (agent evidence: synthetic input through the real
@@ -73,36 +73,46 @@ test("builds from the keyboard: 1, arrows, Enter, arrows, Enter", async ({ page 
   await undoToEmpty(page);
 });
 
-test.fixme("builds a closed loop by dragging, then undoes back to an empty network", async ({ page }) => {
-  // enable after merging codex/d3-planner
-  // The straight-only stub cannot bend, so it cannot close a loop. With the full planner, four
-  // chained drags round a square lay one-bend fits, and the last drag ends on the start node's
-  // port (a two-bend fit), closing the loop into a single closed section.
+test("builds a closed loop by dragging, then undoes back to an empty network", async ({ page }) => {
+  // Needs the full planner (merged from codex/d3-planner): four chained legs, each a one-bend
+  // curve turning left 90°, and a last drag that magnetism snaps into the start's port with a
+  // two-bend fit, closing the loop into one closed section. Offsets are metres east and north
+  // of the start; the planner snaps each click to the reachable node nearest the pointer.
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
   await openDiorama(page);
   const { q, r } = await findDryRun(page, 40, 0.2);
-  await lookAtNode(page, q + 20, r + 12, 2.5);
+  const centre = nodeAtOffset(q, r, 90, 120);
+  await lookAtNode(page, centre[0], centre[1], 2.5);
   await page.keyboard.press("1");
-  const corners: [number, number][] = [
-    [q + 40, r],
-    [q + 20, r + 40],
-    [q - 20, r + 40],
-  ];
-  const origin = await nodeScreen(page, q, r);
-  const first = corners[0];
-  if (!first) throw new Error("no corners");
-  await dragBetween(page, origin, await nodeScreen(page, first[0], first[1]));
-  for (const [cq, cr] of corners.slice(1)) {
+  const [b, ...corners] = ([
+    [180, 0],
+    [300, 120],
+    [180, 240],
+    [-120, 120],
+  ] as const).map(([dx, dy]) => nodeAtOffset(q, r, dx, dy));
+  if (!b) throw new Error("no first corner");
+  const start = await nodeScreen(page, q, r);
+  await dragBetween(page, start, await nodeScreen(page, b[0], b[1]), 20);
+  let s = await snapshot(page);
+  expect(s.pieces).toBeGreaterThan(0);
+  expect(s.phase).toBe("anchored");
+  for (const [cq, cr] of corners) {
     const p = await nodeScreen(page, cq, cr);
     await page.mouse.move(p.x, p.y, { steps: 10 });
     await page.mouse.click(p.x, p.y);
+    expect((await snapshot(page)).phase).toBe("anchored");
   }
-  // Back into the start node's port: magnetism snaps within 3 nodes.
-  await page.mouse.move(origin.x, origin.y, { steps: 10 });
-  await page.mouse.click(origin.x, origin.y);
-  const s = await snapshot(page);
-  expect(s.pieces).toBeGreaterThan(8);
+  // Back to the start: the planner snaps into its port, and after joining the chain ends.
+  await page.mouse.move(start.x, start.y, { steps: 10 });
+  await page.mouse.click(start.x, start.y);
+  s = await snapshot(page);
   expect(s.closedSections).toBe(1);
+  expect(s.phase).toBe("idle");
+  expect(s.pieces).toBeGreaterThan(40);
   await page.keyboard.press("Escape");
-  await page.keyboard.press("Escape");
-  await undoToEmpty(page);
+  expect((await snapshot(page)).tool).toBe("select");
+  const undos = await undoToEmpty(page);
+  expect(undos).toBe(5);
+  expect(errors).toEqual([]);
 });

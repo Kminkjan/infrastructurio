@@ -207,7 +207,7 @@ describe("track tool: states", () => {
     expect(t.state.phase).toBe("idle");
   });
 
-  it("continues an existing endpoint with its heading", () => {
+  it("starts on an existing endpoint at its height and lets the planner continue the track", () => {
     const t = session();
     t.drag([10, 10], [14, 10]);
     t.send({ type: "escape" });
@@ -216,8 +216,28 @@ describe("track tool: states", () => {
     const buffer = t.sim.network().nodes.find((n) => n.q === 14 && n.r === 10);
     expect(end.continueHeading).toBe(buffer ? opposite(buffer.axis) : undefined);
     t.down(14, 10);
-    t.move(18, 10);
-    expect(t.drags.at(-1)?.fromHeading).toBe(0);
+    const fx = t.move(18, 10);
+    const drag = t.drags.at(-1);
+    expect(drag?.from).toEqual(end.node);
+    expect(drag?.fromHeading).toBeUndefined();
+    expect(ghostOf(fx)?.valid).toBe(true);
+    expect(t.state.plan?.pieces.every((p) => p.heading === 0)).toBe(true);
+  });
+
+  it("ends the chain after a plan that joined an existing port", () => {
+    const t = session({ flat: true });
+    // A run whose far end (20, 10) is a port the next drag can snap to.
+    t.drag([16, 10], [20, 10]);
+    t.send({ type: "escape" });
+    t.down(10, 10);
+    const fx = t.move(15, 10);
+    expect(t.state.plan?.snapped).toMatchObject({ q: 16, r: 10 });
+    expect(ghostOf(fx)?.valid).toBe(true);
+    const released = t.up(15, 10);
+    expect(last(released, "execute")).toBeDefined();
+    expect(t.sim.network().pieces.length).toBe(10);
+    expect(t.state.phase).toBe("idle");
+    expect(t.state.anchor).toBeNull();
   });
 });
 

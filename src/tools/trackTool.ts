@@ -37,7 +37,10 @@ import type { GhostModel, Reduced, ScreenPoint, ToolCtx, ToolEffect, ToolEvent, 
  * Height: the end sits `heightSteps` elevation steps above the terrain at
  * the end node (ground-following), so a drag across the land lays track on
  * the ground and ]/[ lift or lower the end. Anchoring on existing track
- * starts at that track's height above ground; chaining keeps the steps.
+ * starts at that track's height above ground; chaining keeps the steps. A
+ * plan that magnetism joined to an existing port takes the port's height,
+ * and after it commits the chain ends (Idle): leaving a joined port would
+ * need a turnout (D5).
  */
 
 /** Movement beyond this many CSS px turns a press into a drag. */
@@ -230,14 +233,20 @@ function step(s: TrackToolState, e: ToolEvent, ctx: ToolCtx, out: ToolEffect[]):
   }
 }
 
-/** Anchors at a pick: its node, its continuation heading, and its height above ground in steps. */
+/**
+ * Anchors at a pick: its node (an existing node keeps its height) and its
+ * height above ground in steps. No start heading is forced: on an existing
+ * buffer end the planner itself picks continuing the track or running back
+ * over it, whichever is nearer the drag direction; elsewhere it follows the
+ * drag. Only a chained start carries the previous plan's end heading.
+ */
 function startAt(s: TrackToolState, pick: ToolPick, ctx: ToolCtx): TrackToolState {
   const ground = ctx.groundZmm(pick.node.q, pick.node.r);
   const stepMm = ctx.settings.heightStepMm;
   const heightSteps = ground === undefined ? 0 : Math.round((pick.node.zMm - ground) / stepMm);
   return {
     ...s,
-    anchor: { node: pick.node, heading: pick.kind === "endpoint" ? pick.continueHeading : undefined },
+    anchor: { node: pick.node, heading: undefined },
     heightSteps,
     endHeading: undefined,
     viewKey: null,
@@ -258,6 +267,11 @@ function commit(s: TrackToolState, ctx: ToolCtx, out: ToolEffect[]): TrackToolSt
     return cur;
   }
   out.push({ type: "execute", command: cur.command });
+  if (plan.snapped) {
+    // Joined an existing port: chaining on from it would need a turnout (D5), so the chain ends here.
+    out.push({ type: "announce", text: `Built and joined the track at (${plan.snapped.q}, ${plan.snapped.r}). ${formatCounts(cur.verdict.counts)}.` });
+    return { ...cur, phase: "idle", anchor: null, heightSteps: 0, endHeading: undefined, plan: null, command: null, verdict: null, viewKey: null };
+  }
   out.push({ type: "announce", text: `Built. ${formatCounts(cur.verdict.counts)}.` });
   // The app executes, then sends `refresh`, which re-plans from the new end against the new revision.
   return {

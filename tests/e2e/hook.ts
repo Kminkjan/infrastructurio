@@ -93,6 +93,15 @@ export async function findDryRun(page: Page, length: number, rowFraction = 0.25)
   );
 }
 
+/** The lattice node nearest (q0, r0) moved by (dx east, dy north) metres (a = 5 m, rows 4.33 m apart). */
+export function nodeAtOffset(q0: number, r0: number, dx: number, dy: number): [number, number] {
+  const rowM = 2.5 * 1.7320508075688772;
+  const x = 5 * (q0 + r0 / 2) + dx;
+  const y = rowM * r0 + dy;
+  const r = Math.round(y / rowM);
+  return [Math.round(x / 5 - r / 2), r];
+}
+
 export async function nodeScreen(page: Page, q: number, r: number, zMm?: number): Promise<ScreenPoint> {
   return page.evaluate(({ q, r, zMm }) => {
     const h = window.__diorama;
