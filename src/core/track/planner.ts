@@ -14,6 +14,7 @@ import {
   shiftTemplate,
 } from "../geometry/templates";
 import { type Axial, HEADINGS, type Heading, SQRT3, isHeading, nearestNode, opposite, rotateHeading, stepLengthMm, stepOf, unit } from "../lattice";
+import { groundMmAt } from "../terrain";
 import { divFloor } from "../util/int";
 import { type Counts, type TrackContext, heightsAt, resolveStructure, validate } from "./validate";
 
@@ -79,18 +80,26 @@ import { type Counts, type TrackContext, heightsAt, resolveStructure, validate }
  * radius class, and with `endHeading` only candidates ending on that
  * heading (single bend). Everything stays on the lattice.
  *
- * **Elevation.** The start z is `from.zMm`; the end z is `from.zMm + dzMm`,
- * or the port's z when the end joins a port. An intermediate node where the
+ * **Elevation: track follows the ground** (owner decision, 2026-09-27, for
+ * D3; D4 revisits it with the 35‰ rule and earthworks). The start z is
+ * `from.zMm`; the end z is `from.zMm + dzMm`, or the port's z when the end
+ * joins a port. Every other node sits on the ground (`groundMmAt`: the
+ * terrain, or the water surface over a lower bed) plus an offset, and it is
+ * the offset, not the absolute height, that is interpolated between pins.
+ * With both ends on the ground the whole plan lies on it; a raised end ramps
+ * the offset from the start's to the end's. An intermediate node where the
  * authored track already has a node within 6.5 m of the plan's height there
  * is pinned to that node's height, so a drag that retraces or extends sloped
  * track reuses the pieces it overlaps (node identity includes z, so a height
  * off by a millimetre would miss their keys); `profileOf` has the exact
  * rule and the choice among several heights. Between consecutive pins
- * (start, pinned nodes, end) the change is apportioned over the pieces in
- * proportion to their lengths by largest remainder (Hamilton): each piece
- * gets ⌊|dz|·len/L⌋ mm, and the leftover millimetres go to the largest
- * remainders, ties to the earlier piece. Negative dz mirrors positive, so
- * every piece's grade is within 1 mm of its share of its span.
+ * (start, pinned nodes, end) the offset's change is apportioned over the
+ * pieces in proportion to their lengths by largest remainder (Hamilton):
+ * each piece gets ⌊|Δoffset|·len/L⌋ mm, and the leftover millimetres go to
+ * the largest remainders, ties to the earlier piece. Negative changes mirror
+ * positive ones. Following the ground can exceed 35‰ (about half the pieces
+ * of a straight drag on the diorama map); nothing rejects that until D4's
+ * grade rule.
  */
 
 /** A point on the sim plan, integer mm (x east, y north). */
@@ -111,7 +120,12 @@ export interface Drag {
   readonly fromHeading?: Heading;
   /** The pointer's ground position on the sim plan. */
   readonly to: PlanPointMm;
-  /** End height minus `from.zMm`, in integer mm (the tool accumulates elevation steps). */
+  /**
+   * End height minus `from.zMm`, in integer mm: the end's absolute height is
+   * `from.zMm + dzMm` (a snapped port's height instead). The tool sets it
+   * from the ground at the end plus the elevation steps. Inner nodes follow
+   * the ground (see "Elevation" above), so this fixes only the end.
+   */
   readonly dzMm: number;
   /** Snap the end to existing endpoints and ports within 3 nodes. Precision mode passes false. */
   readonly magnetism: boolean;
@@ -537,15 +551,37 @@ function isExisting(ctx: PlannerContext, spec: PieceSpec): boolean {
 }
 
 /**
+ * The ground under each node of a path, integer mm (`groundMmAt`: the
+ * terrain, or the water surface over a lower bed). A node off the map takes
+ * the ground of the last on-map node before it, or of the first one after it
+ * when none comes before; a path entirely off the map takes the start's own
+ * height. So a plan that leaves the map still gets deterministic heights,
+ * with no jump where it crosses the edge, for `preview` to reject with
+ * `out-of-bounds`.
+ */
+function groundAlong(ctx: PlannerContext, from: NodeRef, qs: readonly number[], rs: readonly number[]): number[] {
+  const known = qs.map((q, i) => groundMmAt(ctx.terrain, { q, r: rs[i] ?? 0 }));
+  let last = known.find((g) => g !== undefined) ?? from.zMm;
+  return known.map((g) => {
+    last = g ?? last;
+    return last;
+  });
+}
+
+/**
  * Node heights along a path, z[0] = `from.zMm` … z[n] = `endZMm` (see
- * "Elevation" in the module comment). Walking from the start, an
- * intermediate node where the authored track already has nodes is pinned to
- * one of their heights, h, when it lies within `MIN_HEIGHT_SEPARATION_MM`
- * (6.5 m) of the reference: the straight line by cumulative length from the
- * last pin to the end. Nearer than that the path would clash with that track
+ * "Elevation" in the module comment). Each node's height is the ground
+ * there, g[i], plus an offset: the start's offset is `from.zMm − g[0]`, the
+ * end's `endZMm − g[n]`, and every pin's is its height minus its ground.
+ *
+ * Walking from the start, an intermediate node where the authored track
+ * already has nodes is pinned to one of their heights, h, when it lies within
+ * `MIN_HEIGHT_SEPARATION_MM` (6.5 m) of the reference: the ground there plus
+ * the offset on the straight line, by cumulative length, from the last pin's
+ * offset to the end's. Nearer than that the path would clash with that track
  * anyway (`tracks-too-close`), so pinning can only let it share the node or
- * reuse the piece; farther, the path passes over or under the track (a
- * grade separation) and keeps its own height. The comparison is exact:
+ * reuse the piece; farther, the path passes over or under the track (a grade
+ * separation) and keeps its own height. The comparison is exact:
  * |h − ref| · span, with span the length from the last pin to the end, is an
  * integer of at most about 1e14 (safe).
  *
@@ -553,11 +589,15 @@ function isExisting(ctx: PlannerContext, spec: PieceSpec): boolean {
  * wins: the height whose incoming piece (from the previous node, when that is
  * the start or a pin) is an existing piece; then one whose outgoing piece to
  * an existing height at the next node (or to the end height) is; then the
- * nearest to the reference; then the lower. Only the authored heights and the
- * path decide, never insertion order, so the profile is deterministic.
+ * nearest to the reference; then the lower. Only the authored heights, the
+ * terrain and the path decide, never insertion order, so the profile is
+ * deterministic.
  *
- * The rise between consecutive pins is then apportioned over their pieces by
- * length (`apportionMm`, largest remainder).
+ * The offset's change between consecutive pins is then apportioned over
+ * their pieces by length (`apportionMm`, largest remainder), and each node
+ * gets its ground plus its offset. With both ends on the ground and no pin,
+ * every node lies on the ground; on flat terrain this is exactly the old
+ * split of the height change.
  */
 function profileOf(ctx: PlannerContext, from: NodeRef, endZMm: number, shapes: readonly Shape[]): number[] {
   const n = shapes.length;
@@ -570,9 +610,11 @@ function profileOf(ctx: PlannerContext, from: NodeRef, endZMm: number, shapes: r
     cum.push((cum[i] ?? 0) + s.lengthMm);
   });
   const total = cum[n] ?? 0;
+  const g = groundAlong(ctx, from, qs, rs);
   const z: number[] = Array.from({ length: n + 1 }, () => 0);
   z[0] = from.zMm;
   z[n] = endZMm;
+  const endOffset = endZMm - (g[n] ?? 0);
   const pins: number[] = [0];
   let p = 0;
   for (let i = 1; i < n; i++) {
@@ -581,8 +623,9 @@ function profileOf(ctx: PlannerContext, from: NodeRef, endZMm: number, shapes: r
     const heights = heightsAt(ctx.index, q, r);
     if (heights.length === 0) continue;
     const zp = z[p] ?? 0;
+    const op = zp - (g[p] ?? 0);
     const span = total - (cum[p] ?? 0);
-    const refScaled = zp * span + (endZMm - zp) * ((cum[i] ?? 0) - (cum[p] ?? 0));
+    const refScaled = ((g[i] ?? 0) + op) * span + (endOffset - op) * ((cum[i] ?? 0) - (cum[p] ?? 0));
     const distOf = (h: number): number => Math.abs(h * span - refScaled);
     const near = heights.filter((h) => distOf(h) < MIN_HEIGHT_SEPARATION_MM * span);
     const first = near[0];
@@ -620,8 +663,14 @@ function profileOf(ctx: PlannerContext, from: NodeRef, endZMm: number, shapes: r
   for (let k = 1; k < pins.length; k++) {
     const a = pins[k - 1] ?? 0;
     const b = pins[k] ?? 0;
-    const rises = apportionMm((z[b] ?? 0) - (z[a] ?? 0), shapes.slice(a, b).map((s) => s.lengthMm));
-    for (let i = a; i < b - 1; i++) z[i + 1] = (z[i] ?? 0) + (rises[i - a] ?? 0);
+    const offsetA = (z[a] ?? 0) - (g[a] ?? 0);
+    const offsetB = (z[b] ?? 0) - (g[b] ?? 0);
+    const steps = apportionMm(offsetB - offsetA, shapes.slice(a, b).map((s) => s.lengthMm));
+    let offset = offsetA;
+    for (let i = a; i < b - 1; i++) {
+      offset += steps[i - a] ?? 0;
+      z[i + 1] = (g[i + 1] ?? 0) + offset;
+    }
   }
   return z;
 }

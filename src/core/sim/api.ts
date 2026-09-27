@@ -42,6 +42,7 @@ export type { Terrain, TerrainParams } from "../terrain";
 export {
   DEFAULT_TERRAIN_SIZE,
   generateTerrain,
+  groundMmAt,
   heightDmAt,
   isWaterAt,
   nodeOfOffset,

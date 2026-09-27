@@ -6,6 +6,7 @@ import {
   TERRAIN_GENERATOR_VERSION,
   type Terrain,
   generateTerrain,
+  groundMmAt,
   heightDmAt,
   isWaterAt,
   nodeOfOffset,
@@ -338,6 +339,31 @@ describe("terrain layout and lookup", () => {
       expect(heightDmAt(golden, node)).toBe(golden.heightsDm[index]);
       expect(isWaterAt(golden, node)).toBe(golden.water[index] === 1);
     }
+  });
+
+  it("gives the ground track lies on in mm: the terrain on land, the water surface over a lower bed", () => {
+    let land = 0;
+    let water = 0;
+    for (let row = 0; row < golden.rows; row += 3) {
+      for (let col = 0; col < golden.columns; col += 3) {
+        const node = nodeOfOffset(col, row);
+        const h = heightDmAt(golden, node) ?? Number.NaN;
+        const g = groundMmAt(golden, node);
+        if (isWaterAt(golden, node)) {
+          water += 1;
+          expect(g).toBe(golden.waterLevelDm * 100);
+          expect(g).toBeGreaterThan(h * 100);
+        } else {
+          land += 1;
+          expect(g).toBe(h * 100);
+        }
+      }
+    }
+    // The river and the lake both lie on the golden map, so both branches ran.
+    expect(water).toBeGreaterThan(100);
+    expect(land).toBeGreaterThan(water);
+    expect(groundMmAt(golden, nodeOfOffset(-1, 0))).toBeUndefined();
+    expect(groundMmAt(golden, nodeOfOffset(0, golden.rows))).toBeUndefined();
   });
 
   it("bounds the map at about 2.0 × 1.5 km from the south-west origin, enclosing every node", () => {

@@ -37,9 +37,12 @@ import type { GhostModel, Reduced, ScreenPoint, ToolCtx, ToolEffect, ToolEvent, 
  * command key, the network revision or the displayed values change. The
  * command a commit executes is exactly the one the ghost last showed.
  *
- * Height: the end sits `heightSteps` elevation steps above the terrain at
- * the end node (ground-following), so a drag across the land lays track on
- * the ground and ]/[ lift or lower the end. Anchoring on existing track
+ * Height: track follows the ground (owner decision 2026-09-27, for D3). The
+ * end sits `heightSteps` elevation steps above the ground at the end node
+ * (`ctx.groundZmm`, the planner's own ground), and the planner lays every
+ * inner node on the ground plus an offset it ramps from the start's to the
+ * end's, so with no steps a drag lays the whole track on the ground, hills
+ * included, and ]/[ lift or lower the end. Anchoring on existing track
  * starts at that track's height above ground; chaining keeps the steps. A
  * plan that magnetism joined to an existing port takes the port's height. A
  * plan that joins an existing buffer end (by magnetism, or in precision mode
@@ -386,11 +389,13 @@ function present(s: TrackToolState, ctx: ToolCtx, out: ToolEffect[], lead: strin
 }
 
 /**
- * The drag for the current state, planned. The end height follows the ground
- * at the plan's end node (plus the height steps), which is known only after
- * planning, so a plan whose end differs from the first guess is planned once
- * more with the corrected height. A magnetism snap, or ending on an existing
- * endpoint, takes that node's height so the track joins it.
+ * The drag for the current state, planned. The tool sets only the end
+ * height; the planner lays the inner nodes on the ground plus a ramped offset.
+ * The end follows the ground at the plan's end node (plus the height steps),
+ * which is known only after planning, so a plan whose end differs from the
+ * first guess is planned once more with the corrected height. A magnetism
+ * snap, or ending on an existing endpoint, takes that node's height so the
+ * track joins it.
  */
 function planFor(s: TrackToolState, anchor: Anchor, target: ToolPick, ctx: ToolCtx): TrackPlan {
   const stepMm = ctx.settings.heightStepMm;

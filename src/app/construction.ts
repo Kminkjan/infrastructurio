@@ -1,6 +1,6 @@
 import { Vector3 } from "three";
 import type { Command, Diff, Drag, NodeRef, Result, Sim, Terrain, TrackPlan } from "../core/sim/api";
-import { heightDmAt, toWorld } from "../core/sim/api";
+import { groundMmAt, toWorld } from "../core/sim/api";
 import type { CameraController } from "../render/camera/CameraController";
 import type { IsoCamera } from "../render/camera/IsoCamera";
 import { worldToScreen } from "../render/camera/isoMath";
@@ -110,10 +110,12 @@ export class Construction {
     return this.state;
   }
 
-  groundZmm = (q: number, r: number): number | undefined => {
-    const h = heightDmAt(this.d.terrain, { q, r });
-    return h === undefined ? undefined : h * 100;
-  };
+  /**
+   * The ground the track tool starts, ends and measures heights from: the
+   * planner's own (`groundMmAt`, the terrain or the water surface over a
+   * lower bed), so a plan's ends agree with its ground-following inner nodes.
+   */
+  groundZmm = (q: number, r: number): number | undefined => groundMmAt(this.d.terrain, { q, r });
 
   previewStats(): PreviewStats {
     const n = this.samples.copyTo(this.scratch);

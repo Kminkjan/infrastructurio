@@ -8,7 +8,7 @@ import { type RadiusClassM, type ShiftSide, type Turn, RADIUS_CLASSES_M } from "
 import { type Heading, HEADINGS, SQRT3, nearestNode, opposite, rotateHeading, stepOf } from "../lattice";
 import { createSim } from "../sim/api";
 import { type Command, type Result, type World, createWorld } from "../sim/world";
-import { type Terrain, isWaterAt, nodeOfOffset, offsetOfNode, terrainBoundsM } from "../terrain";
+import { DEFAULT_TERRAIN_SIZE, type Terrain, generateTerrain, groundMmAt, isWaterAt, nodeOfOffset, offsetOfNode, terrainBoundsM } from "../terrain";
 import type { Prng } from "../util/prng";
 import {
   type Candidate,
@@ -30,13 +30,21 @@ const TERRAIN = { seed: "d3-planner", columns: 60, rows: 52 } as const;
 describe("planTrack contract", () => {
   it("plans straights along the drag, counts new and reused by key, and leaves the track unchanged", () => {
     const sim = createSim({ terrain: TERRAIN });
-    const drag = { from: { q: 5, r: 5, zMm: 0 }, to: { xMm: 5000 * (9 + 2.5), yMm: 2500 * 1.7320508075688772 * 5 }, dzMm: 0, magnetism: true };
+    const terrain = generateTerrain(TERRAIN);
+    const ground = (q: number, r: number) => groundMmAt(terrain, { q, r }) ?? Number.NaN;
+    // Both ends on the ground, as the tool sets them with no height steps.
+    const drag = { from: { q: 5, r: 5, zMm: ground(5, 5) }, to: { xMm: 5000 * (9 + 2.5), yMm: 2500 * 1.7320508075688772 * 5 }, dzMm: ground(9, 5) - ground(5, 5), magnetism: true };
     const plan = sim.planTrack(drag);
     expect(plan.fit).toBe("straight");
     expect(plan.pieces.length).toBe(4);
     expect(plan.counts).toEqual({ new: 4, reused: 0 });
-    expect(plan.end).toEqual({ node: { q: 9, r: 5, zMm: 0 }, heading: 0 });
-    expect(plan.label).toBe("Straight · 60 km/h · 0.0%");
+    expect(plan.end).toEqual({ node: { q: 9, r: 5, zMm: ground(9, 5) }, heading: 0 });
+    // Every node lies on the ground, and the label's grade is the steepest piece's (round half up, in 0.1 %).
+    expect(plan.pieces.map((p) => [p.from.zMm, p.z1Mm])).toEqual([5, 6, 7, 8].map((q) => [ground(q, 5), ground(q + 1, 5)]));
+    const tenths = Math.round(Math.max(...plan.pieces.map((p) => Math.abs(p.z1Mm - p.from.zMm))) / 5);
+    expect(plan.label).toBe(`Straight · 60 km/h · ${Math.floor(tenths / 10)}.${tenths % 10}%`);
+    // This small seeded map is steep: 500 mm in one 5 m piece, which D4's 35‰ rule will reject.
+    expect(plan.label).toBe("Straight · 60 km/h · 10.0%");
     expect(sim.network().rev).toBe(0);
 
     const built = sim.execute({ type: "build-track", pieces: plan.pieces, structure: "auto" });
@@ -610,6 +618,179 @@ describe("planTrack on sloped track: heights pinned to existing nodes", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Ground following (owner decision 2026-09-27, for D3): each node is the ground plus an offset, and the
+// offset, not the absolute height, is split between pins.
+
+/**
+ * A north–south ridge on the flat 20 m map: 4 m high at col 100, its flanks rising 0.4 m per 5 m column
+ * (80‰) from col 90 and 110. On row 60 (col = q + 30) a heading-0 drag from q 50 to q 90 crosses it.
+ */
+const HILL = makeTerrain(SIZE.columns, SIZE.rows, (_q, _r, col) => 200 + Math.max(0, 40 - 4 * Math.abs(col - 100)));
+
+function hillGround(q: number, r: number): number {
+  return groundMmAt(HILL, { q, r }) ?? Number.NaN;
+}
+
+/** The plan's nodes, start first. */
+function nodesOfPlan(from: NodeRef, plan: TrackPlan): NodeRef[] {
+  return [from, ...plan.pieces.map((p) => endOf([p]).node)];
+}
+
+/** Running sums from `start`: [start, start + d0, start + d0 + d1, …]. */
+function cumulative(start: number, deltas: readonly number[]): number[] {
+  return deltas.reduce((acc, d) => [...acc, (acc[acc.length - 1] ?? 0) + d], [start]);
+}
+
+describe("planTrack on the ground: track follows the terrain", () => {
+  it("lays a drag over a hill on the ground at every node when both ends are on the ground", () => {
+    const w = world([], HILL);
+    const from = node(50, 60);
+    const plan = w.plan({ from, fromHeading: 0, to: at(90, 60), dzMm: 0, magnetism: true });
+    expect(plan.fit).toBe("straight");
+    expect(plan.pieces).toHaveLength(40);
+    const nodes = nodesOfPlan(from, plan);
+    expect(nodes.map((n) => n.zMm)).toEqual(nodes.map((n) => hillGround(n.q, n.r)));
+    // The ridge top sits 4 m up; the old split of the (zero) height change kept every node at 20 m, 4 m under it.
+    expect(nodes[20]?.zMm).toBe(24_000);
+    // The flanks climb 400 mm per 5 m piece: 80‰, over the 35‰ that D4 will enforce. Nothing rejects it in D3.
+    expect(plan.maxGradePermille).toBe(80);
+    expect(plan.label).toBe("Straight · 60 km/h · 8.0%");
+    expect(expectOk(w.run(build(plan.pieces), true)).counts).toEqual({ new: 40, reused: 0 });
+  });
+
+  it("ramps the offset above the ground towards a raised end, and down from a raised start", () => {
+    const w = world([], HILL);
+    const offsets = (from: NodeRef, plan: TrackPlan) => nodesOfPlan(from, plan).map((n) => n.zMm - hillGround(n.q, n.r));
+    // Three 1 m steps up at the end: 3000 mm over forty 5 m pieces, 75 mm each, on top of the ridge's shape.
+    const up = w.plan({ from: node(50, 60), fromHeading: 0, to: at(90, 60), dzMm: 3000, magnetism: true });
+    expect(offsets(node(50, 60), up)).toEqual(cumulative(0, apportionMm(3000, Array<number>(40).fill(5000))));
+    expect(up.end?.node.zMm).toBe(23_000);
+    expect(up.pieces[19]?.z1Mm).toBe(24_000 + 1500);
+    // From track 2 m up back down to the ground: the offset falls by 50 mm a piece; descents mirror climbs.
+    const down = w.plan({ from: node(50, 60, 22_000), fromHeading: 0, to: at(90, 60), dzMm: -2000, magnetism: true });
+    expect(offsets(node(50, 60, 22_000), down)).toEqual(cumulative(2000, apportionMm(-2000, Array<number>(40).fill(5000))));
+    expect(down.end?.node.zMm).toBe(20_000);
+  });
+
+  it("still pins existing nodes on hilly ground, ramping the offset between the pins", () => {
+    // Level track at 21 m through the ridge's flank and top (q 65–75 = col 95–105, ground 22–24 m).
+    const level = straights(65, 60, 0, 10, 21_000);
+    const w = world(level, HILL);
+    const from = node(50, 60);
+    const plan = w.plan({ from, fromHeading: 0, to: at(90, 60), dzMm: 0, magnetism: true });
+    // The overlap takes the existing heights and reuses the pieces, although they lie 1–3 m under the ground.
+    expect(plan.pieces.slice(15, 25)).toEqual(level);
+    expect(plan.counts).toEqual({ new: 30, reused: 10 });
+    const offsets = nodesOfPlan(from, plan).map((n) => n.zMm - hillGround(n.q, n.r));
+    // Offset 0 at the start to −1000 mm at the pin (col 95: ground 22 m, track 21 m), 15 pieces: 67 × 10, 66 × 5.
+    expect(offsets.slice(0, 16)).toEqual(cumulative(0, apportionMm(-1000, Array<number>(15).fill(5000))));
+    // From the last pin (col 105, again −1000 mm) back up to the ground at the end.
+    expect(offsets.slice(25)).toEqual(cumulative(-1000, apportionMm(1000, Array<number>(15).fill(5000))));
+    expect(expectOk(w.run(build(plan.pieces), true)).counts).toEqual(plan.counts);
+  });
+
+  it("on hilly ground: plans deterministically, and every node is the ground plus the offset split between pins", () => {
+    // Rolling hills of ±6 m around 20 m on the property map, with no water.
+    const hills = makeTerrain(PROP_SIZE.columns, PROP_SIZE.rows, (_q, _r, col, row) => 200 + 60 * Math.sin(col / 9) * Math.cos(row / 7), -100);
+    const ground = (q: number, r: number) => groundMmAt(hills, { q, r });
+    let pinned = 0;
+    forAll(
+      { seed: "plan-hilly-ground", runs: 150 },
+      (prng) => {
+        // Chains lifted by the ground at their start, so they lie near the surface and can pin a plan.
+        const chains = Array.from({ length: 1 + prng.nextInt(4) }, () => {
+          const chain = randomChain(prng, PROP_SIZE, 8);
+          const lift = ground(chain[0]?.from.q ?? 0, chain[0]?.from.r ?? 0) ?? Z;
+          return chain.map((s) => ({ ...s, from: { ...s.from, zMm: s.from.zMm + lift }, z1Mm: s.z1Mm + lift }));
+        });
+        const chain = pick(prng, chains);
+        const head = chain[0];
+        if (!head) throw new Error("empty chain");
+        const mode = prng.nextInt(3);
+        if (mode === 0 && head.kind === "straight") {
+          // Along the chain's leading straights and up to two nodes beyond, any end height nearby.
+          let k = 1;
+          while (chain[k]?.kind === "straight" && chain[k]?.heading === head.heading) k += 1;
+          const s = stepOf(head.heading);
+          const e = k + prng.nextInt(3);
+          const to = at(head.from.q + s.q * e, head.from.r + s.r * e);
+          return { chains, drag: { from: head.from, fromHeading: head.heading, to, dzMm: prng.nextInt(2001) - 1000, magnetism: prng.nextInt(2) === 0 } };
+        }
+        if (mode === 1) return { chains, drag: randomDrag(prng, pick(prng, chain).from) };
+        const start = innerNode(prng);
+        const from = node(start.q, start.r, (ground(start.q, start.r) ?? Z) + 1000 * prng.nextInt(3));
+        return { chains, drag: randomDrag(prng, from) };
+      },
+      ({ chains, drag }) => {
+        const a = world([], hills);
+        const b = world([], hills);
+        for (const chain of chains) expect(b.run(build(chain), true)).toEqual(a.run(build(chain), true));
+        const plan = a.plan(drag);
+        expect(a.plan(drag)).toEqual(plan);
+        expect(b.plan(drag)).toEqual(plan);
+        if (plan.fit === "none") return;
+        const existing = heightsOf(a);
+        checkShape(plan, drag, existing, ground);
+        if (nodesOfPlan(drag.from, plan).slice(1, -1).some((n) => existing.get(`${n.q},${n.r}`)?.includes(n.zMm))) pinned += 1;
+        expect(b.run(build(plan.pieces), true)).toEqual(a.run(build(plan.pieces), false));
+      },
+    );
+    // Guards that the generator reaches pinning on hills (15 of 150 runs when written).
+    expect(pinned).toBeGreaterThanOrEqual(5);
+  });
+
+  it("on the diorama map, lays random drags with both ends on the ground on the ground at every node (a probe)", async ({ annotate }) => {
+    const terrain = generateTerrain({ seed: "baltic-diorama", ...DEFAULT_TERRAIN_SIZE });
+    const w = createWorld(terrain);
+    const ground = (n: { q: number; r: number }) => {
+      const g = groundMmAt(terrain, n);
+      if (g === undefined) throw new Error(`(${n.q}, ${n.r}) is off the map`);
+      return g;
+    };
+    let nodes = 0;
+    let pieces = 0;
+    let steep = 0;
+    let curved = 0;
+    forAll(
+      { seed: "ground-diorama", runs: 400 },
+      (prng) => {
+        // Starts at least 300 m inside the map; half straight drags of 10–40 steps, half free drags within ±150 m.
+        const s = nodeOfOffset(60 + prng.nextInt(280), 80 + prng.nextInt(186));
+        const heading = pick(prng, HEADINGS);
+        if (prng.nextInt(2) === 0) {
+          const k = 10 + prng.nextInt(31);
+          const d = stepOf(heading);
+          return { s, fromHeading: heading, to: at(s.q + d.q * k, s.r + d.r * k) };
+        }
+        const p = at(s.q, s.r);
+        return { s, fromHeading: prng.nextInt(2) === 0 ? heading : undefined, to: { xMm: p.xMm + prng.nextInt(300_001) - 150_000, yMm: p.yMm + prng.nextInt(300_001) - 150_000 } };
+      },
+      ({ s, fromHeading, to }) => {
+        const from = node(s.q, s.r, ground(s));
+        const dragTo = (end: { q: number; r: number }): Drag => ({ from, ...(fromHeading === undefined ? {} : { fromHeading }), to, dzMm: ground(end) - from.zMm, magnetism: true });
+        // As the track tool does with no height steps: the end on the ground under the pointer's node, re-planned
+        // once with the ground at the plan's actual end when that differs.
+        let plan = w.plan(dragTo(nearestNode({ x: to.xMm / 1000, y: to.yMm / 1000 })));
+        if (plan.end && plan.end.node.zMm !== ground(plan.end.node)) plan = w.plan(dragTo(plan.end.node));
+        if (plan.fit === "none") return;
+        const all = nodesOfPlan(from, plan);
+        for (const n of all) expect(n.zMm - ground(n)).toBe(0);
+        nodes += all.length;
+        if (plan.pieces.some((p) => p.kind !== "straight")) curved += 1;
+        for (const p of plan.pieces) {
+          pieces += 1;
+          if (Math.abs(p.z1Mm - p.from.zMm) * 1000 > 35 * lengthOf([p])) steep += 1;
+        }
+      },
+    );
+    await annotate(`${nodes} nodes, none below or above the ground; ${curved} plans with curves or shifts; ${((100 * steep) / pieces).toFixed(1)}% of ${pieces} pieces over 35‰`);
+    // Guards against a degenerate generator (when written: 6,882 nodes, 137 plans with curves or shifts).
+    expect(nodes).toBeGreaterThan(4000);
+    expect(curved).toBeGreaterThan(50);
+  });
+});
+
+// ---------------------------------------------------------------------------
 
 function endOf(pieces: readonly PieceSpec[]): { node: NodeRef; heading: Heading } {
   const last = pieces[pieces.length - 1];
@@ -738,8 +919,29 @@ function staysOnLand(terrain: Terrain, pieces: readonly PieceSpec[]): boolean {
   });
 }
 
-/** Structural facts every non-empty plan must satisfy, given the existing node heights by "q,r". */
-function checkShape(plan: TrackPlan, drag: Drag, existing: ReadonlyMap<string, readonly number[]> = new Map()): void {
+/**
+ * The ground under each node as the planner reads it: `ground` where it is defined, else the last defined
+ * value before, else the first after, else the start's height (off-map nodes).
+ */
+function groundUnder(nodes: readonly NodeRef[], ground: (q: number, r: number) => number | undefined): number[] {
+  const known = nodes.map((n) => ground(n.q, n.r));
+  let last = known.find((g) => g !== undefined) ?? nodes[0]?.zMm ?? 0;
+  return known.map((g) => {
+    last = g ?? last;
+    return last;
+  });
+}
+
+/**
+ * Structural facts every non-empty plan must satisfy, given the existing node heights by "q,r" and the
+ * ground (the flat maps' 20 m by default, where following the ground is the plain split of the height change).
+ */
+function checkShape(
+  plan: TrackPlan,
+  drag: Drag,
+  existing: ReadonlyMap<string, readonly number[]> = new Map(),
+  ground: (q: number, r: number) => number | undefined = () => Z,
+): void {
   const first = plan.pieces[0];
   expect(first?.from).toEqual(drag.from);
   let at = drag.from;
@@ -756,15 +958,18 @@ function checkShape(plan: TrackPlan, drag: Drag, existing: ReadonlyMap<string, r
   expect(plan.lengthMm).toBe(length);
   const endZ = plan.snapped ? plan.snapped.zMm : drag.from.zMm + drag.dzMm;
   expect(plan.end?.node.zMm).toBe(endZ);
-  // Heights: the start, the end and every node the plan shares with existing track are pins, and the rise
-  // between consecutive pins follows the largest-remainder split by length. Every other node keeps 6.5 m or
-  // more from the existing heights at its (q, r), measured from the line by length from the last pin to the end.
+  // Heights: each node is the ground plus an offset. The start, the end and every node the plan shares with
+  // existing track are pins, and the offset's change between consecutive pins follows the largest-remainder
+  // split by length. Every other node keeps 6.5 m or more from the existing heights at its (q, r), measured
+  // from the ground plus the offset on the line by length from the last pin to the end.
   const nodes = [drag.from, ...plan.pieces.map((p) => endOf([p]).node)];
+  const g = groundUnder(nodes, ground);
   const lengths = plan.pieces.map((p) => lengthOf([p]));
-  const rises = plan.pieces.map((p) => p.z1Mm - p.from.zMm);
   const cum = lengths.reduce((acc, l) => [...acc, (acc[acc.length - 1] ?? 0) + l], [0]);
   const last = nodes.length - 1;
   const zOf = (i: number) => nodes[i]?.zMm ?? Number.NaN;
+  const offsetOf = (i: number) => zOf(i) - (g[i] ?? Number.NaN);
+  const steps = plan.pieces.map((_, i) => offsetOf(i + 1) - offsetOf(i));
   const pins = [0];
   for (let i = 1; i < last; i++) {
     const n = nodes[i];
@@ -775,14 +980,14 @@ function checkShape(plan: TrackPlan, drag: Drag, existing: ReadonlyMap<string, r
     }
     const p = pins[pins.length - 1] ?? 0;
     const span = (cum[last] ?? 0) - (cum[p] ?? 0);
-    const ref = zOf(p) * span + (zOf(last) - zOf(p)) * ((cum[i] ?? 0) - (cum[p] ?? 0));
+    const ref = ((g[i] ?? 0) + offsetOf(p)) * span + (offsetOf(last) - offsetOf(p)) * ((cum[i] ?? 0) - (cum[p] ?? 0));
     for (const h of heights) expect(Math.abs(h * span - ref)).toBeGreaterThanOrEqual(MIN_HEIGHT_SEPARATION_MM * span);
   }
   pins.push(last);
   for (let k = 1; k < pins.length; k++) {
     const a = pins[k - 1] ?? 0;
     const b = pins[k] ?? 0;
-    expect(rises.slice(a, b)).toEqual(apportionMm(zOf(b) - zOf(a), lengths.slice(a, b)));
+    expect(steps.slice(a, b)).toEqual(apportionMm(offsetOf(b) - offsetOf(a), lengths.slice(a, b)));
   }
   expect(plan.label).toMatch(/^(Straight|Shift|R (60|90|120|180|240|360) m) · \d+ km\/h · \d+\.\d%$/);
   if (plan.snapped) expect(plan.end?.node).toEqual(plan.snapped);

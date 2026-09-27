@@ -3,6 +3,7 @@ import { samplePiece } from "../../core/geometry/sample";
 import { type NetworkNode, type NetworkPiece, type NetworkView, nearestNode, toWorld } from "../../core/sim/api";
 import { type IsoView, worldToScreen } from "../camera/isoMath";
 import { simToWorld } from "../coords";
+import { TRACK_RAIL_TOP_M } from "../track/trackGeometry";
 
 /**
  * Construction picking (architecture "Picking"), in the documented order
@@ -23,8 +24,12 @@ export const TRACK_PICK_RADIUS_PX = 10;
  * of ground away from its foot, so 60 m covers track up to about 40 m high.
  */
 export const PICK_SEARCH_RADIUS_M = 60;
-/** Height above the track height that picking aims at (about the rail tops). */
-const PICK_LIFT_M = 0.3;
+/**
+ * Height above the track height that picking aims at: just under the drawn
+ * rail tops (0.4 m), so it follows the render lift and picks track where it
+ * is drawn. Sim heights are never lifted.
+ */
+export const PICK_LIFT_M = TRACK_RAIL_TOP_M - 0.05;
 const CENTRELINE_SAGITTA_M = 0.1;
 
 export type ScreenPick =

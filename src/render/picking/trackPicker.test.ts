@@ -3,7 +3,7 @@ import { Vector3 } from "three";
 import { createSim, toWorld } from "../../core/sim/api";
 import { ISO_PITCH_RAD, type IsoView, worldToScreen } from "../camera/isoMath";
 import { simToWorld } from "../coords";
-import { NODE_PICK_RADIUS_PX, TRACK_PICK_RADIUS_PX, pickTrack } from "./trackPicker";
+import { NODE_PICK_RADIUS_PX, PICK_LIFT_M, TRACK_PICK_RADIUS_PX, pickTrack } from "./trackPicker";
 
 function setup() {
   const sim = createSim({ terrain: { seed: "d3-pick", columns: 80, rows: 60 } });
@@ -31,7 +31,7 @@ describe("track picker", () => {
   it("picks an existing node within 14 px of where it is drawn", () => {
     const { sim, view } = setup();
     const p = toWorld({ q: 14, r: 20 });
-    const s = screenOf(view, p.x, p.y, 3.3);
+    const s = screenOf(view, p.x, p.y, 3 + PICK_LIFT_M);
     const pick = pickTrack(sim.network(), view, s.x + NODE_PICK_RADIUS_PX - 1, s.y, { x: p.x, y: p.y });
     expect(pick?.kind).toBe("node");
     if (pick?.kind === "node") expect([pick.node.q, pick.node.r, pick.node.kind]).toEqual([14, 20, "buffer"]);
@@ -41,7 +41,7 @@ describe("track picker", () => {
     const { sim, view } = setup();
     const a = toWorld({ q: 11, r: 20 });
     // 2.2 m along the piece from (11, 20) and 9 px off it: outside both nodes' 14 px, within the centreline's 10 px.
-    const s = screenOf(view, a.x + 2.2, a.y, 3.3);
+    const s = screenOf(view, a.x + 2.2, a.y, 3 + PICK_LIFT_M);
     const pick = pickTrack(sim.network(), view, s.x, s.y + TRACK_PICK_RADIUS_PX - 1, { x: a.x + 2.2, y: a.y });
     expect(pick?.kind).toBe("piece");
     if (pick?.kind === "piece") expect([pick.node.q, pick.node.r]).toEqual([11, 20]);
@@ -50,7 +50,7 @@ describe("track picker", () => {
   it("measures on screen at the track's height, so elevated track picks where it is drawn", () => {
     const { sim, view } = setup();
     const p = toWorld({ q: 2, r: 40 });
-    const drawn = screenOf(view, p.x, p.y, 12.3);
+    const drawn = screenOf(view, p.x, p.y, 12 + PICK_LIFT_M);
     // The terrain hit under that pixel lies well south of the node's foot; the search radius covers it.
     const pick = pickTrack(sim.network(), view, drawn.x, drawn.y, { x: p.x, y: p.y - 17 });
     expect(pick?.kind).toBe("node");

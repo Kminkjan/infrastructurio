@@ -159,7 +159,10 @@ export interface ToolCtx {
   planTrack(drag: Drag): TrackPlan;
   /** The memoized `sim.preview` (LRU of 16 keyed by network revision + command key). */
   preview(cmd: Command): Result;
-  /** Terrain height at a lattice node in integer mm; undefined off the map. */
+  /**
+   * Ground height at a lattice node in integer mm (the terrain, or the water
+   * surface over a lower bed: the planner's `groundMmAt`); undefined off the map.
+   */
   groundZmm(q: number, r: number): number | undefined;
   readonly settings: ToolSettings;
 }

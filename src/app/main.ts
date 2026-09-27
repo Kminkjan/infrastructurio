@@ -124,7 +124,15 @@ const trackView = new TrackView({
   requestFrame: () => scheduler.requestFrame("rebuild"),
   now: () => performance.now(),
 });
-const groundM = (x: number, y: number): number | undefined => sampleTerrainHeightM(terrain, x, y);
+const waterLevelM = terrain.waterLevelDm / 10;
+/**
+ * The surface under the ghost's drop lines and end-height tags: the terrain, or the water plane over a lower bed,
+ * matching the tool's ground at nodes (`groundMmAt`), so a tag over water reads the height above the water.
+ */
+const groundM = (x: number, y: number): number | undefined => {
+  const h = sampleTerrainHeightM(terrain, x, y);
+  return h === undefined ? undefined : Math.max(h, waterLevelM);
+};
 const ghost = new GhostView(viewport, groundM);
 const highlight = new HighlightView();
 const flash = new FlashView(reducedMotion);

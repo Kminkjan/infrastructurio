@@ -1,5 +1,5 @@
 import { Color } from "three";
-import { type TrackCentreline, type TrackFrame, sampleCentreline } from "./trackGeometry";
+import { TRACK_RAIL_TOP_M, type TrackCentreline, type TrackFrame, sampleCentreline } from "./trackGeometry";
 
 /**
  * Construction overlays as data (art direction "Overlays and construction
@@ -11,8 +11,8 @@ import { type TrackCentreline, type TrackFrame, sampleCentreline } from "./track
 
 /** Ribbon half width: the sleeper length, so the ghost reads as a track. */
 export const RIBBON_HALF_WIDTH_M = 1.3;
-/** Height of the ribbon above the track height (rail tops are at 0.35 m with the lift). */
-export const RIBBON_LIFT_M = 0.4;
+/** Height of the ribbon above the track height: 5 cm over the drawn rail tops (0.5 m with the 0.15 m lift). */
+export const RIBBON_LIFT_M = TRACK_RAIL_TOP_M + 0.05;
 /** Ghost sampling is coarser than the track's: 5 cm is invisible on a translucent ribbon. */
 export const RIBBON_MAX_SAGITTA_M = 0.05;
 /** Invalid ghosts are dashed: 3 m on, 2 m off along the plan. */

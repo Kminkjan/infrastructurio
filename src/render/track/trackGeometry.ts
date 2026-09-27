@@ -18,8 +18,10 @@ import { palette } from "../art/palette";
  * - sleepers: 2.6 × 0.14 × 0.24 m boxes every 0.9 m (evenly spread per piece);
  * - rails: 0.11 × 0.16 m at u = ±0.817 m, on the sleepers.
  *
- * Everything sits `TRACK_LIFT_M` above the track height, render-only, so the
- * ballast top never z-fights terrain it lies on. Colours come from the
+ * Everything sits `TRACK_LIFT_M` above the track height, render-only (sim
+ * heights never change), so the ballast top never z-fights terrain it lies on
+ * and the rails stay visible where the terrain bulges between nodes (see the
+ * constant). Colours come from the
  * palette through `THREE.Color` (linear). Positions and normals are written
  * in three's world space through the same mapping as `coords.ts`
  * (x, z, −y), inlined in `pushVertex` so the builders allocate no vectors.
@@ -29,8 +31,19 @@ import { palette } from "../art/palette";
 export const TRACK_MAX_SAGITTA_M = 0.02;
 /** Largest angle one chord may span, radians (5°). */
 export const TRACK_MAX_CHORD_RAD = (5 * Math.PI) / 180;
-/** Render-only lift of the whole track above its height, metres. */
-export const TRACK_LIFT_M = 0.05;
+/**
+ * Render-only lift of the whole track above its height, metres. Track follows
+ * the ground at its nodes (D3), but between nodes the lattice-triangle terrain
+ * can rise above a piece's straight height line, most across the slope at the
+ * rails and ballast edges. 0.15 m was chosen from a 2026-09-27 measurement of
+ * 3,000 ground-level plans on the diorama map (ADR 0010, D3 ground-following
+ * finding): on straights it leaves 0.007% (primary) and 0.055% (secondary) of
+ * rail-top samples under the terrain, against 0.27% and 0.26% at the former
+ * 0.05 m, while the 0.35 m deep ballast still meets flat ground with its
+ * shoulders 0.2 m below the surface. Long curves and shifts, whose interiors
+ * the planner cannot shape, stay outside what a lift can fix.
+ */
+export const TRACK_LIFT_M = 0.15;
 
 export const BALLAST_TOP_HALF_M = 1.6;
 export const BALLAST_BASE_HALF_M = 2.2;
@@ -46,6 +59,9 @@ export const SLEEPER_PITCH_M = 0.9;
 export const RAIL_WIDTH_M = 0.11;
 export const RAIL_HEIGHT_M = 0.16;
 export const RAIL_OFFSET_M = 0.817;
+
+/** Where the rail tops are drawn above the track height, lift included (0.45 m): overlays and picking key off it. */
+export const TRACK_RAIL_TOP_M = TRACK_LIFT_M + SLEEPER_HEIGHT_M + RAIL_HEIGHT_M;
 
 /** A piece's centreline: prims in sim plan metres (from → to) and the end heights. */
 export interface TrackCentreline {

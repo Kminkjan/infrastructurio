@@ -3,6 +3,9 @@ import { MeshLambertMaterial, ShaderLib } from "three";
 import { type PieceSpec, resolvePiece } from "../../core/sim/api";
 import { createArtUniforms, createTrackMaterials } from "../art/materials";
 import type { ShaderSource } from "../art/shaderChunks/chunk";
+import { PICK_LIFT_M } from "../picking/trackPicker";
+import { RIBBON_LIFT_M } from "./ghostGeometry";
+import { RING_LIFT_M } from "./SnapRing";
 import {
   BALLAST_BASE_HALF_M,
   BALLAST_DEPTH_M,
@@ -13,6 +16,7 @@ import {
   SLEEPER_LENGTH_M,
   SLEEPER_WIDTH_M,
   TRACK_LIFT_M,
+  TRACK_RAIL_TOP_M,
   type TrackCentreline,
   type TrackMeshData,
   buildTrackMeshes,
@@ -118,6 +122,17 @@ describe("track meshes", () => {
     const striped = [...(ballast.stripe ?? [])].filter((v) => v === 1).length;
     expect(striped).toBe(4);
     expectWindingMatchesNormals(ballast);
+  });
+
+  it("stacks the render-only lifts: ballast top, pick aim, rail tops, ghost ribbon, snap ring", () => {
+    // The lift keeps the ballast's shoulders in flat ground it lies on (no visible gap under them) …
+    expect(TRACK_LIFT_M).toBeLessThan(BALLAST_DEPTH_M);
+    // … and everything aimed or drawn over the track follows it, so picks land on the drawn rails and the
+    // overlays stay above them.
+    expect(TRACK_RAIL_TOP_M).toBeCloseTo(TRACK_LIFT_M + SLEEPER_HEIGHT_M + RAIL_HEIGHT_M, 12);
+    const stack = [TRACK_LIFT_M, PICK_LIFT_M, TRACK_RAIL_TOP_M, RIBBON_LIFT_M, RING_LIFT_M];
+    for (let i = 1; i < stack.length; i++) expect(stack[i], `lift ${i}`).toBeGreaterThan(stack[i - 1] ?? Infinity);
+    expect(stack.map((v) => Math.round(v * 100) / 100)).toEqual([0.15, 0.4, 0.45, 0.5, 0.6]);
   });
 
   it("places 2.6 × 0.14 × 0.24 m sleepers about every 0.9 m", () => {

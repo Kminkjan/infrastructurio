@@ -2,6 +2,7 @@ import { BufferAttribute, BufferGeometry, CircleGeometry, Group, Mesh, MeshBasic
 import { toWorld } from "../../core/sim/api";
 import { palette } from "../art/palette";
 import { simToWorld } from "../coords";
+import { RIBBON_LIFT_M } from "./ghostGeometry";
 
 /**
  * The hover snap ring (issue #67 "Tool and input"): a screen-constant
@@ -16,8 +17,8 @@ export type SnapKind = "endpoint" | "track" | "node";
 
 /** Outer radius on screen, CSS px. */
 export const SNAP_RING_RADIUS_PX = 9;
-/** Height above the node at which the ring floats, metres (clears rails and ghost). */
-const RING_LIFT_M = 0.6;
+/** Height above the node at which the ring floats, metres: 0.1 m over the ghost ribbon, so it clears rails and ghost (0.6 m). */
+export const RING_LIFT_M = RIBBON_LIFT_M + 0.1;
 const SNAP_ORDER = 20;
 
 /** A fork glyph in the unit circle: a stem and two diverging legs, as thin quads (x right, y up). */

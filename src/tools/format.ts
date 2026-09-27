@@ -70,6 +70,12 @@ export function formatHeight(mm: number): string {
   return `${sign}${text} m`;
 }
 
+/**
+ * Line 2's metrics. "Grade" is the steepest piece's, not the drag's average:
+ * track follows the ground, so a level drag over a hill still shows its
+ * flanks. "Min radius" is the tightest curve; "End height" is the end's
+ * height above the ground there.
+ */
 export function formatMetrics(plan: TrackPlan, endHeightMm: number): TooltipMetrics {
   const grade = steepestPermille(plan.pieces);
   return {

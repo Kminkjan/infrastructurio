@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { type Drag, type Sim, createSim, generateTerrain, heightDmAt } from "../core/sim/api";
+import { makeTerrain } from "../../tests/support/makeTerrain";
+import { type Drag, type Sim, type Terrain, generateTerrain, groundMmAt } from "../core/sim/api";
+import { createWorld } from "../core/sim/world";
 import { HINT_LINE } from "./format";
 import { pickAtNode } from "./picks";
 import { createPreviewMemo } from "./previewMemo";
@@ -9,16 +11,29 @@ import type { GhostModel, ToolCtx, ToolEffect, ToolEvent, ToolPick, TooltipModel
 const TERRAIN = { seed: "d3-tool", columns: 60, rows: 52 } as const;
 const STEP_MM = 1000;
 
+/** A `Sim` over a given terrain (tests only: `createSim` generates its terrain from a seed). */
+function simOn(terrain: Terrain): Sim {
+  const w = createWorld(terrain);
+  return {
+    tick: 0,
+    planTrack: (drag) => w.plan(drag),
+    preview: (cmd) => w.run(cmd, false),
+    execute: (cmd) => w.run(cmd, true),
+    network: () => w.network(),
+  };
+}
+
 /**
- * A scripted session: the real sim (stub planner), the memo, and an app loop
- * that executes and refreshes. `flat` reports the ground at height 0
- * everywhere, so plans that cross existing track keep its keys; otherwise the
- * seeded terrain's heights apply (the sim itself validates against its own
- * terrain either way, which D2 checks only for bounds).
+ * A scripted session: the real sim and planner, the memo, and an app loop
+ * that executes and refreshes. The ground is `groundMmAt` on the sim's own
+ * terrain, as the app wires it, so the tool's plan ends and the planner's
+ * ground-following inner nodes agree. `flat` puts the sim on flat dry ground
+ * at height 0 (no water), so heights read as whole steps; otherwise the
+ * seeded terrain applies.
  */
 function session({ flat = false }: { flat?: boolean } = {}) {
-  const sim: Sim = createSim({ terrain: TERRAIN });
-  const terrain = generateTerrain(TERRAIN);
+  const terrain = flat ? makeTerrain(TERRAIN.columns, TERRAIN.rows, () => 0, -100) : generateTerrain(TERRAIN);
+  const sim: Sim = simOn(terrain);
   const counts = { previews: 0 };
   const drags: Drag[] = [];
   const memo = createPreviewMemo(
@@ -28,10 +43,7 @@ function session({ flat = false }: { flat?: boolean } = {}) {
     },
     () => sim.network().rev,
   );
-  const groundZmm = (q: number, r: number): number | undefined => {
-    const h = heightDmAt(terrain, { q, r });
-    return h === undefined ? undefined : flat ? 0 : h * 100;
-  };
+  const groundZmm = (q: number, r: number): number | undefined => groundMmAt(terrain, { q, r });
   const ctx = (): ToolCtx => ({
     network: sim.network(),
     planTrack: (drag) => {
