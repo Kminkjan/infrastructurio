@@ -48,8 +48,6 @@ export interface ToolPick {
    * for a free node (the planner snaps it), the exact node position otherwise.
    */
   readonly pointMm: PlanPointMm;
-  /** Endpoint only: the heading that continues the existing track out of the buffer. */
-  readonly continueHeading?: Heading;
   /** Track only: the piece under the pointer. */
   readonly pieceKey?: PieceKey;
 }

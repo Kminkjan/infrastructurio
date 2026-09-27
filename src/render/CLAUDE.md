@@ -3,8 +3,8 @@
 Status 2026-09-26: `coords.ts`, `camera/`, `core/`, `terrain/` and `art/` (+ tests) exist
 (D1: slices R0–R1); D11a adds `scenery/`, `labels/`, `camera/bookmarks.ts` and the
 art pipeline (`AssetRegistry`, `materials`, shader chunks, vignette, tweak panel) for the
-static diorama (R3; Look Gate A held 2026-09-26, partial: legibility pending). Status 2026-09-27, D3 branch
-`codex/d3-construction-tool`: `track/` (track meshes behind `TrackBatch`, the ghost, rejection
+static diorama (R3; Look Gate A held 2026-09-26, partial: legibility pending). Status 2026-09-27, D3
+(arriving with PR #82): `track/` (track meshes behind `TrackBatch`, the ghost, rejection
 highlight, undo flash, snap ring), `picking/trackPicker.ts`, three track materials and the
 `trackStripe` chunk (R2, R4 presentation); `CameraController` attaches no listeners, since
 `src/app/InputRouter.ts` owns input and offers gestures to the camera first. `src/app/main.ts`

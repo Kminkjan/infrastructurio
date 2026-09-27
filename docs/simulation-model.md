@@ -5,10 +5,11 @@ simulation core (`src/core`). **Implemented:** the lattice
 ([`src/core/lattice.ts`](../src/core/lattice.ts), 9 test cases in
 [`lattice.test.ts`](../src/core/lattice.test.ts)) and, from D1, the integer utilities and
 terrain (§1, §7), all guarded by the boundary test in
-[`tests/architecture.test.ts`](../tests/architecture.test.ts). From D2 (2026-09-26, branch
-`codex/d2-track-model`): templates, pieces and keys (§5, §6), the validator for the D2-owned
-codes, clearance and history (§9, §14), a first `derive` (§10) and the first `Sim` commands
-(§2). From D3's core half (2026-09-27, branch `codex/d3-planner`): the planner (§8).
+[`tests/architecture.test.ts`](../tests/architecture.test.ts). From D2 (2026-09-26, merged to
+`main`): templates, pieces and keys (§5, §6), the validator for the D2-owned codes, clearance
+and history (§9, §14), a first `derive` (§10) and the first `Sim` commands (§2). From D3
+(2026-09-27, arriving with [PR #82](https://github.com/Kminkjan/infrastructurio/pull/82)): the
+planner (§8).
 Everything else here is planned. Its numbers come from the owner-approved M4 plan
 (2026-09-26) and are proposed in
 ADRs [0010](decisions/0010-triangular-lattice-track-geometry.md),
@@ -54,7 +55,7 @@ Module paths are relative to `src/core/`. Tracking keys D1–D13 come from
 | Static diorama scenery | `scenarios/` | — | D11a | **Implemented** in D11a: seeded, integer-only layout for the lookdev spike (no sim behaviour), 21 test cases with a golden hash |
 | Pieces and templates | `geometry/templates.ts`, `piece.ts`, `sample.ts` | S2 | D2 | **Implemented** in D2: 12 straights, 720 oriented curves, 24 shifts; closure and reachability tested ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d2-track-model)) |
 | Authored state, validation, clearance, history | `track/`, `geometry/clearance.ts` | S3 | D2, D4 | **Implemented** in D2 for the 11 D2-owned codes; grade and terrain/structure rules (D4) are ordered placeholders that pass |
-| Planner | `track/planner.ts` | S4 | D3 | **Implemented** in D3's core half (2026-09-27, branch `codex/d3-planner`): one-bend, shift and two-bend fits, magnetism, precision, elevation (pinned to existing node heights on `codex/d3-construction-tool`); 48 test cases (§8) |
+| Planner | `track/planner.ts` | S4 | D3 | **Implemented** in D3 (2026-09-27, PR #82): one-bend, shift and two-bend fits, magnetism, precision, elevation (pinned to existing node heights); 48 test cases (§8) |
 | Derived network, entity commands | `network/derive.ts`, `graph.ts` | S5 | D2, D5–D7 | **Partial**: D2's `derive` (through and buffer nodes, sections split at buffers); junctions and entities planned |
 | Pathfinding | `network/pathfind.ts` | S6 | D8 | Planned |
 | Trains and movement | `trains/` | S7 | D8 | Planned |
@@ -326,10 +327,11 @@ and its [version 2 note](decisions/0010-triangular-lattice-track-geometry.md#fin
 `planTrack(drag)` is pure. It turns drag input into a `TrackPlan`: resolved `PieceSpec[]`,
 new/reused counts and a label. `build-track` then carries those pieces.
 
-**Status 2026-09-27 (automated, D3 core branch `codex/d3-planner`):** implemented in
+**Status 2026-09-27 (automated, D3, PR #82):** implemented in
 [`track/planner.ts`](../src/core/track/planner.ts), with 48 test cases in
 [`planner.test.ts`](../src/core/track/planner.test.ts) (a 23-case drag table, ranking,
-elevation and height-pinning tests, seeded properties) and a planner measurement in
+elevation and height-pinning tests, seeded properties), a brute-force two-bend oracle in
+[`planner.twoBend.test.ts`](../src/core/track/planner.twoBend.test.ts), and a planner measurement in
 [`sim/perf.test.ts`](../src/core/sim/perf.test.ts). The choices this section left open are
 under "As built" below; numbers and limits are in the
 [ADR 0010 D3 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-d3-planner).

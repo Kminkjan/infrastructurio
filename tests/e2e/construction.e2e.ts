@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { dragBetween, findDryRun, lookAtNode, nodeAtOffset, nodeScreen, openDiorama, snapshot, undoToEmpty } from "./hook";
+import { cameraView, dragBetween, findDryRun, lookAtNode, nodeAtOffset, nodeScreen, openDiorama, snapshot, undoToEmpty } from "./hook";
 
 /**
  * D3 construction e2e (agent evidence: synthetic input through the real
@@ -68,9 +68,138 @@ test("builds from the keyboard: 1, arrows, Enter, arrows, Enter", async ({ page 
   await expect(page.getByTestId("construction-tooltip")).toContainText("Pieces: 5 new, 0 reused");
   await page.keyboard.press("Enter");
   expect((await snapshot(page)).pieces).toBe(5);
+  // With precision held (⌥ on macOS, Ctrl elsewhere) the arrows and Enter still move and commit the plan.
+  const precisionKey = (await page.evaluate(() => /mac/i.test(navigator.platform))) ? "Alt" : "Control";
+  await page.keyboard.down(precisionKey);
+  for (let i = 0; i < 3; i++) await page.keyboard.press("ArrowRight");
+  await expect(page.getByTestId("construction-tooltip")).toContainText("Precision: Straight");
+  await expect(page.getByTestId("construction-tooltip")).toContainText("Pieces: 3 new, 0 reused");
+  await page.keyboard.press("Enter");
+  await page.keyboard.up(precisionKey);
+  expect((await snapshot(page)).pieces).toBe(8);
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
   await undoToEmpty(page);
+});
+
+test("the keyboard cursor keeps its target while the view follows it, with the mouse resting on the canvas", async ({ page }) => {
+  await openDiorama(page);
+  const { q, r } = await findDryRun(page, 34, 0.3);
+  await lookAtNode(page, q + 4, r, 6);
+  const start = await nodeScreen(page, q, r);
+  await page.mouse.move(start.x, start.y);
+  await page.keyboard.press("1");
+  await page.mouse.move(start.x + 1, start.y);
+  await page.keyboard.press("Enter");
+  expect((await snapshot(page)).phase).toBe("anchored");
+  const v0 = await cameraView(page);
+  // 30 steps east at 6 ppm (30 px a step) carry the cursor past the 80 px margin, so the camera pans after it.
+  // The mouse stays where it is: those pans must not hand the target back to it.
+  for (let i = 0; i < 30; i++) await page.keyboard.press("ArrowRight");
+  await expect.poll(async () => (await cameraView(page)).x).not.toBe(v0.x);
+  await page.waitForTimeout(300);
+  expect((await snapshot(page)).cursor).toBe(true);
+  await expect(page.getByTestId("construction-tooltip")).toContainText("Pieces: 30 new, 0 reused");
+  await page.keyboard.press("Enter");
+  const s = await snapshot(page);
+  expect(s.pieces).toBe(30);
+  const ends = await page.evaluate(
+    ({ q, r }) => (window.__diorama as unknown as { network(): { nodes: { q: number; r: number; kind: string }[] } }).network().nodes.filter((n) => n.kind === "buffer" && n.r === r).map((n) => n.q - q),
+    { q, r },
+  );
+  expect(ends.sort((a, b) => a - b)).toEqual([0, 30]);
+  // A real pointer move takes the target back.
+  expect((await snapshot(page)).cursor).toBe(true);
+  await page.mouse.move(start.x + 40, start.y + 20, { steps: 4 });
+  expect((await snapshot(page)).cursor).toBe(false);
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await undoToEmpty(page);
+});
+
+test("the end-height tag and the cursor's tooltip follow the camera, and rest with it", async ({ page }) => {
+  await openDiorama(page);
+  const { q, r } = await findDryRun(page, 8, 0.3);
+  await lookAtNode(page, q + 4, r, 6);
+  const start = await nodeScreen(page, q, r);
+  await page.mouse.move(start.x, start.y);
+  await page.keyboard.press("1");
+  await page.mouse.move(start.x + 1, start.y);
+  await page.keyboard.press("Enter");
+  // The keyboard cursor holds the plan (so a pan re-plans nothing); six steps up make the ghost elevated.
+  for (let i = 0; i < 6; i++) await page.keyboard.press("ArrowRight");
+  for (let i = 0; i < 6; i++) await page.keyboard.press("PageUp");
+  const tag = page.locator(".ghost-height-tag").nth(1);
+  await expect(tag).toBeVisible();
+  await expect(tag).toHaveText("+6 m");
+  const tagAt = () => tag.evaluate((el) => el.style.transform);
+  const tipAt = () => page.evaluate(() => document.querySelector<HTMLElement>("#hud")?.style.getPropertyValue("--hud-pointer-x") ?? "");
+  const tag0 = await tagAt();
+  const tip0 = await tipAt();
+  // WASD pans in Track too.
+  await page.keyboard.down("d");
+  await page.waitForTimeout(300);
+  await page.keyboard.up("d");
+  await expect.poll(tagAt).not.toBe(tag0);
+  await expect.poll(tipAt).not.toBe(tip0);
+  expect((await snapshot(page)).cursor).toBe(true);
+  // Once the camera rests (the pan eases out), so do they.
+  let last = "";
+  await expect
+    .poll(async () => {
+      const v = await cameraView(page);
+      const now = `${v.x},${v.z}`;
+      const settled = now === last;
+      last = now;
+      return settled;
+    }, { intervals: [200] })
+    .toBe(true);
+  const tag1 = await tagAt();
+  const tip1 = await tipAt();
+  await page.waitForTimeout(300);
+  expect(await tagAt()).toBe(tag1);
+  expect(await tipAt()).toBe(tip1);
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  expect((await snapshot(page)).pieces).toBe(0);
+});
+
+test("Enter reaches the track tool after the toolbar was used, and Tab + Enter still works on the toolbar", async ({ page }) => {
+  await openDiorama(page);
+  const { q, r } = await findDryRun(page, 8, 0.3);
+  await lookAtNode(page, q + 4, r, 6);
+  // Keyboard: focus Track and press Enter, move the cursor with the arrows, then Enter starts and Enter commits.
+  const trackButton = page.getByRole("button", { name: /^Track/ });
+  await trackButton.focus();
+  await page.keyboard.press("Enter");
+  expect((await snapshot(page)).tool).toBe("track");
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("Enter");
+  let s = await snapshot(page);
+  expect(s.tool).toBe("track");
+  expect(s.phase).toBe("anchored");
+  for (let i = 0; i < 4; i++) await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("Enter");
+  expect((await snapshot(page)).pieces).toBe(4);
+  // A button reached with Tab (focus moved, the cursor not used since) keeps its own Enter.
+  await page.getByRole("button", { name: "Undo" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("toast")).toContainText("Undone: removed 4 pieces");
+  s = await snapshot(page);
+  expect(s.pieces).toBe(0);
+  expect(s.tool).toBe("track");
+  // Pointer: clicking Track leaves focus where it was, so Enter starts a track at the node under the mouse.
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  expect((await snapshot(page)).tool).toBe("select");
+  await trackButton.click();
+  expect((await snapshot(page)).tool).toBe("track");
+  const at = await nodeScreen(page, q, r);
+  await page.mouse.move(at.x, at.y, { steps: 3 });
+  await page.keyboard.press("Enter");
+  s = await snapshot(page);
+  expect(s.tool).toBe("track");
+  expect(s.phase).toBe("anchored");
 });
 
 test("builds a closed loop by dragging, then undoes back to an empty network", async ({ page }) => {

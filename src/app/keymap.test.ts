@@ -49,6 +49,31 @@ describe("key routing", () => {
     expect(classifyKey(key("Enter", "Enter"), select)).toEqual({ kind: "camera" });
   });
 
+  it("keeps Enter, the arrows and the height keys while only the precision modifier is held", () => {
+    // macOS: ⌥ is precision.
+    expect(classifyKey(key("Enter", "Enter", { altKey: true }), precise)).toEqual({ kind: "enter" });
+    expect(classifyKey(key("ArrowRight", "ArrowRight", { altKey: true }), precise)).toEqual({ kind: "cursor", direction: "right" });
+    expect(classifyKey(key("PageUp", "PageUp", { altKey: true }), precise)).toEqual({ kind: "height", delta: 1 });
+    // ⌥] and ⌥[ type ‘ and “ on a US Mac; while precision is held the physical keys still step the height.
+    expect(classifyKey(key("‘", "BracketRight", { altKey: true }), precise)).toEqual({ kind: "height", delta: 1 });
+    expect(classifyKey(key("“", "BracketLeft", { altKey: true }), precise)).toEqual({ kind: "height", delta: -1 });
+    // Windows and Linux: Ctrl is precision.
+    expect(classifyKey(key("Enter", "NumpadEnter", { ctrlKey: true }), precise)).toEqual({ kind: "enter" });
+    expect(classifyKey(key("ArrowUp", "ArrowUp", { ctrlKey: true }), precise)).toEqual({ kind: "cursor", direction: "up" });
+    expect(classifyKey(key("[", "BracketLeft", { ctrlKey: true }), precise)).toEqual({ kind: "height", delta: -1 });
+    // A second modifier (AltGr is Ctrl+Alt; Cmd), or a modifier that is not the precision one, leaves them alone.
+    expect(classifyKey(key("Enter", "Enter", { ctrlKey: true, altKey: true }), precise)).toEqual({ kind: "camera" });
+    expect(classifyKey(key("ArrowUp", "ArrowUp", { metaKey: true, altKey: true }), precise)).toEqual({ kind: "camera" });
+    expect(classifyKey(key("Enter", "Enter", { altKey: true }), track)).toEqual({ kind: "camera" });
+  });
+
+  it("matches the height brackets by character, so other layouts keep those physical keys", () => {
+    // German QWERTZ: the keys at BracketRight and BracketLeft type "+" (the camera's zoom-in) and "ü".
+    expect(classifyKey(key("+", "BracketRight"), track)).toEqual({ kind: "camera" });
+    expect(classifyKey(key("ü", "BracketLeft"), track)).toEqual({ kind: "camera" });
+    expect(classifyKey(key("+", "BracketRight", { shiftKey: true }), track)).toEqual({ kind: "camera" });
+  });
+
   it("turns Q/E into end-heading steps only while precision is held; otherwise they rotate the camera", () => {
     expect(classifyKey(key("q", "KeyQ", { ctrlKey: true }), precise)).toEqual({ kind: "end-heading", delta: -1 });
     // ⌥E on macOS types a dead key; the physical code still matches.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Drag, type Sim, createSim, generateTerrain, heightDmAt, opposite } from "../core/sim/api";
+import { type Drag, type Sim, createSim, generateTerrain, heightDmAt } from "../core/sim/api";
 import { HINT_LINE } from "./format";
 import { pickAtNode } from "./picks";
 import { createPreviewMemo } from "./previewMemo";
@@ -154,6 +154,12 @@ describe("track tool: states", () => {
     const fx = t.drag([10, 10], [14, 10]);
     const exec = last(fx, "execute");
     expect(exec?.command.type).toBe("build-track");
+    // The refresh re-plans from the new end; its announcement leads with the build, so both are heard.
+    expect(last(fx, "announce")?.text).toBe(
+      `Built. Pieces: 4 new, 0 reused. Pieces: 0 new, 0 reused. Drag farther to lay track. ${HINT_LINE}`,
+    );
+    // Only once: the next view is announced on its own.
+    expect(last(t.move(16, 10), "announce")?.text).toMatch(/^Pieces: 2 new, 0 reused\. /);
     expect(t.sim.network().pieces.length).toBe(4);
     expect(t.state.phase).toBe("anchored");
     expect(t.state.anchor?.node).toMatchObject({ q: 14, r: 10 });
@@ -213,8 +219,6 @@ describe("track tool: states", () => {
     t.send({ type: "escape" });
     const end = t.pick(14, 10);
     expect(end.kind).toBe("endpoint");
-    const buffer = t.sim.network().nodes.find((n) => n.q === 14 && n.r === 10);
-    expect(end.continueHeading).toBe(buffer ? opposite(buffer.axis) : undefined);
     t.down(14, 10);
     const fx = t.move(18, 10);
     const drag = t.drags.at(-1);
@@ -238,6 +242,67 @@ describe("track tool: states", () => {
     expect(t.sim.network().pieces.length).toBe(10);
     expect(t.state.phase).toBe("idle");
     expect(t.state.anchor).toBeNull();
+    // Idle shows no plan: the committed ghost and its tooltip are cleared.
+    expect(ghostOf(released)).toBeNull();
+    expect(tooltipOf(released)).toBeNull();
+    expect(last(released, "announce")?.text).toBe("Built and joined the track at (16, 10). Pieces: 6 new, 0 reused.");
+  });
+
+  it("ends the chain after a precision plan that joined an existing buffer end", () => {
+    const t = session({ flat: true });
+    t.drag([16, 10], [20, 10]);
+    t.send({ type: "escape" });
+    // Precision turns magnetism off, so the planner reports no snap; the plan still ends on the buffer end.
+    t.send({ type: "precision", held: true });
+    t.down(10, 10);
+    const fx = t.move(16, 10);
+    expect(ghostOf(fx)?.valid).toBe(true);
+    expect(t.state.plan?.snapped).toBeNull();
+    expect(t.state.plan?.end).toMatchObject({ node: { q: 16, r: 10, zMm: 0 }, heading: 0 });
+    const released = t.up(16, 10);
+    expect(last(released, "execute")).toBeDefined();
+    expect(t.sim.network().pieces.length).toBe(10);
+    expect(t.state.phase).toBe("idle");
+    expect(t.state.anchor).toBeNull();
+  });
+
+  it("keeps chaining after a plan that reached a buffer end along its own track", () => {
+    const t = session({ flat: true });
+    t.drag([10, 10], [14, 10]);
+    t.send({ type: "escape" });
+    // From (6, 10) across the run to its far end: the last pieces are reused, so the plan leaves (14, 10) outward.
+    t.send({ type: "precision", held: true });
+    t.down(6, 10);
+    t.move(14, 10);
+    expect(t.state.plan?.end).toMatchObject({ node: { q: 14, r: 10, zMm: 0 }, heading: 0 });
+    t.up(14, 10);
+    expect(t.sim.network().pieces.length).toBe(8);
+    expect(t.state.phase).toBe("anchored");
+    expect(t.state.anchor).toEqual({ node: { q: 14, r: 10, zMm: 0 }, heading: 0 });
+  });
+
+  it("returns to Idle when an undo removes the end a chain leaves from", () => {
+    const t = session();
+    t.drag([10, 10], [14, 10]);
+    expect(t.state.anchor?.heading).toBe(0);
+    t.move(17, 10);
+    t.sim.execute({ type: "undo" });
+    const fx = t.send({ type: "refresh" });
+    expect(t.sim.network().pieces.length).toBe(0);
+    expect(t.state.phase).toBe("idle");
+    expect(t.state.anchor).toBeNull();
+    expect(ghostOf(fx)).toBeNull();
+    expect(tooltipOf(fx)).toBeNull();
+    expect(last(fx, "announce")?.text).toMatch(/^Track ended/);
+    // A click now starts a new track instead of building from the vanished end.
+    t.down(17, 10);
+    t.up(17, 10);
+    expect(t.all.filter((e) => e.type === "execute")).toHaveLength(1);
+    expect(t.state.anchor).toEqual({ node: t.pick(17, 10).node, heading: undefined });
+    // A redo brings the track back; the tool stays where the user left it.
+    t.sim.execute({ type: "redo" });
+    t.send({ type: "refresh" });
+    expect(t.state.anchor?.node).toMatchObject({ q: 17, r: 10 });
   });
 });
 
@@ -392,6 +457,24 @@ describe("track tool: height, precision and keyboard", () => {
     t.send({ type: "radius-step", delta: 1 });
     t.send({ type: "end-heading-step", delta: 1 });
     expect(t.drags.length).toBe(before);
+  });
+
+  it("starts every activation with precision off; only a held modifier turns it back on", () => {
+    const t = session();
+    t.send({ type: "precision", held: true });
+    t.send({ type: "radius-step", delta: 1 });
+    t.send({ type: "deactivate" });
+    // The modifier was released while Track was inactive, so no precision event reached the tool.
+    t.send({ type: "activate" });
+    expect(t.state.precision).toBe(false);
+    t.down(10, 10);
+    t.move(14, 10);
+    expect(t.drags.at(-1)?.precision).toBeUndefined();
+    expect(t.drags.at(-1)?.magnetism).toBe(true);
+    expect(tooltipOf(t.all)?.precision).toBeNull();
+    // The chosen radius class is kept for the next time precision is held.
+    t.send({ type: "precision", held: true });
+    expect(t.drags.at(-1)?.precision).toEqual({ radiusM: 240 });
   });
 
   it("builds from the keyboard: arrows move the cursor, Enter starts and commits", () => {

@@ -126,7 +126,7 @@ export class TrackView {
     const lod = trackLodForPpm(ppm);
     if (lod === this.lod) return;
     this.lod = lod;
-    this.sleepers.object.visible = lod === "near";
+    this.sleepers.setShown(lod === "near");
     this.options.materials.stripe.uTrackStripe.value = lod === "far" ? 1 : 0;
   }
 

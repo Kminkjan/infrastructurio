@@ -7,7 +7,7 @@ commands. Status 2026-09-27: `lattice.ts`, `terrain.ts` and `util/` (+ tests) ex
 network) exist (D2); `scenarios/` (the static diorama layout and the Baltic name list) and
 terrain generator version 2 exist (D11a); `track/planner.ts`, the full planner behind
 `sim.planTrack` (one-bend, shift and two-bend fits, magnetism, precision, elevation),
-exists on the D3 core branch `codex/d3-planner` (2026-09-27); later slices add the rest
+exists (D3, 2026-09-27, arriving with PR #82); later slices add the rest
 ([simulation model](../../docs/simulation-model.md), [architecture](../../docs/architecture.md)).
 ADRs 0010 (lattice geometry), 0011 (signalling), 0012 (tick and determinism) and 0014
 (operator) are **Proposed**: their numbers are defaults to test, not owner decisions. The

@@ -8,7 +8,7 @@ import {
   MeshBasicMaterial,
   Vector3,
 } from "three";
-import { type NetworkView, type PieceKey, type PieceSpec, pieceFromKey, resolvePiece } from "../../core/sim/api";
+import { type NetworkPiece, type NetworkView, type PieceKey, type PieceSpec, pieceFromKey, resolvePiece } from "../../core/sim/api";
 import { cssColor, palette } from "../art/palette";
 import { type IsoView, worldToScreen } from "../camera/isoMath";
 import { simToWorld } from "../coords";
@@ -130,6 +130,11 @@ export class GhostView {
   private readonly drops: LineSegments;
   private readonly tags: HTMLDivElement[];
   private readonly tagAnchors: Vector3[] = [new Vector3(), new Vector3()];
+  /** Each tag's last written CSS px position; NaN forces the next write. */
+  private readonly tagPx: { x: number; y: number }[] = [
+    { x: Number.NaN, y: Number.NaN },
+    { x: Number.NaN, y: Number.NaN },
+  ];
   private tagsShown = false;
 
   constructor(
@@ -206,24 +211,38 @@ export class GhostView {
     marks.ends.forEach((end, i) => {
       const el = this.tags[i];
       const anchor = this.tagAnchors[i];
-      if (!el || !anchor) return;
+      const px = this.tagPx[i];
+      if (!el || !anchor || !px) return;
       el.textContent = heightTagText(end.aboveM);
       simToWorld(end.x, end.y, end.z, anchor);
+      px.x = Number.NaN;
+      px.y = Number.NaN;
     });
     for (const el of this.tags) el.style.display = this.tagsShown ? "block" : "none";
   }
 
-  /** Places the end-height tags over the ghost's ends; call after the camera moved while the ghost shows. */
+  /**
+   * Places the end-height tags over the ghost's ends: call after `set` and
+   * when the view moved. A tag's style is written (and its string built) only
+   * when its rounded screen position changed, so an unchanged view costs two
+   * projections and no allocation (render guide "Frame loop").
+   */
   updateTags(view: IsoView): void {
     if (!this.tagsShown) return;
     for (let i = 0; i < this.tags.length; i++) {
       const el = this.tags[i];
       const anchor = this.tagAnchors[i];
-      if (!el || !anchor) continue;
+      const px = this.tagPx[i];
+      if (!el || !anchor || !px) continue;
       tagWorld.copy(anchor);
       tagWorld.y += 1.2;
       worldToScreen(view, tagWorld, tagScreen);
-      el.style.transform = `translate(${Math.round(tagScreen.x)}px, ${Math.round(tagScreen.y)}px) translate(-50%, -100%)`;
+      const x = Math.round(tagScreen.x);
+      const y = Math.round(tagScreen.y);
+      if (x === px.x && y === px.y) continue;
+      px.x = x;
+      px.y = y;
+      el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -100%)`;
     }
   }
 
@@ -236,16 +255,39 @@ export class GhostView {
   }
 }
 
+/** Pieces by key, built once per network revision (a `NetworkView` is the same object until the revision changes). */
+const piecesByKey = new WeakMap<NetworkView, ReadonlyMap<PieceKey, NetworkPiece>>();
+
+function pieceIndex(network: NetworkView): ReadonlyMap<PieceKey, NetworkPiece> {
+  let index = piecesByKey.get(network);
+  if (!index) {
+    index = new Map(network.pieces.map((p) => [p.key, p]));
+    piecesByKey.set(network, index);
+  }
+  return index;
+}
+
 /** Existing pieces the current rejection names, in red. */
 export class HighlightView {
   readonly ribbons = new OverlayRibbons("rejection highlight");
+  private keys: readonly PieceKey[] = [];
+  private rev = -1;
 
   get group(): Group {
     return this.ribbons.group;
   }
 
+  /**
+   * Shows the pieces `keys` names in `network`. The tool sends this on every
+   * re-plan, mostly with no keys, so an empty set while nothing shows, or the
+   * same keys against the same revision, does no work.
+   */
   set(keys: readonly PieceKey[], network: NetworkView): void {
-    const known = new Map(network.pieces.map((p) => [p.key, p]));
+    if (keys.length === 0 && this.keys.length === 0) return;
+    if (network.rev === this.rev && sameKeys(keys, this.keys)) return;
+    this.keys = keys;
+    this.rev = network.rev;
+    const known = pieceIndex(network);
     const pieces: RibbonPiece[] = [];
     for (const key of keys) {
       const p = known.get(key);
@@ -257,6 +299,12 @@ export class HighlightView {
   dispose(): void {
     this.ribbons.dispose();
   }
+}
+
+function sameKeys(a: readonly PieceKey[], b: readonly PieceKey[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 }
 
 /**

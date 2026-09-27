@@ -9,7 +9,21 @@
  *   returns to Select.
  * - While Track is active: arrows move the keyboard lattice cursor (instead
  *   of panning; WASD still pans), Enter starts and commits, PgUp/PgDn and
- *   `]`/`[` step the height.
+ *   `]`/`[` step the height. They also work with the precision modifier held
+ *   (so a precision plan can be moved and committed from the keyboard), but
+ *   not with any other modifier. The brackets match by character (`key`), so
+ *   a layout that types something else on those physical keys keeps it
+ *   (German QWERTZ types "+", the camera's zoom-in, where US has `]`). Only
+ *   while precision is held do the physical keys count too: ⌥ changes the
+ *   character on macOS, and the camera ignores modified keys, so nothing is
+ *   taken from it. (Ctrl+PgUp/PgDn switch browser tabs on Windows and Linux,
+ *   so under Ctrl precision the brackets or Shift+wheel step the height.)
+ * - Enter and focused HUD buttons (`InputRouter`): a focused button keeps its
+ *   own Enter, so Tab + Enter still works on the toolbar, unless Track is
+ *   active and the arrows moved the lattice cursor since that button took
+ *   focus: then the user is working the cursor, and Enter starts or commits
+ *   the track. Toolbar buttons take no focus from a pointer click, so a
+ *   clicked Track or Undo button never captures the Enter meant for the tool.
  * - Precision is Ctrl, or ⌥ (Alt) on macOS. While it is held with Track
  *   active, Q/E turn the end heading instead of rotating the camera (the
  *   camera ignores modified keys anyway) and the wheel picks the radius
@@ -75,12 +89,14 @@ export function classifyKey(e: KeyInput, ctx: KeyContext): KeyAction {
     if (ctx.precision && !e.shiftKey && (e.code === "KeyQ" || e.code === "KeyE")) {
       return { kind: "end-heading", delta: e.code === "KeyE" ? 1 : -1 };
     }
-    if (!command && !e.altKey) {
+    // Only the precision modifier: Ctrl (Windows, Linux) or ⌥ (macOS), without the other or Cmd.
+    const precisionOnly = ctx.precision && !e.metaKey && e.ctrlKey !== e.altKey;
+    if ((!command && !e.altKey) || precisionOnly) {
       if (e.key === "Enter" || e.code === "NumpadEnter") return { kind: "enter" };
       const direction = ARROWS[e.key];
       if (direction) return { kind: "cursor", direction };
-      if (e.key === "PageUp" || e.code === "BracketRight" || e.key === "]") return { kind: "height", delta: 1 };
-      if (e.key === "PageDown" || e.code === "BracketLeft" || e.key === "[") return { kind: "height", delta: -1 };
+      if (e.key === "PageUp" || e.key === "]" || (precisionOnly && e.code === "BracketRight")) return { kind: "height", delta: 1 };
+      if (e.key === "PageDown" || e.key === "[" || (precisionOnly && e.code === "BracketLeft")) return { kind: "height", delta: -1 };
     }
   }
 

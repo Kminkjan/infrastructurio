@@ -18,6 +18,8 @@ export interface HookSnapshot {
   readonly closedSections: number;
   readonly tool: string;
   readonly phase: string;
+  /** True while the keyboard cursor, not the pointer, placed the track tool's target. */
+  readonly cursor: boolean;
   readonly canUndo: boolean;
   readonly canRedo: boolean;
   readonly toast: string | null;
@@ -29,7 +31,7 @@ interface DioramaHook {
   lookAtNode(q: number, r: number, ppm: number): void;
   nodeScreen(q: number, r: number, zMm?: number): ScreenPoint;
   network(): { readonly rev: number; readonly pieces: readonly unknown[]; readonly sections: readonly { readonly closed: boolean }[] };
-  tool(): { readonly active: string; readonly phase: string };
+  tool(): { readonly active: string; readonly phase: string; readonly cursor: boolean };
   hud(): { readonly canUndo: boolean; readonly canRedo: boolean; readonly toast: { readonly text: string } | null; readonly status: string };
   previewStats(): { readonly calls: number; readonly p95Ms: number; readonly maxMs: number; readonly memoHits: number; readonly memoMisses: number };
   readonly terrain: { readonly columns: number; readonly rows: number; readonly water: Uint8Array };
@@ -59,6 +61,7 @@ export async function snapshot(page: Page): Promise<HookSnapshot> {
       closedSections: n.sections.filter((s) => s.closed).length,
       tool: tool.active,
       phase: tool.phase,
+      cursor: tool.cursor,
       canUndo: hud.canUndo,
       canRedo: hud.canRedo,
       toast: hud.toast?.text ?? null,
@@ -114,6 +117,14 @@ export async function lookAtNode(page: Page, q: number, r: number, ppm: number):
   await page.evaluate(({ q, r, ppm }) => window.__diorama?.lookAtNode(q, r, ppm), { q, r, ppm });
   // Let the scheduler render the new view before reading screen positions.
   await page.waitForTimeout(150);
+}
+
+/** The camera's look-at target (world x, z), zoom and yaw step. */
+export async function cameraView(page: Page): Promise<{ x: number; z: number; ppm: number; yawStep: number }> {
+  return page.evaluate(() => {
+    const c = (window.__diorama as unknown as { camera: { ppm: number; yawStep: number; target: { x: number; z: number } } }).camera;
+    return { x: c.target.x, z: c.target.z, ppm: c.ppm, yawStep: c.yawStep };
+  });
 }
 
 /** Drags the real pointer from one node to another in small steps. */

@@ -328,14 +328,17 @@ type Triple = readonly [number, number, number];
 /**
  * Non-negative integer (x, y, z) with x·a + y·b + z·c = D, where b is not
  * parallel to a or c. When a and c are independent the solutions form one
- * line y ↦ (x(y), y, z(y)) with period |det(a, c)| ≤ 3 in y, and the length
- * x·la + y·lb + z·lc is affine in y, so the shortest lies at an end of the
- * feasible interval (ties: fewer straights before the first bend). When c = a
- * (an S-bend back onto the start heading) only x + z is fixed: both
- * placements, bends first and bends last, are returned. When c = −a (a
- * U-turn) the shortest is unique.
+ * line y ↦ (x(y), y, z(y)); its integer points recur with a period that
+ * divides |det(a, c)| ≤ 3 (the period is 1, not 3, when a, b and c are all
+ * secondary), so each end of the feasible interval is found by scanning at
+ * most |det| values of y inward from it. The length x·la + y·lb + z·lc is
+ * affine in y, so the shortest lies at one of those two ends (ties: fewer
+ * straights before the first bend). When c = a (an S-bend back onto the
+ * start heading) only x + z is fixed: both placements, bends first and bends
+ * last, are returned. When c = −a (a U-turn) the shortest is unique.
+ * Exported for the brute-force oracle test.
  */
-function solveThree(a: Axial, la: number, b: Axial, lb: number, c: Axial, lc: number, D: Axial): Triple[] {
+export function solveThree(a: Axial, la: number, b: Axial, lb: number, c: Axial, lc: number, D: Axial): Triple[] {
   const g = det(a, c);
   if (g === 0) {
     const ky = solve2(a, b, D);
@@ -365,9 +368,10 @@ function solveThree(a: Axial, la: number, b: Axial, lb: number, c: Axial, lc: nu
     else if (A < 0) return [];
   }
   if (lo > hi) return [];
+  const integral = (y: number): boolean => (P - y * Q) % g === 0 && (U - y * V) % g === 0;
   let first = -1;
   for (let y = lo; y < lo + period && y <= hi; y++) {
-    if ((P - y * Q) % g === 0 && (U - y * V) % g === 0) {
+    if (integral(y)) {
       first = y;
       break;
     }
@@ -377,7 +381,10 @@ function solveThree(a: Axial, la: number, b: Axial, lb: number, c: Axial, lc: nu
   const low = at(first);
   // Unbounded above only when x and z both grow with y, so length grows too.
   if (hi === Infinity) return [low];
-  const high = at(first + period * divFloor(hi - first, period));
+  // The last integral y, scanning down from hi: fewer than |det| steps, since `first` is integral.
+  let last = hi;
+  while (last > first && !integral(last)) last -= 1;
+  const high = at(last);
   const length = (s: Triple) => s[0] * la + s[1] * lb + s[2] * lc;
   const dl = length(low) - length(high);
   if (dl < 0 || (dl === 0 && low[0] <= high[0])) return [low];

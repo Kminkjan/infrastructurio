@@ -460,6 +460,24 @@ Proposed.
   - multi-height layouts beyond the constructed tests. D3 builds them only as level track
     6.5 m or more above other track (`auto` resolves to ground).
 
+## Findings (2026-09-27, D3 review: the two-bend solve)
+
+Recorded after the code review of [#82](https://github.com/Kminkjan/infrastructurio/pull/82);
+automated evidence only. It corrects the D3 planner section's two-bend sentence, which stays
+as written above.
+- **The period divides |det|; it is not |det| itself.** For each template pair the
+  non-negative solutions lie on one line, and the length is affine along it, so the shortest
+  fit sits at one end of the feasible interval. The first version stepped by |det| and could
+  miss that end. With three secondary headings (for example 1 → 3 → 5) every step is
+  feasible, so some 60° + 60° joins came out up to two straights (17.3 m) longer than the
+  shortest: D = 5a + 5c gave (2, 3, 2), 7 steps, instead of (0, 5, 0).
+- **Now:** `solveThree` scans at most |det| values inward from each end of the feasible
+  interval. A brute-force oracle over every turn pair (8,378 solvable cases,
+  [`planner.twoBend.test.ts`](../../src/core/track/planner.twoBend.test.ts)) checks the
+  shortest fit; it also caught the 1 → 11 → 9 triple.
+- **Not established:** whether the shorter joins change how port joins feel; that is the
+  owner's check.
+
 ## Revisit when
 
 - The D3 feel check finds construction unsatisfying for reasons that planner tuning, chained
@@ -494,3 +512,6 @@ Proposed.
 - 2026-09-27: D3 height-pinning findings added (inner nodes pinned to existing node heights
   within 6.5 m, the multi-height order, the per-position height index); status unchanged,
   still Proposed.
+- 2026-09-27: D3 review findings added (the two-bend solve's period divides |det| rather than
+  equalling it; a brute-force oracle now checks the shortest fit); status unchanged, still
+  Proposed.

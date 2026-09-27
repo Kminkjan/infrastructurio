@@ -12,7 +12,9 @@ import type { TrackMeshData } from "./trackGeometry";
  *   128 m chunk, rebuilt when the chunk's membership changes.
  *
  * `add`/`remove` record changes; `flush` applies what is deferred (chunk
- * rebuilds, bounds) once per batch of edits.
+ * rebuilds, bounds) once per batch of edits. `setShown` is the LOD switch;
+ * it is kept apart from emptiness, so a flush never shows a layer the LOD
+ * hid, and showing a layer never draws an empty batch.
  */
 export interface TrackBatch {
   readonly object: Object3D;
@@ -22,6 +24,8 @@ export interface TrackBatch {
   add(key: string, data: TrackMeshData): void;
   remove(key: string): void;
   flush(): void;
+  /** Shows or hides the whole layer (LOD); an empty layer draws nothing either way. */
+  setShown(shown: boolean): void;
   dispose(): void;
 }
 
@@ -46,6 +50,8 @@ export class BatchedTrackBatch implements TrackBatch {
   readonly mesh: BatchedMesh;
   private readonly ids = new Map<string, number>();
   private dirty = false;
+  /** The LOD switch; the mesh draws only when shown and non-empty. */
+  private shown = true;
 
   constructor(material: Material, name: string) {
     this.mesh = new BatchedMesh(INITIAL_INSTANCES, INITIAL_VERTICES, INITIAL_VERTICES * 2, material);
@@ -98,7 +104,7 @@ export class BatchedTrackBatch implements TrackBatch {
   flush(): void {
     if (!this.dirty) return;
     this.dirty = false;
-    this.mesh.visible = this.ids.size > 0;
+    this.syncVisible();
     // Stale bounds would cull or mis-pick the batch (render guide "GPU resources").
     if (this.ids.size > 0) {
       this.mesh.computeBoundingBox();
@@ -106,9 +112,19 @@ export class BatchedTrackBatch implements TrackBatch {
     }
   }
 
+  setShown(shown: boolean): void {
+    this.shown = shown;
+    this.syncVisible();
+  }
+
   dispose(): void {
     this.mesh.dispose();
     this.ids.clear();
+  }
+
+  /** An empty batch has no attributes yet: keep it out of the render, whatever the LOD says. */
+  private syncVisible(): void {
+    this.mesh.visible = this.shown && this.ids.size > 0;
   }
 
   /** Grows the shared buffers (doubling) until `vertices` and `indices` more fit. */
@@ -208,6 +224,11 @@ export class ChunkedTrackBatch implements TrackBatch {
       this.group.add(mesh);
       chunk.mesh = mesh;
     }
+  }
+
+  /** Each chunk mesh exists only while it has pieces, so the group alone carries the LOD switch. */
+  setShown(shown: boolean): void {
+    this.group.visible = shown;
   }
 
   dispose(): void {

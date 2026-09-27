@@ -270,7 +270,7 @@ and arcs of the `NetworkView` render prims. Curves are sampled through
 - **The far-LOD threshold (4 ppm) sits inside the mid band** (2–5 ppm). That fits the
   numbers: below 4 ppm the sleeper pitch falls under 2.1–3.6 px (calculated) and would
   shimmer.
-- **D3 status (2026-09-27, branch `codex/d3-construction-tool`; look not judged):** the table's
+- **D3 status (2026-09-27, [PR #82](https://github.com/Kminkjan/infrastructurio/pull/82); look not judged):** the table's
   dimensions and arc sampling are implemented in
   [`render/track/trackGeometry.ts`](../src/render/track/trackGeometry.ts). Choices the table
   leaves open: sleepers are spread evenly per piece at round(L / 0.9 m); rails stand on the

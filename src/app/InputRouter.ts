@@ -33,6 +33,8 @@ export interface InputRouterOptions {
   /** Where the keyboard cursor starts when it has no position: the node at the viewport centre. */
   readonly centreNode: () => NodeRef;
   readonly trackActive: () => boolean;
+  /** Whether the keyboard cursor, not the pointer, placed the track tool's target. */
+  readonly cursorLeads: () => boolean;
   readonly dispatch: (event: ToolEvent) => void;
   /** The pointer moved over the canvas (CSS px) or left it; for the tooltip position. */
   readonly onPointer: (x: number, y: number, inside: boolean) => void;
@@ -54,6 +56,8 @@ export class InputRouter {
   private readonly pointer = { x: 0, y: 0, inside: false };
   private toolPointer: number | undefined;
   private precision = false;
+  /** The arrows moved the lattice cursor since the focused element took focus (see `keymap.ts`, Enter). */
+  private cursorSinceFocus = false;
 
   constructor(private readonly o: InputRouterOptions) {
     const { canvas } = o;
@@ -68,6 +72,7 @@ export class InputRouter {
     window.addEventListener("keydown", this.onKeyDown, { signal });
     window.addEventListener("keyup", this.onKeyUp, { signal });
     window.addEventListener("blur", this.onBlur, { signal });
+    window.addEventListener("focusin", this.onFocusIn, { signal });
   }
 
   get precisionHeld(): boolean {
@@ -84,9 +89,13 @@ export class InputRouter {
     for (const code of ARROW_CODES) this.o.camera.releaseKey(code);
   }
 
-  /** Re-picks under a still pointer after the camera moved, so the ghost follows the ground under it. */
+  /**
+   * Re-picks under a still pointer after the camera moved, so the ghost follows the ground under it.
+   * Not while the keyboard cursor leads: a camera move (its own keep-in-view pan included) never hands
+   * the target back to the mouse; a real pointer move does.
+   */
   repick(): void {
-    if (!this.pointer.inside || !this.o.trackActive() || this.o.camera.panning) return;
+    if (!this.pointer.inside || !this.o.trackActive() || this.o.camera.panning || this.o.cursorLeads()) return;
     this.o.dispatch({ type: "pointer-move", pick: this.o.pick(this.pointer.x, this.pointer.y), screen: { x: this.pointer.x, y: this.pointer.y } });
   }
 
@@ -119,8 +128,8 @@ export class InputRouter {
     this.syncModifiers(e);
     if (isEditable(e.target)) return;
     const action = classifyKey(e, this.context());
-    // A focused HUD button handles its own Enter and Space.
-    if (action.kind === "enter" && e.target instanceof HTMLButtonElement) return;
+    // A focused HUD button handles its own Enter (and Space), unless the arrows have moved the cursor since it took focus.
+    if (action.kind === "enter" && e.target instanceof HTMLButtonElement && !this.cursorSinceFocus) return;
     const { actions, dispatch } = this.o;
     switch (action.kind) {
       case "undo":
@@ -143,6 +152,7 @@ export class InputRouter {
         return;
       case "cursor":
         e.preventDefault();
+        this.cursorSinceFocus = true;
         dispatch({ type: "cursor-step", heading: cursorHeading(action.direction, this.o.yawStep()), origin: this.o.centreNode() });
         return;
       case "height":
@@ -169,6 +179,10 @@ export class InputRouter {
   private readonly onKeyUp = (e: KeyboardEvent): void => {
     this.syncModifiers(e);
     this.o.camera.handleKeyUp(e);
+  };
+
+  private readonly onFocusIn = (): void => {
+    this.cursorSinceFocus = false;
   };
 
   private readonly onBlur = (): void => {
@@ -213,13 +227,15 @@ export class InputRouter {
 
   private readonly onPointerMove = (e: PointerEvent): void => {
     const screen = this.screen(e);
+    // A move event that did not move (browsers send them after layout changes) leaves the keyboard cursor's target alone.
+    const still = this.pointer.inside && screen.x === this.pointer.x && screen.y === this.pointer.y;
     this.pointer.x = screen.x;
     this.pointer.y = screen.y;
     this.pointer.inside = true;
     this.o.onPointer(screen.x, screen.y, true);
     if (this.o.camera.handlePointerMove(e)) return;
     if (e.pointerType === "mouse" && this.toolPointer === undefined) this.syncModifiers(e);
-    if (this.o.trackActive()) this.o.dispatch({ type: "pointer-move", pick: this.o.pick(screen.x, screen.y), screen });
+    if (this.o.trackActive() && !(still && this.o.cursorLeads())) this.o.dispatch({ type: "pointer-move", pick: this.o.pick(screen.x, screen.y), screen });
   };
 
   private readonly onPointerUp = (e: PointerEvent): void => {

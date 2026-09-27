@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { TrackPlan } from "../core/sim/api";
+import { type TrackPlan, createSim } from "../core/sim/api";
 import { HINT_LINE, buildTooltip, formatGrade, formatHeight, gradeLevel, splitReason } from "./format";
+import { planPointOfNode } from "./picks";
 
 function plan(overrides: Partial<TrackPlan> = {}): TrackPlan {
   return {
-    pieces: [],
+    // The steepest piece sets the grade: 60 mm over a 5 m straight is 12‰.
+    pieces: [{ kind: "straight", from: { q: 0, r: 0, zMm: 0 }, heading: 0, z1Mm: 60 }],
     fit: "one-bend",
     end: { node: { q: 1, r: 0, zMm: 6000 }, heading: 0 },
     snapped: null,
@@ -65,6 +67,20 @@ describe("tooltip text", () => {
     expect(gradeLevel(35)).toBe("amber");
     expect(gradeLevel(35.1)).toBe("red");
     expect(gradeLevel(-40)).toBe("red");
+  });
+
+  it("rounds the grade once, from the pieces, so the metrics line and the precision label agree", () => {
+    // One secondary straight (8,660 mm) rising 108 mm: 12.47‰. The plan's maxGradePermille is already
+    // rounded to 12.5‰; rounding that again would read 1.3 % beside the label's 1.2%.
+    const sim = createSim({ terrain: { seed: "d3-format", columns: 60, rows: 52 } });
+    const planned = sim.planTrack({ from: { q: 20, r: 20, zMm: 0 }, fromHeading: 1, to: planPointOfNode(21, 21), dzMm: 108, magnetism: false });
+    expect(planned.pieces).toHaveLength(1);
+    expect(planned.maxGradePermille).toBe(12.5);
+    expect(planned.label).toBe("Straight · 60 km/h · 1.2%");
+    const tip = buildTooltip({ plan: planned, endHeightMm: 108, rejection: null, precision: true, anchor: null });
+    expect(tip.metrics?.grade).toBe("Grade 1.2 %");
+    expect(tip.metrics?.gradeLevel).toBe("green");
+    expect(tip.precision).toBe("Precision: Straight · 60 km/h · 1.2% · wheel radius · Q/E end heading");
   });
 
   it("formats grades and signed heights", () => {

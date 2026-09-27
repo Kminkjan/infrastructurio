@@ -175,8 +175,8 @@ export class Construction {
     this.history("redo");
   }
 
-  /** Per frame: keeps the tooltip over the keyboard cursor while it leads (the camera may have moved). */
-  onFrame(): void {
+  /** The view moved or resized: keeps the tooltip over the keyboard cursor while it leads. */
+  onViewChange(): void {
     const anchor = this.tooltipAnchor;
     if (!anchor) return;
     const p = toWorld(anchor);
@@ -308,7 +308,7 @@ export class Construction {
   private showTooltip(tooltip: TooltipModel | null): void {
     this.tooltipAnchor = tooltip?.anchor ?? null;
     this.d.store.set({ tooltip });
-    if (this.tooltipAnchor) this.onFrame();
+    if (this.tooltipAnchor) this.onViewChange();
   }
 
   private setTooltipPosition(x: number, y: number): void {
