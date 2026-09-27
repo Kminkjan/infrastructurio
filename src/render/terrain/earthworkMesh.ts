@@ -20,8 +20,10 @@ import { smoothstep } from "../math";
  * `ChunkPass.attributesAt`) drives the terrain shader's earthwork colours
  * (`shaderChunks/earthwork.ts`). Plain corners that refined triangles reuse
  * carry their true attribute too, so the colour interpolates correctly up to
- * them; plain vertices elsewhere keep zeros, which the shader reads as natural
- * ground, and so do fans, whose edge vertices the rule never moves.
+ * them, and so do outline corners of a neighbouring chunk's refined triangles
+ * (`ChunkPass.forEachSeamCorner`), so both chunks agree along the seam; plain
+ * vertices elsewhere keep zeros, which the shader reads as natural ground, and
+ * so do fans, whose edge vertices the rule never moves.
  */
 
 export interface EarthworkMeshData extends MeshData {
@@ -51,8 +53,8 @@ export function buildEarthworkChunk(pass: ChunkPass, shading: TerrainShading, pl
   const lat = pass.lat;
   const base = plain ?? buildChunkData(t, shading, pass.chunkX, pass.chunkY, lat.lod);
   const baseCount = base.positions.length / 3;
-  const { refined, fans } = pass.stats;
-  if (refined === 0 && fans === 0) return { ...base, earthwork: new Float32Array(baseCount * EARTHWORK_ITEM_SIZE) };
+  const { refined, fans, seamCorners } = pass.stats;
+  if (refined === 0 && fans === 0 && seamCorners === 0) return { ...base, earthwork: new Float32Array(baseCount * EARTHWORK_ITEM_SIZE) };
 
   const k = REFINE;
   const sub = lat.spacingM / k;
@@ -265,6 +267,8 @@ export function buildEarthworkChunk(pass: ChunkPass, shading: TerrainShading, pl
   const tail = (last + 1 - pass.j0) * perRow * 3;
   idx.set(base.indices.subarray(tail), ni);
   ni += base.indices.length - tail;
+  // Outline corners of refined triangles, a neighbour's included, carry their attribute on this side of the seam too.
+  pass.forEachSeamCorner((Q, R, plain) => pass.attributesAt(k * Q, k * R, earthwork, EARTHWORK_ITEM_SIZE * plain));
 
   const nodeIndices = new Int32Array(count).fill(-1);
   nodeIndices.set(base.nodeIndices);

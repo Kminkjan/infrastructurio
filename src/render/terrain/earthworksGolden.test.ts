@@ -164,12 +164,13 @@ describe("earthworks and terrain bake output (a byte pin)", () => {
     expect(hashes).toEqual({
       pieces: 411,
       refined: 6458,
-      withEarthworks: 36,
+      withEarthworks: 38,
       cleared: 255,
       maxCutFill: [4.316668701171871, 6.461734008789062],
-      // LOD0 as recorded at 81663f8; LOD1's earthwork attribute since the PR #83 review's converged LOD1 reach.
-      lod0: "ae0326d8 f61ad335 68f93f83 e6a82db5 172c603b",
-      lod1: "de4c69ec 0b3769cb f7cf5dc0 3132497b 3d8f5a3b",
+      // Positions, normals, colours and indices as recorded at 81663f8; the earthwork attributes since the PR #83
+      // review's seam corners (both LODs) and converged LOD1 reach (LOD1 only).
+      lod0: "ae0326d8 f61ad335 68f93f83 ef0087f3 172c603b",
+      lod1: "de4c69ec 0b3769cb f7cf5dc0 f0d18e12 3d8f5a3b",
       heightfield0: "46021029",
       heightfield1: "9278cb59",
       reach: "9951e90e",

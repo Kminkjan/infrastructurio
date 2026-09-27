@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Vector3 } from "three";
 import { type Drag, type PieceSpec, groundMmAt, resolvePiece, toWorld } from "../../core/sim/api";
-import { diorama } from "../../../tests/support/groundPlans";
+import { diorama, groundPlans } from "../../../tests/support/groundPlans";
 import { makeTerrain } from "../../../tests/support/makeTerrain";
 import { ISO_PITCH_RAD, type IsoView, worldToScreen, yawForStep } from "../camera/isoMath";
 import { worldToSim } from "../coords";
@@ -18,6 +18,7 @@ import {
   conformTerrain,
   earthworkPiece,
   piecesTouching,
+  reachAt,
 } from "./earthworks";
 import { type EarthworkMeshData, buildEarthworkChunk } from "./earthworkMesh";
 import { type MeshData, buildChunkData } from "./terrainGeometry";
@@ -355,5 +356,46 @@ describe("earthwork chunk geometry", () => {
     expect(a.size).toBeGreaterThan(40);
     expect([...a].filter((v) => !b.has(v))).toEqual([]);
     expect([...b].filter((v) => !a.has(v))).toEqual([]);
+  });
+
+  it("carries the same earthwork attribute on both sides of a chunk seam, at both LODs", () => {
+    // Review finding (PR #83): a plain corner reused unmoved by a refined triangle got its true attribute in the chunk
+    // owning that triangle but zeros in the neighbouring chunk, whose separate vertex there only plain or fan
+    // triangles used, so the lip weight (facets, slope soil) jumped along the straight seam: by up to 0.77 of its
+    // range for these three diorama plans, each crossing a seam.
+    const plans = groundPlans(31, "seam-probe").slice(28);
+    let shared = 0;
+    let coloured = 0;
+    const mismatches: string[] = [];
+    for (const plan of plans) {
+      const pieces = plan.pieces.map((spec) => earthworkPiece(terrain, inputOf(spec)));
+      for (const lod of [0, 1] as const) {
+        const touched = new Set<string>();
+        for (const p of pieces) chunksTouching(terrain, lod, reachAt(p, lod), (x, y) => touched.add(`${x},${y}`));
+        // Attributes by plan position and height, per chunk (a plain vertex no triangle uses any more keeps zeros).
+        const byPosition = new Map<string, Map<string, string>>();
+        for (const key of touched) {
+          const [x, y] = key.split(",").map(Number) as [number, number];
+          const m = buildEarthworkChunk(passFor(terrain, lod, x, y, pieces), shading);
+          for (let i = 0; i < m.positions.length / 3; i++) {
+            const at = [0, 2, 1].map((c) => (m.positions[3 * i + c] ?? 0).toFixed(3)).join(",");
+            const value = [0, 1, 2].map((c) => (m.earthwork[EARTHWORK_ITEM_SIZE * i + c] ?? 0).toFixed(5)).join(" ");
+            let perChunk = byPosition.get(at);
+            if (!perChunk) byPosition.set(at, (perChunk = new Map()));
+            perChunk.set(key, value);
+          }
+        }
+        for (const [at, perChunk] of byPosition) {
+          if (perChunk.size < 2) continue;
+          shared += 1;
+          const values = new Set(perChunk.values());
+          if ([...values].some((v) => v !== "0.00000 0.00000 0.00000")) coloured += 1;
+          if (values.size > 1) mismatches.push(`LOD${lod} at ${at}: ${[...perChunk].map(([k, v]) => `${k} ${v}`).join(" | ")}`);
+        }
+      }
+    }
+    expect(shared).toBeGreaterThan(300);
+    expect(coloured).toBeGreaterThan(20);
+    expect(mismatches).toEqual([]);
   });
 });

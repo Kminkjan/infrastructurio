@@ -439,6 +439,8 @@ export interface ChunkPassStats {
   readonly refined: number;
   /** Plain triangles turned into fans. */
   readonly fans: number;
+  /** Outline vertices carrying the earthwork attribute for a refined triangle (`forEachSeamCorner`). */
+  readonly seamCorners: number;
   /** Largest cut (N − C) and fill (C − N) on the chunk's modified sub-vertices, metres. */
   readonly maxCutM: number;
   readonly maxFillM: number;
@@ -474,7 +476,7 @@ export class ChunkPass {
   refinedCount = 0;
   refinedIds = new Int32Array(0);
   refinedHeights = new Float32Array(0);
-  stats: ChunkPassStats = { refined: 0, fans: 0, maxCutM: 0, maxFillM: 0, evaluated: 0 };
+  stats: ChunkPassStats = { refined: 0, fans: 0, seamCorners: 0, maxCutM: 0, maxFillM: 0, evaluated: 0 };
 
   // Sub-lattice scratch over the chunk and its ring, indexed (rs − rs0)·width + (cs − cs0) with cs = Qs + floor(Rs/2).
   private rs0 = 0;
@@ -527,7 +529,7 @@ export class ChunkPass {
     this.i1 = Math.min(this.i0 + lat.chunkCells, lat.columns - 1);
     this.j1 = Math.min(this.j0 + lat.chunkCells, lat.rows - 1);
     this.refinedCount = 0;
-    this.stats = { refined: 0, fans: 0, maxCutM: 0, maxFillM: 0, evaluated: 0 };
+    this.stats = { refined: 0, fans: 0, seamCorners: 0, maxCutM: 0, maxFillM: 0, evaluated: 0 };
     if (this.i1 <= this.i0 || this.j1 <= this.j0) return false;
     this.prepare();
     let evaluated = 0;
@@ -783,7 +785,37 @@ export class ChunkPass {
       }
     });
     this.refinedCount = refined;
-    this.stats = { ...this.stats, refined, fans };
+    this.stats = { ...this.stats, refined, fans, seamCorners: this.forEachSeamCorner() };
+  }
+
+  /**
+   * Visits the chunk's outline vertices (the LOD nodes on its edges) that a refined
+   * triangle uses unmoved, whether that triangle is this chunk's or a neighbour's (in
+   * the ring), with their plain vertex index in the chunk mesh; returns how many. Such a
+   * vertex carries the earthwork attribute in both chunks, so the lip agrees across the
+   * seam (PR #83 review: the neighbour's separate vertex kept zeros). An interior
+   * vertex's triangles are all this chunk's, so `buildEarthworkChunk` writes those as
+   * its refined triangles reuse them.
+   */
+  forEachSeamCorner(visit?: (Q: number, R: number, plainIndex: number) => void): number {
+    let n = 0;
+    const across = this.i1 - this.i0 + 1;
+    for (let j = this.j0; j <= this.j1; j++) {
+      const step = j === this.j0 || j === this.j1 ? 1 : Math.max(1, this.i1 - this.i0);
+      const half = Math.floor(j / 2);
+      for (let i = this.i0; i <= this.i1; i += step) {
+        const Q = i - half;
+        if (!this.touchesRefined(Q, j) || this.isModified(REFINE * Q, REFINE * j)) continue;
+        n += 1;
+        visit?.(Q, j, (j - this.j0) * across + (i - this.i0));
+      }
+    }
+    return n;
+  }
+
+  /** Whether any of the six lattice triangles around LOD node (Q, R) is refined. */
+  private touchesRefined(Q: number, R: number): boolean {
+    return this.isRefined(Q, R, 0) || this.isRefined(Q - 1, R, 0) || this.isRefined(Q - 1, R, 1) || this.isRefined(Q, R - 1, 0) || this.isRefined(Q, R - 1, 1) || this.isRefined(Q - 1, R - 1, 1);
   }
 
   /** Doubles the pooled refined storage, keeping what it holds. */

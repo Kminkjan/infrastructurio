@@ -245,7 +245,8 @@ export class EarthworksView {
     const pass = this.pass;
     this.rebuild.chunks += 1;
     if (!pass.run(terrain, lod, x, y, near)) return;
-    const moved = pass.stats.refined > 0 || pass.stats.fans > 0;
+    // Drawn with earthworks: refined triangles, fans, or outline corners of a neighbour's refined triangles.
+    const moved = pass.stats.refined > 0 || pass.stats.fans > 0 || pass.stats.seamCorners > 0;
     if (moved || this.drawnWithEarthworks.has(key)) {
       let plain = this.plain.get(key);
       if (!plain) {
