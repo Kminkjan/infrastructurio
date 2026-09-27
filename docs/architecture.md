@@ -145,7 +145,7 @@ The allowed import directions are:
 | Core imports only relative paths inside `src/core`. No packages at all, so no three and no react | boundary test | on main |
 | Core never uses `Math.random`, `Date`, `performance.`, `console.`, `window`/`document`/`globalThis`, `setTimeout`/`setInterval`/`requestAnimationFrame`, `structuredClone` or `for…in` | boundary test. DOM globals also fail the core typecheck | on main |
 | `Math.sin/cos/tan/asin/acos/atan/atan2/sinh/cosh/tanh/pow/exp/expm1/log*/hypot/cbrt` appear only in `core/geometry/{sample,clearance,templates}.ts` | boundary test | on main |
-| Tools never import three, render, ui or react, and never touch `window`/`document` | boundary test | on main |
+| Tools never import three, render, ui or react, never touch `window`/`document`/`navigator` or DOM types, and read no clock or randomness and schedule nothing (reducers are pure) | boundary test | on main; clock, randomness, scheduling and DOM types added in D3 (2026-09-27) |
 | Render never imports ui | boundary test | on main |
 | Render, tools and ui import core only through `sim/api.ts` (snapshot types and the façade; it re-exports the lattice, terrain and scenario helpers the edges need) and the pure `geometry/sample.ts`, so curve maths has one source. `src/app`, the composition root, may import core directly; `main.ts` does | boundary test (test files exempt, like every scan) | since D3 (2026-09-27): the D1 and D11a exceptions were cleared when `render/terrain/`, `render/scenery/`, `render/labels/placeLabels.ts` and `render/camera/bookmarks.ts` moved to `sim/api.ts`, which now also re-exports the scenario types |
 | Ui imports neither three nor render | convention | recommendation |

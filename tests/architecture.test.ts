@@ -6,7 +6,8 @@ import { describe, expect, it } from "vitest";
  * - src/core is deterministic and DOM-free: no imports outside src/core, no
  *   three/react, no wall-clock, randomness, DOM or console APIs;
  * - trigonometry and friends only in the whitelisted geometry modules;
- * - src/tools has no three or DOM; src/render never imports src/ui;
+ * - src/tools has no three, DOM, clock or randomness (reducers are pure);
+ *   src/render never imports src/ui;
  * - src/render, src/tools and src/ui reach the core only through
  *   core/sim/api.ts and the pure core/geometry/sample.ts (src/app, the
  *   composition root, may import the core directly);
@@ -86,7 +87,16 @@ function layerViolations(path: string, raw: string): string[] {
     }
     if (path.startsWith("/src/render/") && target.startsWith("/src/ui/")) problems.push(`render imports ui ${spec}`);
   }
-  if (path.startsWith("/src/tools/") && /\b(?:window|document)\b/.test(code)) problems.push("tools touch the DOM");
+  if (path.startsWith("/src/tools/")) {
+    // Reducers are pure: the same state, event and ctx always give the same result.
+    const impure: [RegExp, string][] = [
+      [/\b(?:window|document|navigator|globalThis|localStorage|sessionStorage)\b/, "tools touch the DOM"],
+      [/\b(?:HTMLElement|Element|Event|KeyboardEvent|PointerEvent|MouseEvent|WheelEvent)\b/, "tools use DOM types"],
+      [/\bMath\.random\b|\bDate\b|\bperformance\s*\./, "tools read a clock or randomness"],
+      [/\b(?:setTimeout|setInterval|requestAnimationFrame|queueMicrotask)\b/, "tools schedule work"],
+    ];
+    for (const [re, name] of impure) if (re.test(code)) problems.push(name);
+  }
   return problems;
 }
 
@@ -161,6 +171,13 @@ describe("architecture boundaries", () => {
     expect(found.length).toBe(7);
     expect(coreViolations("/src/core/geometry/sample.ts", "const s = Math.sin(1);")).toEqual([]);
     expect(layerViolations("/src/tools/track.ts", 'import * as T from "three";')).not.toEqual([]);
+    expect(
+      layerViolations(
+        "/src/tools/track.ts",
+        ["document.title;", "(e: KeyboardEvent) => e;", "const t = performance.now();", "setTimeout(f, 1);"].join("\n"),
+      ),
+    ).toEqual(["tools touch the DOM", "tools use DOM types", "tools read a clock or randomness", "tools schedule work"]);
+    expect(layerViolations("/src/tools/track.ts", 'import type { ToolEvent } from "./types";\nconst d = Math.hypot(1, 2);')).toEqual([]);
     expect(layerViolations("/src/render/hud.ts", 'import { Hud } from "../ui/Hud";')).not.toEqual([]);
     expect(coreViolations("/src/core/a.ts", '// Math.random() in a comment\nimport { b } from "./b";')).toEqual([]);
     expect(coreViolations("/src/core/track/a.ts", 'import { c } from "../lattice";')).toEqual([]);
