@@ -41,11 +41,12 @@ describe("world materials", () => {
     expect(terrainChunks(u, {}).map((c) => c.key)).toEqual(terrainChunks(u).map((c) => c.key));
     expect(terrainChunks(u, { crispSplat: true, detail: true, relief: true }).map((c) => c.key)).toEqual([
       "terrain-splat-v3-crisp-detail",
+      "terrain-earthwork-v1",
       "terrain-relief-v1",
       "grain-v1",
       "edge-fade-v1",
     ]);
-    expect(terrainChunks(u, { crispSplat: true, detail: true, relief: true, facets: true }).map((c) => c.key)[1]).toBe("terrain-relief-v1-facets");
+    expect(terrainChunks(u, { crispSplat: true, detail: true, relief: true, facets: true }).map((c) => c.key)[2]).toBe("terrain-relief-v1-facets");
   });
 
   it("turns sway off and on (reduced motion)", () => {

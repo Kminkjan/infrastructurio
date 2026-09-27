@@ -809,3 +809,23 @@ CSS size with `deviceScaleFactor: 2`.
   look's rationale joins the sections above in a dated amendment.
 - Legibility was not assessed. The mid laptop, real DPR 2 and the Low preset are unmeasured.
 - Whether the owner reads the relief as hills and the detail as calm.
+
+## Terrain look: the owner's choice (2026-09-27)
+
+**Label: owner.** On 2026-09-27 the owner compared `?terrain=d11a`, `a`, `b` and `c` on a
+local preview of `codex/terrain-crisp-look` at `3e8a8d3`, served by an agent, without
+earthworks. Asked which look should become the default, the owner chose **"b: faceted"**:
+"Crisp relief + low-poly lattice facets from Region zoom in (the agent's recommendation).
+Needs a dated art-direction amendment ('smooth shading for terrain')."
+
+- **Amendment to Materials.** Above, "**Smooth shading** for terrain" is left as written; this
+  note supersedes it. From Region zoom in, the terrain's lattice triangles are lit as flat
+  facets. At Far they stay smooth.
+- **Default.** `b` is the default (`DEFAULT_TERRAIN_LOOK` in
+  [`terrainLook.ts`](../src/render/terrain/terrainLook.ts)). `d11a`, `a` and `c` stay
+  selectable through `?terrain=` for comparison, until D11b decides whether they become
+  presets or go.
+- **Not established:**
+  - Look Gate A's legibility score, which is still pending;
+  - how `b` reads together with earthworks, since the owner chose without them;
+  - the cost on the mid laptop and at real DPR 2.

@@ -46,7 +46,7 @@ describe("terrain look variants", () => {
     expect(c.relief?.contour).toBeGreaterThan(0);
     expect(b.relief?.contour).toBe(0);
     const u = createArtUniforms(bounds);
-    expect(terrainChunks(u, terrainChunkOptions(b)).map((k) => k.key)).toEqual(["terrain-splat-v3-crisp-detail", "terrain-relief-v1-facets", "grain-v1", "edge-fade-v1"]);
+    expect(terrainChunks(u, terrainChunkOptions(b)).map((k) => k.key)).toEqual(["terrain-splat-v3-crisp-detail", "terrain-earthwork-v1", "terrain-relief-v1-facets", "grain-v1", "edge-fade-v1"]);
   });
 
   it("write their settings and the water level into the shared uniforms", () => {
