@@ -329,6 +329,36 @@ describe("earthworks conform (the rule)", () => {
     expect(deepest).toBeLessThan(-1);
   });
 
+  it("fades a capped reach's slope to natural before the cap: a continuous face, no vertical wall (both LODs)", () => {
+    // Re-review finding (PR #83): the track tool's height steps have no bound, so ground track can stand 90 m up. Its
+    // fill needs about 142 m of run but the reach stops at 120 m, where the drawn surface dropped from 32.67 m to the
+    // natural 20 m in one step. Flat ground at 20 m, a 20-piece run at 110 m on row 80.
+    const wide = makeTerrain(200, 160, () => 200);
+    const run = Array.from({ length: 20 }, (_, i) => straight(60 + i, 80, 0, 110_000));
+    const x = 5 * (70 + 40) + 2.5;
+    const y0 = 80 * 2.5 * Math.sqrt(3);
+    for (const lod of [0, 1] as const) {
+      const field = conformTerrain(wide, { pieces: run }, lod);
+      // Along both sides, from the formation out past the cap: every 5 cm step rises less than the steepened face allows
+      // (the cap rise over CAP_FADE_M, times smoothstep's steepest 1.5, plus the side slope and the lattice's slack).
+      let steepest = 0;
+      let reachedNatural = 0;
+      for (const side of [1, -1]) {
+        let previous = field.heightAtM(x, y0);
+        for (let d = 0.05; d <= 130; d += 0.05) {
+          const h = field.heightAtM(x, y0 + side * d);
+          steepest = Math.max(steepest, Math.abs(h - previous) / 0.05);
+          previous = h;
+          if (d > 121 && h === field.naturalAtM(x, y0 + side * d)) reachedNatural += 1;
+        }
+      }
+      expect(steepest, `LOD${lod}`).toBeLessThan(4);
+      // Past the cap the ground is natural, and the fill still stands 90 m high at the track.
+      expect(reachedNatural).toBeGreaterThan(200);
+      expect(field.heightAtM(x, y0)).toBeCloseTo(110, 3);
+    }
+  });
+
   it("returns nothing for a chunk beyond the grid", () => {
     const tiny: Terrain = makeTerrain(2, 2, () => 200);
     expect(new ChunkPass().run(tiny, 1, 0, 0, [])).toBe(false);

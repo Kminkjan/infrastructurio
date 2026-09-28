@@ -49,6 +49,23 @@ let stamp = 0;
  * often keep it, since it never changes.
  */
 export function buildEarthworkChunk(pass: ChunkPass, shading: TerrainShading, plain?: MeshData): EarthworkMeshData {
+  const steps = earthworkChunkSteps(pass, shading, plain);
+  for (;;) {
+    const r = steps.next();
+    if (r.done) return r.value;
+  }
+}
+
+/** LOD rows of triangles per slice of `earthworkChunkSteps`. */
+const MESH_ROWS = 4;
+
+/**
+ * `buildEarthworkChunk` as steps: each `next()` builds a few LOD rows of the chunk, and the last returns the mesh
+ * data, byte for byte what `buildEarthworkChunk` returns. `EarthworksView` spreads a large chunk over frames (PR #83
+ * re-review: a 20-piece run capped at 120 m took 12.5 ms for one chunk's mesh). The pass must stay untouched, and no
+ * other build may run, until it is done or dropped (they share the vertex slots below).
+ */
+export function* earthworkChunkSteps(pass: ChunkPass, shading: TerrainShading, plain?: MeshData): Generator<void, EarthworkMeshData, void> {
   const t = pass.terrain;
   const lat = pass.lat;
   const base = plain ?? buildChunkData(t, shading, pass.chunkX, pass.chunkY, lat.lod);
@@ -207,7 +224,7 @@ export function buildEarthworkChunk(pass: ChunkPass, shading: TerrainShading, pl
   const head = Math.max(0, first - pass.j0) * perRow * 3;
   idx.set(base.indices.subarray(0, head), 0);
   ni = head;
-  forEachChunkTriangle(pass.i0, pass.i1, first, last + 1, (Q, R, up, ordinal) => {
+  const visit = (Q: number, R: number, up: 0 | 1, ordinal: number): void => {
     if (pass.isRefined(Q, R, up)) {
       setCorners(Q, R, up);
       for (let b = 0; b < k; b++) {
@@ -263,7 +280,12 @@ export function buildEarthworkChunk(pass: ChunkPass, shading: TerrainShading, pl
       idx[ni++] = loop[i] ?? 0;
       idx[ni++] = loop[(i + 1) % loop.length] ?? 0;
     }
-  }, head / 3);
+  };
+  for (let j = first; j <= last; j += MESH_ROWS) {
+    const to = Math.min(last + 1, j + MESH_ROWS);
+    forEachChunkTriangle(pass.i0, pass.i1, j, to, visit, (j - pass.j0) * perRow);
+    if (to <= last) yield;
+  }
   const tail = (last + 1 - pass.j0) * perRow * 3;
   idx.set(base.indices.subarray(tail), ni);
   ni += base.indices.length - tail;

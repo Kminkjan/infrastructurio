@@ -81,6 +81,28 @@ export function samplePiece(piece: HasPrims, maxSagittaM: number): SamplePoint[]
   return out;
 }
 
+/**
+ * Points on a piece's centreline (on the arcs themselves, not their chords) no more than
+ * `maxStepM` of arc length apart: each primitive split into equal steps, both ends of the
+ * piece included, each join once. Render-side (the earthworks' neighbour bounds).
+ */
+export function sampleCentrelineEvery(piece: HasPrims, maxStepM: number): SamplePoint[] {
+  if (!(maxStepM > 0) || !Number.isFinite(maxStepM)) throw new RangeError(`maxStepM must be > 0, got ${maxStepM}`);
+  const out: SamplePoint[] = [];
+  let s = 0;
+  for (const p of piece.prims) {
+    const len = primLengthM(p);
+    const n = Math.max(1, Math.ceil(len / maxStepM));
+    for (let i = out.length === 0 ? 0 : 1; i <= n; i++) {
+      const f = i / n;
+      const q = p.kind === "line" ? { x: p.x0 + (p.x1 - p.x0) * f, y: p.y0 + (p.y1 - p.y0) * f } : arcPoint(p, f);
+      out.push({ x: q.x, y: q.y, sM: s + len * f });
+    }
+    s += len;
+  }
+  return out;
+}
+
 const TWO_PI = 2 * Math.PI;
 
 /**

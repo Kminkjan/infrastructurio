@@ -3,11 +3,15 @@ import { type BufferGeometry, MeshBasicMaterial } from "three";
 import { type Command, type PieceSpec, type TrackPlan, createSim } from "../../core/sim/api";
 import { DIORAMA_PARAMS, diorama, groundPlans } from "../../../tests/support/groundPlans";
 import { makeTerrain } from "../../../tests/support/makeTerrain";
+import { steepestDrawnFace } from "../../../tests/support/drawnFaces";
 import { type ClearableLayer, SceneryClearance } from "../scenery/clearance";
-import { EARTHWORK_ATTRIBUTE } from "../art/shaderChunks/earthwork";
-import { EarthworksView, SCENERY_CLEARANCE_M } from "./EarthworksView";
+import { EARTHWORK_ATTRIBUTE, EARTHWORK_ITEM_SIZE } from "../art/shaderChunks/earthwork";
+import { type EarthworkChunkTarget, EarthworksView, SCENERY_CLEARANCE_M } from "./EarthworksView";
 import { TerrainView } from "./TerrainView";
-import { chunkCounts } from "./terrainGeometry";
+import { SIDE_SLOPE_RUN } from "./earthworks";
+import type { EarthworkMeshData } from "./earthworkMesh";
+import { buildChunkData, chunkCounts } from "./terrainGeometry";
+import { type TerrainShading, computeTerrainShading } from "./terrainShading";
 
 const material = new MeshBasicMaterial();
 
@@ -65,6 +69,32 @@ function ridgeSetup(options: { budgetMs?: number; clockStepMs?: number; enabled?
       return frames;
     },
   };
+}
+
+/** A chunk target that keeps the mesh data it was last given per chunk (no three.js), to compare views cheaply. */
+class RecordingTarget implements EarthworkChunkTarget {
+  readonly chunks = new Map<string, EarthworkMeshData>();
+  constructor(readonly shading: TerrainShading) {}
+  replaceChunk(x: number, y: number, lod: 0 | 1, data: EarthworkMeshData): boolean {
+    this.chunks.set(`${lod}:${x},${y}`, data);
+    return true;
+  }
+}
+
+/** Whether two chunk meshes hold the same bytes (positions, normals, colours, earthwork attribute, indices). */
+function sameMesh(a: EarthworkMeshData, b: EarthworkMeshData): boolean {
+  const bytes = (v: ArrayBufferView) => new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+  return [
+    [a.positions, b.positions],
+    [a.normals, b.normals],
+    [a.colors, b.colors],
+    [a.earthwork, b.earthwork],
+    [Uint32Array.from(a.indices), Uint32Array.from(b.indices)],
+  ].every(([x, y]) => {
+    const p = bytes(x as ArrayBufferView);
+    const q = bytes(y as ArrayBufferView);
+    return p.length === q.length && p.every((v, k) => v === q[k]);
+  });
 }
 
 /** A plain array of positions standing in for a scenery layer. */
@@ -129,6 +159,88 @@ describe("earthworks view", () => {
     expect(s.earthworks.stats.refinedTriangles).toBe(built.refinedTriangles);
   });
 
+  it("equals a fresh view over builds, undos and redos beside higher tracks, whose reaches depend on each other", () => {
+    // PR #83 re-review: a piece's reach now depends on its neighbours' beds, so an edit must re-derive the pieces
+    // beside it (and an undo lower them again). Flat ground at 20 m; a run on row 30 at 20 m, one 3 rows north at
+    // 26 m, one 3 rows south at 14 m, and a 60° run at 23 m north of them.
+    const params = { seed: "neighbours", columns: 130, rows: 70 };
+    const terrain = makeTerrain(params.columns, params.rows, () => 200);
+    const sim = createSim({ terrain: params });
+    const shading = computeTerrainShading(terrain);
+    const view = new RecordingTarget(shading);
+    const earthworks = new EarthworksView({ terrain, target: view, requestFrame: () => {}, now: () => 0, budgetMs: Infinity });
+    // What a chunk draws without earthworks: its plain mesh with a zero attribute (what `buildEarthworkChunk` gives).
+    const natural = new Map<string, EarthworkMeshData>();
+    const naturalOf = (key: string): EarthworkMeshData => {
+      let m = natural.get(key);
+      if (!m) {
+        const [lod, x, y] = key.split(/[:,]/).map(Number) as [0 | 1, number, number];
+        const plain = buildChunkData(terrain, shading, x, y, lod);
+        m = { ...plain, earthwork: new Float32Array((plain.positions.length / 3) * EARTHWORK_ITEM_SIZE) };
+        natural.set(key, m);
+      }
+      return m;
+    };
+    const run = (r: number, zMm: number, q0: number, n: number, heading: 0 | 2 = 0): PieceSpec[] =>
+      Array.from({ length: n }, (_, i): PieceSpec => ({ kind: "straight", from: { q: q0 + (heading === 0 ? i : 0), r: r + (heading === 2 ? i : 0), zMm }, heading, z1Mm: zMm }));
+    const a = run(30, 20_000, 30, 20);
+    const steps: Command[] = [
+      build(a),
+      build(run(33, 26_000, 29, 20)),
+      build(run(27, 14_000, 32, 20)),
+      build(run(36, 23_000, 40, 12, 2)),
+      { type: "undo" },
+      { type: "undo" },
+      { type: "redo" },
+      { type: "undo" },
+      { type: "undo" },
+      { type: "redo" },
+      { type: "redo" },
+      { type: "redo" },
+      { type: "undo" },
+      { type: "undo" },
+      { type: "undo" },
+      { type: "undo" },
+    ];
+    const probe = sim.network();
+    expect(probe.pieces).toHaveLength(0);
+    const aKey = (() => {
+      sim.execute(build(a.slice(0, 1)));
+      const key = sim.network().pieces[0]?.key ?? "";
+      sim.execute({ type: "undo" });
+      return key;
+    })();
+    const reachesOfA: number[] = [];
+    for (const [i, step] of steps.entries()) {
+      expect(sim.execute(step).ok, `step ${i}`).toBe(true);
+      earthworks.sync(sim.network());
+      expect(earthworks.busy).toBe(false);
+      const freshView = new RecordingTarget(shading);
+      const fresh = new EarthworksView({ terrain, target: freshView, requestFrame: () => {}, now: () => 0, budgetMs: Infinity });
+      fresh.sync(sim.network());
+      for (const p of sim.network().pieces) expect(earthworks.reachOf(p.key), `step ${i} reach of ${p.key}`).toEqual(fresh.reachOf(p.key));
+      // Every chunk either view has drawn: the same bytes (a chunk a view never drew is its natural chunk).
+      for (const key of new Set([...view.chunks.keys(), ...freshView.chunks.keys()])) {
+        expect(sameMesh(view.chunks.get(key) ?? naturalOf(key), freshView.chunks.get(key) ?? naturalOf(key)), `step ${i}, chunk ${key}`).toBe(true);
+      }
+      for (const lod of [0, 1] as const) {
+        const f = lod === 0 ? fresh.heightfield : fresh.heightfieldLod1;
+        const g = lod === 0 ? earthworks.heightfield : earthworks.heightfieldLod1;
+        expect([...g.triangles.keys()].sort((x, y) => x - y), `step ${i} LOD${lod} refined ids`).toEqual([...f.triangles.keys()].sort((x, y) => x - y));
+        for (const [id, heights] of f.triangles) expect(g.triangles.get(id), `step ${i} LOD${lod} triangle ${id}`).toEqual(heights);
+        const face = steepestDrawnFace(g);
+        expect(face.slope, `step ${i} LOD${lod}: steepest face at (${face.x.toFixed(1)}, ${face.y.toFixed(1)})`).toBeLessThan((1 / SIDE_SLOPE_RUN) * 1.15);
+      }
+      reachesOfA.push(earthworks.reachOf(aKey)?.[0] ?? Number.NaN);
+    }
+    // The first run's reach grows beside the higher run and returns to its natural reach once that is undone.
+    expect(reachesOfA[1]).toBeGreaterThan(reachesOfA[0] ?? Infinity);
+    expect(reachesOfA[8]).toBe(reachesOfA[0]);
+    expect(reachesOfA[9]).toBe(reachesOfA[1]);
+    expect(reachesOfA[14]).toBe(reachesOfA[0]);
+    expect(earthworks.stats).toMatchObject({ pieces: 0, chunksWithEarthworks: 0, refinedTriangles: 0 });
+  });
+
   it("time-slices a rebuild at the budget, at least one step per frame", () => {
     const s = ridgeSetup({ budgetMs: 8, clockStepMs: 5 });
     s.sim.execute(build(s.run));
@@ -140,6 +252,39 @@ describe("earthworks view", () => {
     expect(s.earthworks.busy).toBe(false);
     expect(s.earthworks.stats.lastRebuild.slices).toBeGreaterThan(1);
     expect(s.earthworks.stats.appliedRev).toBe(1);
+  });
+
+  it("spreads a chunk too big for one slice over frames, drawing the same bytes (a run capped at 120 m)", async ({ annotate }) => {
+    // PR #83 re-review: a 20-piece run 90 m over flat ground reaches the 120 m cap, and one chunk's pass took 13.6 ms,
+    // over the 8 ms slice, with its mesh on top. Each step now yields between pieces, resolve blocks and mesh rows.
+    const params = { seed: "capped", columns: 200, rows: 160 };
+    const terrain = makeTerrain(params.columns, params.rows, () => 200);
+    const sim = createSim({ terrain: params });
+    const run: PieceSpec[] = Array.from({ length: 20 }, (_, i) => ({ kind: "straight", from: { q: 60 + i, r: 80, zMm: 110_000 }, heading: 0, z1Mm: 110_000 }));
+    expect(sim.execute(build(run)).ok).toBe(true);
+    const whole = new TerrainView(terrain, material, material);
+    const once = new EarthworksView({ terrain, target: whole, requestFrame: () => {}, now: () => 0, budgetMs: Infinity });
+    once.sync(sim.network());
+    const steps = once.stats.lastRebuild.chunks;
+    // A clock that advances 1 ms per reading: each 8 ms slice does at most eight slices of work.
+    let clock = 0;
+    const sliced = new TerrainView(terrain, material, material);
+    const earthworks = new EarthworksView({ terrain, target: sliced, requestFrame: () => {}, now: () => (clock += 1), budgetMs: 8 });
+    let frames = 0;
+    while (frames++ < 5000 && (earthworks.sync(sim.network()) || earthworks.busy));
+    expect(earthworks.busy).toBe(false);
+    expect(earthworks.stats.lastRebuild.slices).toBeGreaterThan(2 * steps);
+    const a = snapshotChunks(whole, terrain);
+    for (const [key, arrays] of snapshotChunks(sliced, terrain)) arrays.forEach((arr, k) => expect(a.get(key)?.[k], `${key} array ${k}`).toEqual(arr));
+    expect([...earthworks.heightfield.triangles.keys()]).toEqual([...once.heightfield.triangles.keys()]);
+    // The same on the wall clock, with the app's 8 ms budget (a dev measurement: the load of the machine shows).
+    const wall = new TerrainView(terrain, material, material);
+    const timed = new EarthworksView({ terrain, target: wall, requestFrame: () => {}, now: () => performance.now() });
+    let wallFrames = 0;
+    while (wallFrames++ < 5000 && (timed.sync(sim.network()) || timed.busy));
+    const r = timed.stats.lastRebuild;
+    await annotate(`capped 20-piece run: ${steps} steps, ${r.slices} slices of 8 ms, longest ${r.longestSliceMs.toFixed(2)} ms, total ${r.totalMs.toFixed(1)} ms`);
+    for (const v of [whole, sliced, wall]) v.dispose();
   });
 
   it("does nothing when disabled (the natural terrain, for before/after checks)", () => {

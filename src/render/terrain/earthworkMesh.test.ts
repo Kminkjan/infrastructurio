@@ -17,6 +17,7 @@ import {
   chunksTouching,
   conformTerrain,
   earthworkPiece,
+  earthworkPieces,
   piecesTouching,
   reachAt,
 } from "./earthworks";
@@ -362,13 +363,14 @@ describe("earthwork chunk geometry", () => {
     // Review finding (PR #83): a plain corner reused unmoved by a refined triangle got its true attribute in the chunk
     // owning that triangle but zeros in the neighbouring chunk, whose separate vertex there only plain or fan
     // triangles used, so the lip weight (facets, slope soil) jumped along the straight seam: by up to 0.77 of its
-    // range for these three diorama plans, each crossing a seam.
-    const plans = groundPlans(31, "seam-probe").slice(28);
+    // range for three diorama plans, each crossing a seam (plans 28–30). The re-review asked for more: 40 plans, the
+    // three among them, each drawn with its reaches settled as the view draws them.
+    const plans = groundPlans(68, "seam-probe").slice(28);
     let shared = 0;
     let coloured = 0;
     const mismatches: string[] = [];
     for (const plan of plans) {
-      const pieces = plan.pieces.map((spec) => earthworkPiece(terrain, inputOf(spec)));
+      const pieces = earthworkPieces(terrain, plan.pieces.map(inputOf));
       for (const lod of [0, 1] as const) {
         const touched = new Set<string>();
         for (const p of pieces) chunksTouching(terrain, lod, reachAt(p, lod), (x, y) => touched.add(`${x},${y}`));

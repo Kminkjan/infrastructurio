@@ -8,10 +8,14 @@ import {
   chunksTouching,
   conforms,
   earthworkPiece,
+  MAX_REACH_M,
+  mayNeighbour,
   nearestOnPiece,
   piecesTouching,
+  settleReaches,
+  settledPiece,
 } from "./earthworks";
-import { buildEarthworkChunk } from "./earthworkMesh";
+import { type buildEarthworkChunk, earthworkChunkSteps } from "./earthworkMesh";
 import type { TerrainLod } from "./offsetGrid";
 import { type MeshData, buildChunkData } from "./terrainGeometry";
 import type { TerrainShading } from "./terrainShading";
@@ -19,12 +23,16 @@ import type { TerrainShading } from "./terrainShading";
 /**
  * Keeps the terrain's earthworks in step with `NetworkView` snapshots
  * (architecture "Per-frame order", step 3, beside `TrackView`). On a new
- * revision it diffs ground pieces by key; the reach boxes of pieces that left
- * or arrived mark the terrain chunks (both LODs) to rebuild, LOD0 first. Each
- * rebuild runs the chunk pass over every current piece near the chunk, so a
- * chunk is always rebuilt from scratch: undo gives back the natural chunk
- * exactly. Rebuilds are time-sliced like the track (8 ms, at least one step
- * per frame). A LOD0 rebuild also swaps the chunk's refined triangles into the
+ * revision it diffs ground pieces by key and settles the reaches beside the
+ * edit (a piece's reach depends on its neighbours' beds, PR #83 re-review);
+ * the reach boxes of pieces that left, arrived or changed reach mark the
+ * terrain chunks (both LODs) to rebuild, LOD0 first. Each rebuild runs the
+ * chunk pass over every current piece near the chunk, so a chunk is always
+ * rebuilt from scratch: undo gives back the natural chunk exactly, and the
+ * incremental result equals a fresh view's. Rebuilds are time-sliced like the
+ * track (8 ms, at least one slice per frame), and a chunk too big for a slice
+ * spreads its pass and mesh over frames, swapped in only once whole. A LOD0
+ * rebuild also swaps the chunk's refined triangles into the
  * drawn heightfield (picking); once every LOD0 chunk of the revision is done,
  * the scenery on those chunks is re-tested, then LOD1 (only drawn below 2 ppm)
  * catches up.
@@ -34,6 +42,8 @@ import type { TerrainShading } from "./terrainShading";
 const STEP_LOD0 = 0;
 const STEP_SCENERY = 1;
 const STEP_LOD1 = 2;
+/** The first character of a LOD0 step's key ("0"): the queue is sorted, so LOD0 steps come first. */
+const STEP_LOD0_CODE = 48 + STEP_LOD0;
 
 export const EARTHWORKS_BUDGET_MS = 8;
 /**
@@ -101,6 +111,8 @@ export class EarthworksView {
   private maxCutM = 0;
   private maxFillM = 0;
   private readonly near = { d: 0, s: 0 };
+  /** The step in flight: its queue key (still at the queue's head) and its remaining slices. */
+  private current: { readonly key: string; readonly work: Generator<void, void, void> } | undefined;
 
   constructor(private readonly options: EarthworksViewOptions) {
     this.heightfield = new DrawnHeightfield(options.terrain, 0);
@@ -117,6 +129,15 @@ export class EarthworksView {
   /** True while chunks are queued. */
   get busy(): boolean {
     return this.queue.length > 0;
+  }
+
+  /**
+   * The network revision whose LOD0 surface (the heightfield that picking and the ghost read) is fully drawn, or −1
+   * while its chunks are pending; scenery and LOD1 may still follow. Allocation-free, for the frame loop.
+   */
+  get surfaceRev(): number {
+    const head = this.queue[0];
+    return head === undefined || head.charCodeAt(0) !== STEP_LOD0_CODE ? this.targetRev : -1;
   }
 
   get stats(): EarthworksStats {
@@ -141,6 +162,8 @@ export class EarthworksView {
     if (!this.enabled) return false;
     if (network.rev !== this.targetRev) {
       this.targetRev = network.rev;
+      // A step in flight may read pieces the revision replaced: it starts again (its key stays queued).
+      this.current = undefined;
       this.applyRevision(network);
     }
     if (this.queue.length === 0) return false;
@@ -148,10 +171,17 @@ export class EarthworksView {
     const start = now();
     let elapsed = 0;
     do {
-      const key = this.queue.shift();
-      if (key === undefined) break;
-      this.queued.delete(key);
-      this.runStep(key);
+      let current = this.current;
+      if (!current) {
+        const key = this.queue[0];
+        if (key === undefined) break;
+        current = this.current = { key, work: this.stepWork(key) };
+      }
+      if (current.work.next().done) {
+        this.queue.shift();
+        this.queued.delete(current.key);
+        this.current = undefined;
+      }
       elapsed = now() - start;
     } while (this.queue.length > 0 && elapsed < budgetMs);
     this.rebuild.slices += 1;
@@ -168,12 +198,19 @@ export class EarthworksView {
   retarget(target: EarthworkChunkTarget, scenery: SceneryClearance | undefined): void {
     this.target = target;
     this.scenery = scenery;
+    this.current = undefined;
     this.plain.clear();
     for (const key of this.drawnWithEarthworks) this.enqueue(key);
     // Scenery on chunks near pieces must be re-cleared too, even where the ground did not move.
     for (const p of this.pieces.values()) this.enqueueBox(p);
     this.sortQueue();
     if (this.queue.length > 0) this.options.requestFrame();
+  }
+
+  /** A ground piece's current reach at LOD0 and LOD1 (settled beside its neighbours), or undefined (tests, checks). */
+  reachOf(key: string): readonly [number, number] | undefined {
+    const p = this.pieces.get(key);
+    return p ? [p.reachM, p.lod1.reachM] : undefined;
   }
 
   /** Whether earthworks claim plan (x, y) for scenery: on a formation, or where the drawn ground moved. */
@@ -191,21 +228,66 @@ export class EarthworksView {
   private applyRevision(network: NetworkView): void {
     const terrain = this.options.terrain;
     const next = new Set<string>();
+    const added: EarthworkPiece[] = [];
     for (const p of network.pieces) {
       if (!conforms(p)) continue;
       next.add(p.key);
-      if (this.pieces.has(p.key)) continue;
-      const piece = earthworkPiece(terrain, p);
-      this.pieces.set(p.key, piece);
-      this.enqueueBox(piece);
+      if (!this.pieces.has(p.key)) added.push(earthworkPiece(terrain, p));
     }
+    let removed = false;
     for (const [key, piece] of this.pieces) {
       if (next.has(key)) continue;
       this.pieces.delete(key);
       this.enqueueBox(piece);
+      removed = true;
     }
+    if (added.length > 0 || removed) this.settle(added, removed);
     this.rebuild = { chunks: 0, slices: 0, totalMs: 0, longestSliceMs: 0 };
     this.sortQueue();
+  }
+
+  /**
+   * Re-derives the reaches beside the edit (`settleReaches`: a piece's reach depends on its neighbours' beds) and
+   * queues the chunks of every piece whose reach changed, old and new box, plus the added pieces'. After a removal
+   * every piece a neighbour had raised starts again from its natural reach, so the result equals a fresh settle.
+   */
+  private settle(added: readonly EarthworkPiece[], removed: boolean): void {
+    const kept = this.pieces.size;
+    const list = [...this.pieces.values(), ...added];
+    const reach0 = Float64Array.from(list, (p) => p.reachM);
+    const reach1 = Float64Array.from(list, (p) => p.lod1.reachM);
+    const work: number[] = [];
+    for (let i = 0; i < kept; i++) {
+      const p = list[i];
+      if (!p) continue;
+      if (removed && (p.reachM !== p.naturalReachM[0] || p.lod1.reachM !== p.naturalReachM[1])) {
+        reach0[i] = p.naturalReachM[0];
+        reach1[i] = p.naturalReachM[1];
+        work.push(i);
+        continue;
+      }
+      // A piece whose box meets an arrival's may fold in its beds.
+      for (const a of added) {
+        if (mayNeighbour(p, a)) {
+          work.push(i);
+          break;
+        }
+      }
+    }
+    for (let i = kept; i < list.length; i++) work.push(i);
+    settleReaches(this.options.terrain, list, reach0, reach1, work);
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i];
+      if (!p) continue;
+      // A capped piece's cap rise depends on its neighbours even when its reach stays at the cap.
+      const capped = (reach0[i] ?? 0) >= MAX_REACH_M || (reach1[i] ?? 0) >= MAX_REACH_M || p.capRiseM > 0 || p.lod1.capRiseM > 0;
+      if (i < kept && !capped && reach0[i] === p.reachM && reach1[i] === p.lod1.reachM) continue;
+      const settled = settledPiece(this.options.terrain, list, reach0, reach1, i) ?? p;
+      if (i < kept && settled === p) continue;
+      if (i < kept) this.enqueueBox(p);
+      this.pieces.set(p.key, settled);
+      this.enqueueBox(settled);
+    }
   }
 
   private sortQueue(): void {
@@ -229,7 +311,11 @@ export class EarthworksView {
     this.queue.push(key);
   }
 
-  private runStep(key: string): void {
+  /**
+   * One queued step as slices: a chunk's pass one piece (or block) at a time, then its mesh a few rows at a time,
+   * swapped in only once whole, so a chunk too big for one 8 ms slice spreads over frames (PR #83 re-review).
+   */
+  private *stepWork(key: string): Generator<void, void, void> {
     const [stepText, xText, yText] = key.split(":");
     const step = Number(stepText);
     const x = Number(xText);
@@ -244,7 +330,9 @@ export class EarthworksView {
     const near = piecesTouching(this.pieces.values(), ChunkPass.chunkBox(terrain, lod, x, y), lod);
     const pass = this.pass;
     this.rebuild.chunks += 1;
-    if (!pass.run(terrain, lod, x, y, near)) return;
+    const steps = pass.begin(terrain, lod, x, y, near);
+    if (!steps) return;
+    while (!steps.next().done) yield;
     // Drawn with earthworks: refined triangles, fans, or outline corners of a neighbour's refined triangles.
     const moved = pass.stats.refined > 0 || pass.stats.fans > 0 || pass.stats.seamCorners > 0;
     if (moved || this.drawnWithEarthworks.has(key)) {
@@ -253,7 +341,8 @@ export class EarthworksView {
         plain = buildChunkData(terrain, this.target.shading, x, y, lod);
         this.plain.set(key, plain);
       }
-      this.target.replaceChunk(x, y, lod, buildEarthworkChunk(pass, this.target.shading, plain));
+      const mesh = yield* earthworkChunkSteps(pass, this.target.shading, plain);
+      this.target.replaceChunk(x, y, lod, mesh);
       if (moved) this.drawnWithEarthworks.add(key);
       else this.drawnWithEarthworks.delete(key);
     }
