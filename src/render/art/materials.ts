@@ -2,9 +2,12 @@ import { Color, MeshLambertMaterial } from "three";
 import type { MaterialSlot } from "./AssetRegistry";
 import { palette } from "./palette";
 import { type ShaderChunk, installChunks } from "./shaderChunks/chunk";
+import { type EarthworkUniforms, createEarthworkChunk, createEarthworkUniforms, syncEarthworkColors } from "./shaderChunks/earthwork";
 import { type EdgeFadeUniforms, createEdgeFadeChunk, createEdgeFadeUniforms, hazeForToneMapping } from "./shaderChunks/edgeFade";
 import { createFoliageTintChunk } from "./shaderChunks/foliageTint";
 import { type GrainUniforms, GRAIN_AMOUNT, createGrainChunk, createGrainUniforms } from "./shaderChunks/grain";
+import { type GroundDetailUniforms, createGroundDetailUniforms, syncGroundDetailColors } from "./shaderChunks/groundDetail";
+import { type ReliefUniforms, createReliefChunk, createReliefUniforms } from "./shaderChunks/relief";
 import { type SplatUniforms, createSplatChunk, createSplatUniforms, syncSplatColors } from "./shaderChunks/splat";
 import { type TrackStripeUniforms, createTrackStripeChunk, createTrackStripeUniforms } from "./shaderChunks/trackStripe";
 import { type WindSwayUniforms, SWAY_AMPLITUDE_M, createWindSwayChunk, createWindSwayUniforms } from "./shaderChunks/windSway";
@@ -25,11 +28,15 @@ import { type WindSwayUniforms, SWAY_AMPLITUDE_M, createWindSwayChunk, createWin
  */
 
 export interface ArtUniforms {
+  /** Terrain look variants (2026-09-27): relief shading and grass detail, installed only by the variants. */
+  readonly relief: ReliefUniforms;
+  readonly detail: GroundDetailUniforms;
   readonly sway: WindSwayUniforms;
   readonly grain: GrainUniforms;
   readonly waterGrain: GrainUniforms;
   readonly edge: EdgeFadeUniforms;
   readonly splat: SplatUniforms;
+  readonly earthwork: EarthworkUniforms;
 }
 
 /** Water takes half the grain, so the surface reads calm. */
@@ -37,11 +44,14 @@ const WATER_GRAIN = GRAIN_AMOUNT / 2;
 
 export function createArtUniforms(bounds: { minX: number; minZ: number; maxX: number; maxZ: number }): ArtUniforms {
   const u: ArtUniforms = {
+    relief: createReliefUniforms(),
+    detail: createGroundDetailUniforms(),
     sway: createWindSwayUniforms(),
     grain: createGrainUniforms(),
     waterGrain: createGrainUniforms(WATER_GRAIN),
     edge: createEdgeFadeUniforms(bounds),
     splat: createSplatUniforms(),
+    earthwork: createEarthworkUniforms(),
   };
   syncArtColors(u, 1);
   return u;
@@ -51,8 +61,10 @@ const haze = new Color();
 
 /** Re-reads palette-driven uniforms (after a tweak-panel change) for the current exposure. */
 export function syncArtColors(u: ArtUniforms, exposure: number): void {
+  syncGroundDetailColors(u.detail);
   hazeForToneMapping(haze.setHex(palette.haze), exposure, u.edge.uEdgeHaze.value);
   syncSplatColors(u.splat);
+  syncEarthworkColors(u.earthwork);
 }
 
 /** Wind sway on or off (reduced motion turns it off, and the ambient reason with it). */
@@ -60,9 +72,29 @@ export function setSwayEnabled(u: ArtUniforms, on: boolean): void {
   u.sway.uSwayAmplitude.value = on ? SWAY_AMPLITUDE_M : 0;
 }
 
-/** Chunks after the lattice on the terrain material. */
-export function terrainChunks(u: ArtUniforms): ShaderChunk[] {
-  return [createSplatChunk(u.splat), createGrainChunk(u.grain), createEdgeFadeChunk(u.edge)];
+/** What a terrain look variant adds to the terrain material (nothing: D11a's splat exactly, plus the earthwork colours). */
+export interface TerrainChunkOptions {
+  readonly crispSplat?: boolean;
+  readonly detail?: boolean;
+  /** The splat keeps the grass on earthworks (fades its surfaces and AO tint there); without it the splat is D11a's `terrain-splat-v2`. */
+  readonly earthworkSplat?: boolean;
+  readonly relief?: boolean;
+  /** Compile the relief chunk's facet path (lattice triangles lit as facets). */
+  readonly facets?: boolean;
+}
+
+/**
+ * Chunks after the lattice on the terrain material: splat (keeping the grass on
+ * earthworks when asked), then the earthwork colours right after it, then
+ * relief (its contour hint darkens fields and roads too; its facets fade out
+ * on earthworks), grain and edge fade. Without options the splat is D11a's
+ * exactly, and the earthwork chunk acts only on earthwork vertices, so where no
+ * track is built the terrain renders as D11a's.
+ */
+export function terrainChunks(u: ArtUniforms, options: TerrainChunkOptions = {}): ShaderChunk[] {
+  const splat = createSplatChunk(u.splat, { crisp: options.crispSplat === true, earthwork: options.earthworkSplat === true, ...(options.detail ? { detail: u.detail } : {}) });
+  const relief = options.relief ? [createReliefChunk(u.relief, { facets: options.facets === true })] : [];
+  return [splat, createEarthworkChunk(u.earthwork), ...relief, createGrainChunk(u.grain), createEdgeFadeChunk(u.edge)];
 }
 
 /** Chunks after the lattice on the water material. */

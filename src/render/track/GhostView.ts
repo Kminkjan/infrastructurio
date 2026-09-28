@@ -136,6 +136,8 @@ export class GhostView {
     { x: Number.NaN, y: Number.NaN },
   ];
   private tagsShown = false;
+  /** The centrelines the ghost shows, kept so its elevation marks can be measured again (`refreshGround`). */
+  private lines: readonly TrackCentreline[] = [];
 
   constructor(
     tagParent: HTMLElement,
@@ -200,7 +202,24 @@ export class GhostView {
       }
     }
     this.ribbons.set(pieces, ghost !== null && !ghost.valid);
-    const marks = elevationMarks(lines, this.groundM);
+    this.lines = lines;
+    this.measure();
+  }
+
+  /**
+   * Measures the drop lines and end-height tags again on the ghost's centrelines, against the ground as it is drawn
+   * now; returns false when no ghost shows. The app calls it when the earthworks finish drawing a revision: a
+   * commit sets the chained ghost before the time-sliced conform lands, so its marks measured the ground from before
+   * the build, and a ghost whose plan did not change was never measured again (PR #83 re-review).
+   */
+  refreshGround(): boolean {
+    if (this.lines.length === 0) return false;
+    this.measure();
+    return true;
+  }
+
+  private measure(): void {
+    const marks = elevationMarks(this.lines, this.groundM);
     const old = this.dropGeometry;
     this.dropGeometry = new BufferGeometry();
     if (marks.dropLines.length > 0) this.dropGeometry.setAttribute("position", new BufferAttribute(marks.dropLines, 3));

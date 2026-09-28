@@ -5,12 +5,17 @@ import { DEFAULT_TERRAIN_SIZE, generateTerrain } from "../../core/terrain";
 import { makeTerrain } from "../../../tests/support/makeTerrain";
 import { simToWorld } from "../coords";
 import {
+  D11A_TERRAIN_COLOURS,
   WATER_DISTANCE_FAR,
+  computeDryColors,
+  computeNodeColors,
   computeNodeNormals,
   computeTerrainShading,
   computeWaterDistance,
   localMeanHeights,
+  smoothHeightsDm,
 } from "./terrainShading";
+import { TERRAIN_LOOKS } from "./terrainLook";
 
 describe("terrain shading", () => {
   it("counts lattice rings to the nearest water node", () => {
@@ -67,5 +72,103 @@ describe("terrain shading", () => {
     const luminance = (i: number) => (colors[3 * i] ?? 0) + (colors[3 * i + 1] ?? 0) + (colors[3 * i + 2] ?? 0);
     expect(luminance(0)).toBeGreaterThan(luminance(1));
     expect(luminance(1)).toBeGreaterThan(luminance(2));
+  });
+
+  it("smooths heights with a six-neighbour binomial filter that keeps planes and flattens spikes", () => {
+    const plane = makeTerrain(14, 12, (q, r) => 300 + 3 * q + 7 * r);
+    const smoothed = smoothHeightsDm(plane, 2);
+    // Two passes reach two rings; inside that margin a plane is exact.
+    for (let row = 2; row < plane.rows - 2; row++) {
+      for (let col = 2; col < plane.columns - 2; col++) expect(smoothed[row * plane.columns + col]).toBeCloseTo(plane.heightsDm[row * plane.columns + col] ?? 0, 9);
+    }
+    const spike = makeTerrain(9, 9, (_q, _r, col, row) => (col === 4 && row === 4 ? 180 : 100));
+    const one = smoothHeightsDm(spike, 1);
+    expect(one[4 * 9 + 4]).toBeCloseTo(100 + (2 * 80) / 8, 9);
+    expect(one[4 * 9 + 5]).toBeCloseTo(100 + 80 / 8, 9);
+    expect([...smoothHeightsDm(spike, 0)]).toEqual([...spike.heightsDm]);
+  });
+
+  it("keeps D11a's shading by default and gives the variants smoothed normals and a calmer bake", () => {
+    const t = generateTerrain({ seed: "baltic-diorama", ...DEFAULT_TERRAIN_SIZE });
+    const d11a = computeTerrainShading(t);
+    const explicit = computeTerrainShading(t, D11A_TERRAIN_COLOURS);
+    expect(explicit.colors).toEqual(d11a.colors);
+    expect(explicit.normals).toEqual(d11a.normals);
+    expect(computeNodeColors(t, d11a.waterDistance)).toEqual(d11a.colors);
+
+    const calm = computeTerrainShading(t, TERRAIN_LOOKS.a.colours);
+    expect(calm.colors.every((v) => Number.isFinite(v) && v >= 0 && v <= 1)).toBe(true);
+    expect(calm.normals.filter((_, i) => i % 3 === 1).every((y) => y > 0)).toBe(true);
+    // Neighbouring normals differ less once the 1 dm height steps are smoothed away.
+    const roughness = (n: Float32Array) => {
+      let sum = 0;
+      for (let row = 1; row < t.rows - 1; row++) {
+        for (let col = 1; col < t.columns - 1; col++) {
+          const i = 3 * (row * t.columns + col);
+          sum += Math.hypot((n[i] ?? 0) - (n[i + 3] ?? 0), (n[i + 2] ?? 0) - (n[i + 5] ?? 0));
+        }
+      }
+      return sum;
+    };
+    expect(roughness(calm.normals)).toBeLessThan(0.8 * roughness(d11a.normals));
+    // The calmer bake spreads grass tones less than D11a's 70 m patches.
+    const spread = (c: Float32Array) => {
+      const g: number[] = [];
+      for (let i = 0; i < t.water.length; i++) if (!t.water[i]) g.push(c[3 * i + 1] ?? 0);
+      g.sort((a, b) => a - b);
+      return (g[Math.floor(0.95 * g.length)] ?? 0) - (g[Math.floor(0.05 * g.length)] ?? 0);
+    };
+    expect(spread(calm.colors)).toBeLessThan(0.75 * spread(d11a.colors));
+    // Smoothed normals on a plane stay exact in the interior.
+    const plane = makeTerrain(16, 14, (q, r) => 300 + 3 * q + 7 * r);
+    const exact = computeNodeNormals(plane);
+    const fromSmoothed = computeNodeNormals(plane, smoothHeightsDm(plane, 2));
+    const i = 3 * (7 * plane.columns + 8);
+    for (let k = 0; k < 3; k++) expect(fromSmoothed[i + k]).toBeCloseTo(exact[i + k] ?? 0, 6);
+  });
+
+  it("gives made ground a dry colour: the land recipe without the shore soil, on water nodes at the water level", () => {
+    const t = generateTerrain({ seed: "baltic-diorama", ...DEFAULT_TERRAIN_SIZE });
+    const shading = computeTerrainShading(t, TERRAIN_LOOKS.b.colours);
+    let far = 0;
+    let shore = 0;
+    let grassy = 0;
+    let land = 0;
+    let greener = 0;
+    for (let i = 0; i < t.water.length; i++) {
+      const ring = shading.waterDistance[i] ?? 255;
+      const [r, g, b] = [0, 1, 2].map((k) => shading.dryColors[3 * i + k] ?? 0) as [number, number, number];
+      if (ring > 3) {
+        far += 1;
+        expect([r, g, b]).toEqual([0, 1, 2].map((k) => shading.colors[3 * i + k]));
+        continue;
+      }
+      shore += 1;
+      expect([r, g, b].every((v) => Number.isFinite(v) && v >= 0 && v <= 1)).toBe(true);
+      // Grass, not soil or the underwater bed: green leads red and blue.
+      if (g > r && g > b) grassy += 1;
+      // On the soil rings of the shore it is greener than the soil-tinted colour it replaces.
+      if (ring > 0 && ring < 3) {
+        land += 1;
+        if (g / r > (shading.colors[3 * i + 1] ?? 0) / (shading.colors[3 * i] ?? 1)) greener += 1;
+      }
+    }
+    expect(far).toBeGreaterThan(100_000);
+    expect(shore).toBeGreaterThan(1000);
+    expect(grassy / shore).toBeGreaterThan(0.99);
+    expect(land).toBeGreaterThan(500);
+    expect(greener).toBe(land);
+  });
+
+  it("builds the land recipe once per bake, with the bytes each colour pass gives on its own", () => {
+    // Review finding (PR #83): computeTerrainShading built the land recipe twice (the ±25 m mean and the land
+    // range scan each time). It now shares one; the colours must not change by a bit, for D11a and a variant.
+    const t = generateTerrain({ seed: "baltic-diorama", ...DEFAULT_TERRAIN_SIZE });
+    for (const colours of [TERRAIN_LOOKS.d11a.colours, TERRAIN_LOOKS.b.colours]) {
+      const shading = computeTerrainShading(t, colours);
+      const alone = computeNodeColors(t, shading.waterDistance, colours);
+      expect(shading.colors).toEqual(alone);
+      expect(shading.dryColors).toEqual(computeDryColors(t, alone, shading.waterDistance, colours));
+    }
   });
 });

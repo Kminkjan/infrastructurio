@@ -901,6 +901,400 @@ decision below sets D3 planner behaviour and accepts no ADR.
     shows it, although another neighbour, or two bends on the node, may be valid;
   - timings on the gate hardware, or agreement across JavaScript engines.
 
+## Findings (2026-09-27, earthworks-lite)
+
+Recorded on branch `codex/d3-earthworks-lite`, from the D3 branch at `c699393`, code at
+`c363352` ([#67](https://github.com/Kminkjan/infrastructurio/issues/67); the D4 criterion is
+[#68](https://github.com/Kminkjan/infrastructurio/issues/68)'s). Measurements are automated
+evidence (Vitest 4.1.10, Node 26.7.0, macOS 26.6.2, Apple M5 Pro) unless labelled agent
+(Playwright 1.63.0, headless Chrome 153, same machine). The status of this ADR stays
+Proposed: the owner decision pulls a render criterion forward and accepts no ADR.
+- **Owner decision (2026-09-27, as relayed to the implementing agent).** "Earthworks-lite
+  now": pull D4's "earthworks conform" forward in the renderer. The terrain is cut and
+  filled under the track so that it always shows, in a cutting or on an embankment. Sim
+  terrain is unchanged. The relayed problem: curves vanish part-way into rising ground,
+  because a curve is one piece with one grade, so only its ends sit on the ground (the D3
+  ground-following finding above: 13.8% of curve samples more than 1 m under, worst 14.6 m).
+- **Population.** 3,000 zero-step plans from the D3 render-lift generator (same seed, now
+  shared as [`tests/support/groundPlans.ts`](../../tests/support/groundPlans.ts)), 51,886
+  pieces, each conformed on its own as the tool would build it. Every piece is sampled every
+  0.25 m along its drawn centreline, at the centre and both rails. "Buried" means the drawn
+  terrain lies above the drawn rail tops (track height + 0.45 m). The code is
+  [`earthworkVisibility.test.ts`](../../src/render/terrain/earthworkVisibility.test.ts) at
+  `PLANS = 3000`; the suite runs 300.
+- **Before** (the natural LOD0 surface):
+
+  | Piece kind | Centreline samples | Rail tops buried | Worst | Ballast-top edges (±1.6 m) buried |
+  |---|---|---|---|---|
+  | curve | 653,639 | 26.7% | 14.14 m | 38.7% |
+  | shift | 19,737 | 5.7% | 1.21 m | 22.0% |
+  | straight | 1,420,420 | 0.032% | 0.12 m | 7.4% |
+
+- **The rule** ([`render/terrain/earthworks.ts`](../../src/render/terrain/earthworks.ts)).
+  The mechanism follows the decision; the numbers are defaults to test.
+  - For each ground-structure piece, with d the plan distance to its centreline and z the
+    track height at the nearest centreline point (linear in arc length, as drawn), there is
+    a cut envelope U = z + max(0, d − 3 m) / 1.5 and a fill envelope
+    L = z − max(0, d − 3 m) / 1.5.
+  - That is a 6 m flat formation (bed) at the track height, 0.15 m under the drawn ballast
+    top, so the ballast reads, with 1 : 1.5 side slopes (33.7°) for cuts and fills alike:
+    stylised and plausible for 1900 earthworks.
+  - U is the lowest envelope over all pieces and L the highest. The drawn height is
+    C = min(U, max(N, L)) over the natural surface N, so cuts win and no fill (and no other
+    track's embankment) can rise over a track.
+  - Under water the fill stops 10 cm below the surface, so it never z-fights the water
+    plane. Where |C − N| ≤ 5 cm the ground stays natural, so ground-level track on gentle
+    ground leaves the terrain alone.
+  - A piece's reach, 3 m + 1.5 × the relief around it + 1 m, bounds the chunks it marks.
+    Bridges and tunnels are D4's, and are not conformed.
+- **Mesh: three options measured on the same 3,000 plans.**
+
+  | Option | Rail tops buried | Least clearance | Ballast-top edges buried | Cost per plan |
+  |---|---|---|---|---|
+  | A: the rule at LOD0 nodes only (5 m) | 0% | 0.17 m | 6.2% | 39.5 nodes moved (about 855 m²), no extra triangles |
+  | B: A, plus every node of a triangle under the ballast top clamped to the bed | 0% | 0.45 m | 0% | 85.3 nodes moved (about 1,847 m²), no extra triangles |
+  | **C (chosen): each affected triangle refined 4 × 4, its plain neighbours fanned** | **0%** | **0.32 m** | **0%** | 183.2 triangles refined, about 2,750 triangles added before fans |
+
+  - **A** keeps the rails clear here only as a measurement: nothing bounds it, since a 5 m
+    triangle can take a vertex 5.8 m out, 1.9 m above the bed. It leaves 6.2% of the
+    ballast edges sunk, and draws soft 5 m smudges with ragged edges (agent capture of a
+    temporary `REFINE = 1` build, not committed).
+  - **B** guarantees clear track but moves 2.2 times the ground. By the lattice geometry (not
+    measured), its floors are about 8.7 m wide along primary headings, with staircase edges
+    along curves.
+  - **C** guarantees clear track by construction. Under the ballast top every drawn vertex
+    lies within one 1.25 m sub-triangle edge of the track, inside the 3 m bed, so the
+    drawn ground there is at most 5 cm over the bed: 10 cm under the ballast top and 40 cm
+    under the rail tops. LOD1 refines to 2.5 m, where the rails still clear (the slope term
+    adds at most 0.21 m).
+  - **Skirt geometry alone** cannot show a cut, because the natural terrain covers it unless
+    the terrain beneath is lowered anyway. It was not built.
+- **C, in detail.**
+  - A refined triangle takes the 1.25 m sub-lattice (the same triangular lattice, 4 times
+    finer) with the rule's heights. A plain triangle beside one becomes a fan through the
+    refined edge's vertices, in its own plane, with interpolated normals and colours, so it
+    looks unchanged and there are no T-junctions.
+  - Tests over the hill crossing at both LODs: every edge is used at most twice, and the
+    outline length and plan area equal the plain chunk's. The drawn mesh equals the picking
+    heightfield within 1 mm over more than 1,000 probes. With nothing near, a chunk equals
+    the plain chunk byte for byte. Seams match the neighbouring chunk.
+  - Cut faces at 1 : 1.5, plus the track's grade, can exceed the 35.26° view pitch and face
+    away from the camera. FrontSide culls them, and on a heightfield the ground in front
+    hides them anyway. A test checks that every triangle clockwise on screen is one of
+    these (under 5% of a chunk's), and that every plan-projected triangle winds
+    counter-clockwise at all six yaws.
+- **After** (C): no rail-top sample is buried, at LOD0 or LOD1, for any piece kind; the least
+  clearance is 0.32–0.37 m. The ballast-top edges are 0% buried at LOD0 and 0.001%
+  (straights) and 0.005% (shifts) at LOD1, the far band under 2 ppm. The committed 300-plan
+  test asserts that rails stay clear at both LODs and ballast edges at LOD0.
+- **Depth at the centreline** (the same 3,000 plans, 2,093,796 samples; natural ground
+  minus track height):
+  - cut: over 8 m 0.120%, 4–8 m 0.628%, 2–4 m 1.209%, 1–2 m 2.658%, 0.05–1 m 10.978%;
+  - within ±5 cm: 63.616%;
+  - fill: 0.05–1 m 11.401%, 1–2 m 5.511%, 2–4 m 3.091%, 4–8 m 0.688%, over 8 m 0.098%.
+
+  The deepest cut is 14.55 m and the highest fill 13.51 m. Beyond D4's ±4 m ground band lie
+  0.75% of samples as cuts and 0.79% as fills. They would be D4 tunnels and bridges, and are
+  conformed anyway here.
+- **Shading.** Two in-house palette tokens: `earthworkFace` `#9E8A6C` (slopes) and
+  `earthworkBed` `#7B705E` (the formation beside the ballast).
+  - Each vertex carries an unclamped ramp, (movement − 5 cm) / 45 cm. The terrain shader
+    ([`shaderChunks/earthwork.ts`](../../src/render/art/shaderChunks/earthwork.ts)) clamps
+    it per fragment, after the splat. It picks bed or face by the smooth world normal (bed
+    at y ≥ 0.97, face at y ≤ 0.88) and fades the splat (fields, roads, forest floor, AO
+    tint) by the same weight.
+  - The first build baked a clamped colour per vertex. At Close its crest edge sawtoothed
+    along the 1.25 m triangles (agent capture). Clamping per fragment follows the smooth
+    contour instead.
+- **Scenery.** Trees and props collapse (scale 0 about the trunk) where their trunk or post
+  stands within 5 m of a centreline (the 3 m bed plus 2 m, so crowns mostly stay off the
+  ballast), or where the drawn ground moved more than 10 cm. Undo restores them exactly
+  (tests). Fields fade in the shader.
+  - Buildings are not moved. 255 of the 3,000 plans (8.5%) have earthworks that claim a
+    building lot's centre or a corner, 873 claims in all. The building floats over the cut
+    or sinks into the fill there; D3 validation does not know about buildings.
+- **Picking.** The construction pick marches the drawn LOD0 heightfield, so the cursor lands
+  on the ground the player sees.
+  - Agent e2e: 2.8 m beside the deepest point of a hill curve, the pick lands within 0.5 m
+    of the cutting floor, where the natural hill would put it metres away. Over the curve's
+    rails the track picker still returns the curve.
+  - A free node keeps the sim ground's height (`groundMmAt`). The snap ring over a free node
+    inside an earthwork therefore floats at the natural height, which is where new track
+    would start.
+- **Ghost: see-through, not conformed live.** The two-pass ghost (0.7 depth-tested, 0.2
+  see-through) is unchanged.
+  - Of the zero-step plans, 25.3% of curve ribbon samples (5.2% of shift and 0.3% of
+    straight samples) lie under the natural ground. Until built, those parts show only
+    through the 0.2 pass: in the agent capture the buried curve reads as a faint white
+    ribbon over the hill.
+  - Conforming live would rebuild 1–4 chunks per re-plan, churn the ground under the
+    pointer, and carve for invalid plans too.
+- **Incremental rebuilds and cost (dev measurements, not gates).** A new revision diffs
+  pieces by key. The reach boxes of pieces that left or arrived mark the chunks to rebuild:
+  LOD0 first, then the scenery on them, then LOD1, in 8 ms slices, and each chunk is rebuilt
+  from scratch.
+  - Node, three runs of
+    [`EarthworksView.test.ts`](../../src/render/terrain/EarthworksView.test.ts), 40 edits of
+    8–12 pieces on the diorama, each built and undone:
+    - rebuild median 1.88–2.06 ms, p95 4.66–5.30 ms, max 6.77–6.96 ms;
+    - undo median 0.52–0.58 ms, p95 1.17–1.35 ms.
+  - Node, a 505-piece network: the full rebuild takes 57.4–60.4 ms over 38 chunk rebuilds
+    (19 chunks at 2 LODs, 36 with earthworks; 4,898 refined LOD0 triangles). The 8 ms slices
+    spread it over 5–6 frames, but one chunk alone takes up to 9.9 ms, over the slice.
+  - Agent browser, two runs of 20 warmed edit and undo cycles of the hill curve: edits
+    3.5–6.8 ms (medians 3.8 and 4.7), undos 1.3–3.4 ms. The first, cold edit took 12–17 ms
+    over 2 slices. `renderer.info.memory.geometries` grew by one over the cycles, with and
+    without earthworks alike, and the D3 manual capture's own 20-cycle leak check stayed
+    at 94.
+  - The Default capture with the hill curve drew 1,108,173 triangles against 1,098,981
+    without earthworks (+0.8%). The build is 282.23 kB gzip.
+  - Gate B8 (provisional, ≤ 3 ms p95 rebuild after a 10-piece edit, all static layers;
+    authoritative only in the
+    [acceptance gates](../evidence/m4/2026-09-26-acceptance-gates.md)) is likely at risk:
+    earthworks alone reach a 5 ms p95 here. D13 measures it; the likely levers are
+    deferring LOD1 until the far band shows, and splitting heavy chunks.
+- **Agent browser check (captures, not a Look Gate).** `CAPTURE=1 npx playwright test
+  --project=capture`, 1280 × 800, yaw 0, Far 0.9 (LOD1 terrain), Region 2.5, Default 6 and
+  Close 12 ppm. "Before" is the same build with `?earthworks=0`.
+  - A curve over the hill, a free drag (226, 100) → (233, 117):
+    - before, the straight lead-in shows at the forest edge and the curve disappears into
+      the hill, with only a sliver of rail near its far end at Close and nothing at Region
+      or Far;
+    - after, the whole curve runs in a cutting at every zoom: a flat dark bed along the
+      ballast, and a lighter earth face rising on the hill side to a crisp crest. At Far the
+      cutting reads as a small earth leaf with the ballast stripe through it.
+  - A 12-piece straight on a cross-slope by the river, (226, 115) → (238, 115):
+    - before, the ballast sinks on the uphill side;
+    - after, it sits on a shelf: a thin cut face above, a narrow fill below, the ballast
+      whole.
+  - Mid-drag over the hill, the ghost's buried part shows as the see-through ribbon.
+  - No page errors or warnings.
+- **Not established:**
+  - whether the earthworks look right: that is for the Look Gates and the owner, and the
+    colours and the 1 : 1.5 slope are in-house defaults;
+  - D4 structures: deep cuts and high fills are conformed here, where D4 would build
+    tunnels and bridges;
+  - validation, grades and the planner, which are unchanged: the D4 grade rule would still
+    reject about half of the pieces a ground-following drag makes;
+  - track lowered below the water surface next to water, whose cut would show the water
+    plane over it (zero-step plans never cut below it);
+  - timings on the gate hardware.
+
+## Findings (2026-09-27, render pass iteration)
+
+Recorded on branch `codex/render-earthworks-terrain`, code at `b864b05` (from `329b69a`,
+draft PR [#83](https://github.com/Kminkjan/infrastructurio/pull/83)). The trigger was owner
+feedback on the earthworks above, as relayed to the implementing agent: "The groundwork/dirt
+seems very pixely", then "Still a bit wonky". The look side is in
+[art direction](../art-direction.md#render-pass-iteration-2026-09-27). Measurements are
+automated (Vitest 4.1.10, Node 26.7.0, macOS 26.6.2, Apple M5 Pro) unless labelled agent
+(Playwright 1.63.0, headless Chrome, same machine). The status of this ADR stays Proposed.
+- **The rule, made smooth** ([`earthworks.ts`](../../src/render/terrain/earthworks.ts)). The
+  mechanism of the earthworks-lite finding stands; four details changed.
+  - **Crest and toe.** The side slope rises e(d) = ease(d − W) / S. `ease` is 0 on the
+    formation, x² / 2b over b = 2 m, then x − b/2: 1 : 1.5 with a rounded crest or toe and no
+    kink. The formation stays flat to W = 3 m.
+  - **Daylight line.** The natural surface is clamped between L = z − e and U = z + e by
+    mid + sign(x)·smin(|x|, half, k), with a polynomial smooth minimum over k = 0.6 m of height,
+    narrowed to 2·min(|x|, half) so shallow ground keeps its sign.
+    - It never leaves [L, U] and is exact on the formation.
+    - Where the envelopes of two tracks conflict (L ≥ U) it takes U: cuts still win.
+  - **Leave natural.** The hard 5 cm step is a soft band: moves up to 5 cm stay natural,
+    moves from 10 cm are drawn in full, with a smoothstep between. So the ground within the
+    band lies at most about 5.4 cm above the bed (calculated).
+  - **Water.** Fills continue their slope under the water. Round 1's cap, 10 cm under the
+    surface, left a shelf whose edge dropped over one 1.25 m sub-triangle.
+  - The reach grew by b/2 + S·k = 1.9 m, to cover the round-offs.
+- **The visibility guarantee holds** (same test and population as round 1, at PLANS = 3000;
+  the committed suite runs 300). The fresh population is 3,000 plans with 52,114 pieces;
+  round 1 recorded 51,886 pieces, so only fresh numbers are compared here.
+  - No rail-top sample is buried, at LOD0 or LOD1, for any piece kind. The least clearance
+    is 0.323–0.367 m.
+  - Ballast-top edges: 0% buried at LOD0; 0.004% (shifts) and 0.001% (straights) at LOD1,
+    the far band.
+  - Before (natural LOD0 surface): curve rail tops buried 26.811% (worst 14.14 m).
+  - The argument is unchanged. Under the ballast top every drawn vertex lies within
+    1.25 + 1.6 m of the centreline, inside the flat 3 m formation, where the clamp gives the
+    bed exactly.
+- **Mesh** ([`earthworkMesh.ts`](../../src/render/terrain/earthworkMesh.ts)).
+  - **Normals.** A moved vertex's normal is the smooth natural normal tilted by the
+    least-squares gradient of the departure D = C − N over its six sub-lattice neighbours.
+    - Round 1 blended in the raw drawn-surface normal over the first 30 cm of movement. That
+      normal carries the 5 m lattice facets, and the relief chunk's ×5 slope gain magnified
+      them into teeth along the lip (agent capture: they vanish at gain 1).
+    - D is smooth and exactly 0 on natural ground, so no blend threshold is needed. Test: a
+      6 m bank has upright normals on its bed and 33.7° ± 0.05° on its straight slope.
+  - **Colour attribute.** It is now a vec3: the encoded potential max(N − U, L − N)
+    (|N − U| where the envelopes conflict), the signed departure, and the centreline
+    distance.
+    - The potential is unclamped and piecewise smooth, so linear interpolation keeps its
+      contours.
+    - Plain corners that refined triangles reuse carry their true values. Unmoved vertices,
+      fans among them, carry no earthwork colour weight (tested).
+  - **Colours.** Moved vertices blend toward a dry bake, the land recipe without the shore
+    soil (on water nodes, taken at the water level), as they move 5–60 cm. A fill standing in
+    a lake is no longer coloured as the underwater bed. The D11a bake and the look bake stay
+    bit-identical to `329b69a` (checked).
+  - Watertightness, the drawn-heightfield equality (within 1 mm), undo byte-exactness, the
+    seams and the winding tests all pass unchanged.
+- **No cliff at the shore.**
+  - Unit test: on a synthetic shore, no drawn sub-triangle is steeper than 1 : 1.5 (× 1.02)
+    and none lies flat at the water plane.
+  - Agent e2e: the owner's scene, laid with the real pointer (a drag (50, 203) → (34, 246)).
+    - The rails stay clear, and within 20 m of the curve's shore end the steepest 0.5 m step
+      over underwater natural ground is 0.664.
+    - It finds no flat shelf at 10 cm under the water. The same test finds 30 shelf samples
+      on `329b69a`.
+  - Nothing is drawn flat at the water plane, so nothing z-fights it.
+- **Rebuild cost** (dev measurements, not gates; five runs each, the same session).
+  - 10-piece edits in
+    [`EarthworksView.test.ts`](../../src/render/terrain/EarthworksView.test.ts):
+    - `329b69a`: median 1.81–1.91 ms, p95 4.24–4.91 ms (the median of the five runs'
+      p95s is 4.38 ms);
+    - `b864b05`: median 2.05–2.29 ms, p95 4.63–6.45 ms (4.83 ms);
+    - undo p95 1.14–1.28 ms against 1.16–1.28 ms.
+  - A 505-piece network: the full rebuild takes 57.2–61.8 ms at `329b69a` and 59.9–67.2 ms
+    at `b864b05`; its longest 8 ms slice is 8.83–9.61 ms and 9.76–11.63 ms. The cause is
+    5,987 refined LOD0 triangles against 4,898 (+22%), from the round-off bands.
+  - An earlier session's baseline was noisier: p95 4.45–6.05 ms, 4.92 ms across runs.
+  - Agent browser: 20 warmed edit and undo cycles of the hill curve, three alternating runs
+    each.
+    - Edits: medians 5.95/6.15/5.95 ms at `329b69a` and 6.6/6.35/6.45 ms at `b864b05`,
+      about +0.4 ms.
+    - Undos: 1.7–3.4 ms and 1.7–3.7 ms.
+    - `renderer.info.memory.geometries` 94 → 95 on both builds.
+  - Gate B8 (provisional, ≤ 3 ms p95; authoritative only in the
+    [acceptance gates](../evidence/m4/2026-09-26-acceptance-gates.md)) stays at risk, a
+    little more than before. The levers are unchanged: defer LOD1 until the far band shows,
+    split heavy chunks. A narrower reach margin is a third.
+- **Not established:** the owner's reading of the new shapes; the look gates; timings on the
+  gate hardware. Nor how the track's rounded end-cap earthworks read: at a shore node they
+  form a small rounded nose into the water, as in round 1.
+
+## Findings (2026-09-28, PR #83 review fixes)
+
+Recorded on branch `codex/render-earthworks-terrain`, code at `8635640` (from `81663f8`,
+draft PR [#83](https://github.com/Kminkjan/infrastructurio/pull/83)). The trigger was a code
+review of the PR in recall mode (13 findings, not adversarially verified); each was checked
+against the code before it was fixed. Measurements are automated (Vitest 4.1.10, Node 26.7.0,
+macOS 26.6.2, Apple M5 Pro) unless labelled agent (Playwright, headless Chrome, same machine).
+The status of this ADR stays Proposed.
+- **The reach converges, per LOD** ([`earthworks.ts`](../../src/render/terrain/earthworks.ts)).
+  - The loop stopped after 8 passes without rescanning its last growth. It now grows until
+    the relief in the box needs no more, still capped at 120 m.
+  - A LOD1 triangle interpolates corners up to one 10 m cell past the box that the LOD0 node
+    scan sees, so LOD1 gets its own reach, from a scan 10 m wider.
+  - Tests: a 32° slope across a run left a 0.67 m ledge at the reach, and a rise just beyond
+    the scan left a 0.63 m ledge at LOD1. Both are now continuous: no jump over 5 cm between
+    samples 1 cm apart.
+  - On a probe of 3,815 diorama pieces (265 plans), 14 pieces had not converged in 8 passes,
+    and 6 of their LOD0 reaches change. 2,328 LOD1 reaches grow, by up to 42 m. On the
+    411-piece network of the new byte pin, LOD0 stays byte-identical and LOD1 changes only in
+    the colour attribute.
+- **Seams.** An unmoved plain corner of a refined triangle carried its colour attribute only
+  in the chunk owning that triangle. The neighbouring chunk's vertex there kept zeros, so the
+  lip weight (facets, slope soil) could jump along the seam: by up to 0.77 of its range on
+  three diorama plans. Both chunks now write it, tested at both LODs. Positions, normals,
+  colours and indices are unchanged.
+- **Ghost.** Its drop lines and end-height tags measure against the drawn surface, as picking
+  does; sim-facing heights keep `groundMmAt`. Agent e2e: a plan started with the real pointer
+  on the hill cutting's floor shows a tag of 9.3 m, for a node 9.26 m above the drawn floor.
+  Before, no tag showed.
+- **Single sources.** The arc maths go through `geometry/sample.ts` (new pure centreline
+  helpers), and one lattice interpolation serves the drawn heightfield and the ray march. A
+  byte pin (`earthworksGolden.test.ts`, 411 pieces on the diorama), recorded at `81663f8`,
+  held through those refactors and the efficiency fixes.
+- **Rebuild cost** (dev measurements, not gates; the machine's load average was 7–15 while
+  measuring, so the ranges overlap).
+  - 10-piece edits in
+    [`EarthworksView.test.ts`](../../src/render/terrain/EarthworksView.test.ts), cold (40
+    edits per run): p95 4.70–5.52 ms over ten runs at `81663f8`, 4.34–5.71 ms over five now;
+    median 2.09–2.37 ms against 2.11–2.30 ms.
+  - Warmed (320 edits per run, five alternating runs each): p95 3.40–3.80 ms against
+    3.20–3.50 ms; median 1.58–1.66 ms against 1.44–1.58 ms.
+  - Undo: median 0.46 → 0.16 ms, p95 1.20–1.37 → 0.29–0.32 ms. A chunk rebuild no longer walks
+    all 8,192 triangle ids of the heightfield.
+  - The 505-piece network: a full rebuild of 58.6 ms against 64.3–65.9 ms.
+  - The savings (pooled heights, per-chunk deletes, fewer nearest-point queries) are partly
+    spent on the per-LOD reach and the seam corners. Gate B8 (provisional, authoritative only
+    in the [acceptance gates](../evidence/m4/2026-09-26-acceptance-gates.md)) stays at risk.
+- **Not established:** the owner's reading; the look gates; timings on the gate hardware.
+
+## Findings (2026-09-28, earthworks re-review fixes)
+
+Recorded on branch `codex/render-earthworks-terrain`, code at `26ae87f` (from `8f79894`, draft PR
+[#83](https://github.com/Kminkjan/infrastructurio/pull/83)). The trigger was a targeted re-review of the
+PR: four confirmed findings and one plausible one, relayed to the implementing agent. Each confirmed
+finding has a regression test that fails against `8f79894`'s modules on the defect itself and passes now.
+Measurements are automated (Vitest 4.1.10, Node 26.7.0, macOS 26.6.2, Apple M5 Pro) unless labelled agent
+(Playwright, headless Chrome, same machine). The conform rule, "cuts win" included, is unchanged. The status
+of this ADR stays Proposed.
+- **A second, higher ground track** ([`earthworks.ts`](../../src/render/terrain/earthworks.ts)
+  `settleReaches`).
+  - A reach was sized from the natural relief alone. Where a higher neighbour's fill overrode this track's
+    cut, the cut stopped at that reach while the fill went on, so the drawn ground jumped up to the fill.
+  - A reach now also clears its neighbours at the cutoff. At plan distance R the piece's cut is at least
+    its lowest bed plus the side slope's rise there. Every neighbour's fill reaching that line must stay
+    0.6 m (the smooth clamp's band) under it, and every neighbour's cut that far over the piece's fill.
+    Neighbour envelopes are bounded from bed samples every 0.5 m.
+  - A piece keeps its natural reach wherever every neighbour clears it. Otherwise it takes the least
+    0.25 m multiple above that reach which clears them. The grid makes the candidates a finite set, so
+    settling ends and gives the least fixed point whatever the order.
+  - `EarthworksView` re-derives only the pieces beside an edit. After a removal, every piece a neighbour
+    had raised starts again from its natural reach. A test compares it with a fresh view after each of 16
+    builds, undos and redos: the same reaches and bytes.
+  - Tests: on flat ground, a second run 8.66–17.32 m away and 5–10 m higher drew faces with slopes of
+    2.16–6.50 at LOD0 and 1.39–3.55 at LOD1. Now none is steeper than 0.77 (1 : 1.5 plus 15 %).
+  - The review proposed folding each neighbour's whole bed range into the relief. Tried first, that
+    raised 155 of the byte pin's 411 LOD0 reaches (by up to 41 m), took 116 ms to settle 2,188 pieces,
+    and changed the pin. The cutoff check replaced it.
+  - On diorama networks the settled reaches change no drawn height on the 411-piece byte pin or on a
+    505-piece network. On a 2,188-piece ground-following network (300 plans), 16 of 23,801 refined LOD0
+    triangles change; the steepest face among them was 2.89 before and is 0.77 after. LOD1 is unchanged
+    there.
+- **The chained ghost** ([`GhostView.ts`](../../src/render/track/GhostView.ts), `main.ts`).
+  - A commit sets the chained ghost before the time-sliced earthworks land, and an unchanged plan was
+    never measured again. `refreshGround` measures the drop lines and tags again once the conformed LOD0
+    surface of a revision is drawn (`EarthworksView.surfaceRev`).
+  - Agent e2e, frames held so the commit and the continuation's ghost land before the sync: the start
+    tag reads "+6 m", then "0 m" once the embankment is drawn, and drop-line vertices go 8 → 6. With
+    `8f79894`'s wiring the tag stayed "+6 m" (8 → 8).
+- **The ghost over water** ([`heightfieldRay.ts`](../../src/render/terrain/heightfieldRay.ts)).
+  - The ghost's ground now reads the water level only over the triangles the water mesh draws
+    (`waterMeshCovers`, shared with `buildWaterData`). A dry cutting's floor 1.5 m under the water level,
+    30 rings from water, reads 8.5 m, where it read 10 m. A cutting within the mesh's three rings of a lake
+    still shows the water drawn over it.
+  - Clamping only where the natural ground lies under water was rejected: it would measure from a flooded
+    cutting's floor under drawn water.
+- **The 120 m cap.**
+  - A capped piece steepens its side slope over the last 10 m (`CAP_FADE_M`) by the rise that clears the
+    ground and its neighbours at the cap. Test: a 20-piece run 90 m over flat ground. The steepest 5 cm
+    step had a slope of 12.27 (a wall a sub-triangle wide); now it stays under 4.
+  - The chunk pass and its mesh now run as slices: one piece, 8,192 touched sub-vertices, or 8 (pass) or
+    4 (mesh) LOD rows. The view resumes a chunk across frames and swaps it in only once whole.
+  - The capped run takes 8 steps over 7 slices of 8 ms, the longest 9.42 ms (one run; the overshoot is one
+    slice of work). Before, one of its chunks took 15.7 ms of pass and 12.5 ms of mesh in a single slice.
+- **Reach inflation on diagonal pieces: skipped.**
+  - Tried: skipping nodes farther than the reach plus a cell from the centreline. It changes 108 of the
+    411 pin reaches (p90 ratio 1.07, max 1.57), keeps every drawn height on three networks (3,104 pieces),
+    and cuts evaluated sub-vertices by 7 % at LOD0 and 13 % at LOD1.
+  - It was not kept. It changes the byte pin (the earthwork attribute at both LODs, and the reach and
+    nearest hashes) without fixing a defect. On ground steeper than the side slope, heights beyond the
+    tighter reach are not guaranteed to stay.
+- **Coverage.** Nearest centreline points on all 12 headings, with arc centres and sweep edges; the seam
+  attribute over 40 plans (was 3); incremental views against fresh ones.
+- **Byte pin** (`earthworksGolden.test.ts`): every hash as at `8f79894`.
+- **Captures (agent):** look `b`'s eleven render-iteration stills (reduced motion, 1280×800) are
+  byte-identical PNGs at `8f79894` and `26ae87f`.
+- **Rebuild cost** (dev measurements, not gates; eight alternating runs each, load average 6–7).
+  - 10-piece edits (40 per run): p95 6.60–10.43 ms (median over runs 6.76) → 6.77–7.45 ms (7.02);
+    median 1.99–2.43 → 2.19–2.54 ms. Undo is unchanged (median 0.15–0.18 ms).
+  - The 505-piece network: a full rebuild of 60–74 ms either way; its longest 8 ms slice 9.99–12.25 →
+    8.16–8.48 ms. Gate B8 (provisional, authoritative only in the
+    [acceptance gates](../evidence/m4/2026-09-26-acceptance-gates.md)) stays at risk.
+- **Not established:** the owner's reading of the changed cases; the look gates; timings on the gate
+  hardware; the `?terrain=d11a` captures, which were not re-shot.
+
 ## Revisit when
 
 - The D3 feel check finds construction unsatisfying for reasons that planner tuning, chained
@@ -950,3 +1344,21 @@ decision below sets D3 planner behaviour and accepts no ADR.
   one bend on a neighbour of the pointer's node over two bends on it, ring 1 and its order,
   the kinks, follow and performance numbers before and after, open doubts); status
   unchanged, still Proposed.
+- 2026-09-27: earthworks-lite findings added (the relayed owner decision to pull D4's
+  earthworks conform forward in the renderer, the conform rule, three mesh options measured,
+  visibility before and after, cut and fill depths, scenery, picking, the ghost decision,
+  rebuild costs); status unchanged, still Proposed.
+- 2026-09-27: render pass iteration findings added (the smooth conform rule: an eased crest
+  and toe, a smooth daylight clamp, a soft leave-natural band and fills continued under
+  water; departure-gradient normals, the vec3 colour attribute and the dry bake; visibility
+  re-measured on 3,000 plans; the shore e2e; rebuild costs before and after); status
+  unchanged, still Proposed.
+- 2026-09-28: PR #83 review findings added (the reach grows until it converges, with its own
+  LOD1 reach; seam corners carry the colour attribute in both chunks; the ghost measures
+  against the drawn surface; single sources and a byte pin; rebuild costs before and after);
+  status unchanged, still Proposed.
+- 2026-09-28: earthworks re-review findings added (reaches settled beside neighbours, the
+  chained ghost measured again once the earthworks land, the ghost over water only where the
+  water is drawn, the capped reach faded and chunks spread over slices, the diagonal reach
+  change skipped, coverage and rebuild costs before and after); status unchanged, still
+  Proposed.

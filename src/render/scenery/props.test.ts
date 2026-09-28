@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { type InstancedMesh, MeshLambertMaterial } from "three";
+import { AssetRegistry } from "../art/AssetRegistry";
 import { convexInwardFacing, inwardFacing, triangleCount, windingMismatches } from "../../../tests/support/geometry";
 import { DIORAMA_SEED, generateDiorama } from "../../core/scenarios/baltic-diorama";
 import { DEFAULT_TERRAIN_SIZE, generateTerrain } from "../../core/terrain";
-import { FENCE_PANEL_M, PROP_BUDGET, PROP_KINDS, buildProp, propPlacements } from "./props";
+import { FENCE_PANEL_M, PROP_BUDGET, PROP_KINDS, PropLayer, buildProp, propPlacements, registerPropAssets } from "./props";
 
-const scenery = generateDiorama(generateTerrain({ seed: DIORAMA_SEED, ...DEFAULT_TERRAIN_SIZE }));
+const terrain = generateTerrain({ seed: DIORAMA_SEED, ...DEFAULT_TERRAIN_SIZE });
+const scenery = generateDiorama(terrain);
 
 describe("props", () => {
   it("stay small and wind outward", () => {
@@ -45,5 +48,29 @@ describe("props", () => {
       expect(Math.hypot(p.xM - 100, p.yM - 200)).toBeCloseTo(k * step, 9);
     });
     expect(panels.length * step).toBeCloseTo(length, 9);
+  });
+
+  it("clears a prop for earthworks and restores its placed matrix exactly", () => {
+    const registry = new AssetRegistry();
+    registerPropAssets(registry);
+    const layer = new PropLayer(scenery, terrain, registry, new MeshLambertMaterial());
+    const placements = propPlacements(scenery);
+    expect(layer.clearableCount).toBe(PROP_KINDS.reduce((n, k) => n + placements[k].length, 0));
+    const meshes = layer.group.children as InstancedMesh[];
+    const before = meshes.map((m) => Float32Array.from(m.instanceMatrix.array));
+    const point = { x: 0, y: 0 };
+    layer.clearablePosition(0, point);
+    const first = placements["telegraph-pole"][0]!;
+    expect(point).toEqual({ x: first.xM, y: first.yM });
+    expect(layer.setCleared(0, true)).toBe(true);
+    layer.commitCleared();
+    const poles = meshes[0]!.instanceMatrix.array;
+    for (const e of [0, 1, 2, 4, 5, 6, 8, 9, 10]) expect(poles[e]).toBe(0);
+    for (const e of [12, 13, 14]) expect(poles[e]).toBe(before[0]![e]);
+    layer.setCleared(0, false);
+    layer.commitCleared();
+    meshes.forEach((m, i) => expect(Array.from(m.instanceMatrix.array)).toEqual(Array.from(before[i]!)));
+    layer.dispose();
+    registry.dispose();
   });
 });

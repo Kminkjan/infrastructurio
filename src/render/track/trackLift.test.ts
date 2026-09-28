@@ -1,20 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createPrng } from "../../core/util/prng";
-import {
-  DEFAULT_TERRAIN_SIZE,
-  type Drag,
-  HEADINGS,
-  type PieceSpec,
-  type TrackPlan,
-  createSim,
-  generateTerrain,
-  groundMmAt,
-  nearestNode,
-  nodeOfOffset,
-  resolvePiece,
-  stepOf,
-  toWorld,
-} from "../../core/sim/api";
+import { type PieceSpec, resolvePiece } from "../../core/sim/api";
+import { diorama, groundPlans } from "../../../tests/support/groundPlans";
 import { sampleTerrainHeightM } from "../terrain/heightfieldRay";
 import { BALLAST_DEPTH_M, BALLAST_TOP_HALF_M, RAIL_HEIGHT_M, RAIL_OFFSET_M, SLEEPER_HEIGHT_M, TRACK_LIFT_M, type TrackCentreline, sampleCentreline } from "./trackGeometry";
 
@@ -25,7 +11,6 @@ import { BALLAST_DEPTH_M, BALLAST_TOP_HALF_M, RAIL_HEIGHT_M, RAIL_OFFSET_M, SLEE
  * came from this code with PLANS = 3000 (about 5 s); the suite runs 300.
  */
 const PLANS = 300;
-const PARAMS = { seed: "baltic-diorama", ...DEFAULT_TERRAIN_SIZE } as const;
 /** Across the track: the rails, the ballast top's edges and the shoulders' base. */
 const RAILS_M = [RAIL_OFFSET_M, -RAIL_OFFSET_M];
 const BALLAST_EDGES_M = [BALLAST_TOP_HALF_M, -BALLAST_TOP_HALF_M];
@@ -34,43 +19,15 @@ const RAIL_TOP_ABOVE_LIFT_M = SLEEPER_HEIGHT_M + RAIL_HEIGHT_M;
 
 describe("track render lift over ground-following track (a dev measurement)", () => {
   it("keeps the rails of ground-level straights above the rendered terrain", async ({ annotate }) => {
-    const terrain = generateTerrain(PARAMS);
-    const sim = createSim({ terrain: PARAMS });
+    const { terrain } = diorama();
     const levelM = terrain.waterLevelDm / 10;
     /** The visible surface: the terrain mesh, or the water plane over it. */
     const surfaceM = (x: number, y: number) => {
       const t = sampleTerrainHeightM(terrain, x, y);
       return t === undefined ? undefined : Math.max(t, levelM);
     };
-    const ground = (n: { q: number; r: number }) => groundMmAt(terrain, n) ?? Number.NaN;
-    const point = (q: number, r: number) => {
-      const w = toWorld({ q, r });
-      return { xMm: Math.round(w.x * 1000), yMm: Math.round(w.y * 1000) };
-    };
-
-    // Plans with zero height steps, as the tool makes them: half straight drags of 10–40 steps, half free
-    // drags within ±150 m, the end re-planned onto the ground at the plan's actual end.
-    const prng = createPrng("render-lift-probe");
-    const plans: TrackPlan[] = [];
-    while (plans.length < PLANS) {
-      const s = nodeOfOffset(60 + prng.nextInt(280), 80 + prng.nextInt(186));
-      const heading = HEADINGS[prng.nextInt(12)] ?? 0;
-      let to = point(s.q, s.r);
-      let fromHeading: typeof heading | undefined = heading;
-      if (prng.nextInt(2) === 0) {
-        const k = 10 + prng.nextInt(31);
-        const d = stepOf(heading);
-        to = point(s.q + d.q * k, s.r + d.r * k);
-      } else {
-        to = { xMm: to.xMm + prng.nextInt(300_001) - 150_000, yMm: to.yMm + prng.nextInt(300_001) - 150_000 };
-        if (prng.nextInt(2) === 0) fromHeading = undefined;
-      }
-      const from = { q: s.q, r: s.r, zMm: ground(s) };
-      const drag = (end: { q: number; r: number }): Drag => ({ from, ...(fromHeading === undefined ? {} : { fromHeading }), to, dzMm: ground(end) - from.zMm, magnetism: true });
-      let plan = sim.planTrack(drag(nearestNode({ x: to.xMm / 1000, y: to.yMm / 1000 })));
-      if (plan.end && plan.end.node.zMm !== ground(plan.end.node)) plan = sim.planTrack(drag(plan.end.node));
-      if (plan.fit !== "none") plans.push(plan);
-    }
+    // Plans with zero height steps, as the tool makes them (the shared generator the earthworks tests use too).
+    const plans = groundPlans(PLANS);
 
     // Terrain minus track height (m), every 0.25 m along each piece's rendered centreline, by piece class.
     type Samples = { centre: number[]; rails: number[]; ballast: number[]; shoulder: number[] };

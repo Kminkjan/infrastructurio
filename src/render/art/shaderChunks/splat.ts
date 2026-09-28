@@ -1,6 +1,9 @@
 import { Color, type IUniform, type Texture, Vector2 } from "three";
 import { palette } from "../palette";
 import { ALBEDO_ANCHOR, type ShaderChunk, ensureArtWorld, inject } from "./chunk";
+import { ensureEarthworkVarying } from "./earthwork";
+import { GROUND_DETAIL_PARS, type GroundDetailUniforms } from "./groundDetail";
+import { smoothstep } from "../../math";
 
 /**
  * The terrain splat (art direction "Terrain and water"): data textures painted
@@ -19,6 +22,21 @@ import { ALBEDO_ANCHOR, type ShaderChunk, ensureArtWorld, inject } from "./chunk
  * a cosine stripe across each field's heading, faded to its mean by its screen
  * frequency (`fwidth`) so it never aliases. `splatAlbedo` and `furrowStripe`
  * mirror the GLSL for tests.
+ *
+ * Terrain look variants (2026-09-27) opt into two extras; without them the
+ * GLSL and cache key are exactly D11a's:
+ * - `crisp`: the 1 m splat is bilinear, so at Default and Close zoom its edges
+ *   blur over 6–12 px. Fields and cobbles are cut at weight 0.5 and roads and
+ *   yards at 0.45 (keeping the yard's partial weight), and the forest floor at
+ *   a noisy level, each over one pixel (`crispSplatWeight` mirrors it).
+ * - `detail`: runs `groundDetail` on the grass before any surface is laid.
+ *
+ * The terrain material always adds a third (render pass iteration, 2026-09-27):
+ * - `earthwork`: reads the terrain's `earthwork` attribute (see
+ *   `shaderChunks/earthwork.ts`) and fades the surfaces and the AO tint by its
+ *   earthwork weight, and the grass detail's slope soil by its lip, so cuttings
+ *   and embankments keep the grass (and its detail) instead of fields, roads,
+ *   forest floor or a frayed soil rim. Off earthworks the colour is unchanged.
  */
 
 export const FURROW_SPACING_M = 1.4;
@@ -123,12 +141,51 @@ float splatNoise( vec2 p ) {
 }
 `;
 
-const FRAGMENT_MAIN = /* glsl */ `
+/** The crisp-mode cut levels on the splat weights (see `crispSplatWeight`). */
+export const SPLAT_CUTS = { dirt: 0.45, cobble: 0.5, field: 0.5, forestFloor: [0.2, 0.4] } as const;
+
+const CRISP_PARS = /* glsl */ `
+// 1 where x > 0, 0 where x < 0, over about one pixel of x's screen gradient.
+float splatCut( float x ) {
+  float w = max( fwidth( x ), 1e-4 );
+  return smoothstep( - w, w, x );
+}
+`;
+
+// Cuts the bilinear 1 m weights to pixel-crisp edges. Roads and yards keep their weight
+// past the cut (yards are painted at 0.55); fields and cobbles become all or nothing; the
+// forest floor's edge frays with a 4 m noise.
+const CRISP_MAIN = /* glsl */ `  splat.r *= splatCut( splat.r - ${SPLAT_CUTS.dirt.toFixed(2)} );
+  splat.g = splatCut( splat.g - ${SPLAT_CUTS.cobble.toFixed(2)} );
+  splat.b = splatCut( splat.b - ${SPLAT_CUTS.field.toFixed(2)} );
+  splat.a *= splatCut( splat.a - mix( ${SPLAT_CUTS.forestFloor[0].toFixed(2)}, ${SPLAT_CUTS.forestFloor[1].toFixed(2)}, splatNoise( splatXY / 4.0 + 11.0 ) ) );
+`;
+
+// The grass detail runs on the vertex colour before any surface is laid over it; the
+// surfaces keep their shade from the undetailed grass, so no patch shows through a road.
+function detailMain(earthwork: boolean): string {
+  return /* glsl */ `  #ifdef FLAT_SHADED
+  float splatUp = abs( normalize( cross( dFdx( vArtWorld ), dFdy( vArtWorld ) ) ).y );
+  #else
+  float splatUp = ( vec4( normalize( vNormal ), 0.0 ) * viewMatrix ).y;
+  #endif
+  base = groundDetail( base, splatXY, vArtWorld.y, splatUp, ${earthwork ? "1.0 - splatLip" : "1.0"} );
+`;
+}
+
+// Earthworks keep the grass: surfaces fade by the earthwork weight, the slope soil by the lip.
+const EARTHWORK_MAIN = /* glsl */ `  float splatEarthwork = earthworkWeight();
+  float splatLip = earthworkLip();
+  splat *= 1.0 - splatEarthwork;
+`;
+
+function fragmentMain(crisp: boolean, detail: boolean, earthwork: boolean): string {
+  return /* glsl */ `
 {
   vec2 splatXY = vec2( vArtWorld.x, -vArtWorld.z );
   vec2 splatUv = splatXY / uSplatSizeM;
   vec4 splat = texture( uSplatMap, splatUv );
-  vec3 luma = vec3( ${LUMA.join(", ")} );
+${crisp ? CRISP_MAIN : ""}${earthwork ? EARTHWORK_MAIN : ""}  vec3 luma = vec3( ${LUMA.join(", ")} );
   float shade = clamp( dot( diffuseColor.rgb, luma ) / max( dot( uSplatGrassRef, luma ), 1e-3 ), ${SHADE_MIN.toFixed(2)}, ${SHADE_MAX.toFixed(2)} );
   ivec2 fieldSize = textureSize( uFieldMap, 0 );
   ivec2 fieldTexel = clamp( ivec2( floor( splatUv * vec2( fieldSize ) ) ), ivec2( 0 ), fieldSize - 1 );
@@ -143,22 +200,41 @@ const FRAGMENT_MAIN = /* glsl */ `
   vec3 field = uSplatCrops[ crop ] * ( 1.0 - uFurrowStrength * stripe );
   vec3 cobble = mix( uSplatCobble, uSplatCobbleDark, splatNoise( splatXY * 1.6 ) );
   vec3 base = diffuseColor.rgb;
-  base = mix( base, uSplatForestFloor * shade, splat.a );
+${detail ? detailMain(earthwork) : ""}  base = mix( base, uSplatForestFloor * shade, splat.a );
   base = mix( base, field * shade, splat.b );
   base = mix( base, uSplatDirt * shade, splat.r );
   base = mix( base, cobble * shade, splat.g );
-  diffuseColor.rgb = base * ( 1.0 - uAoStrength * texture( uAoMap, splatXY / uAoSizeM ).r );
+  diffuseColor.rgb = base * ( 1.0 - uAoStrength * texture( uAoMap, splatXY / uAoSizeM ).r${earthwork ? " * ( 1.0 - splatEarthwork )" : ""} );
 }
 `;
+}
 
-export function createSplatChunk(uniforms: SplatUniforms): ShaderChunk {
+export interface SplatOptions {
+  /** Pixel-crisp surface edges (terrain look variants). */
+  readonly crisp?: boolean;
+  /** Ground detail on the grass under the surfaces (terrain look variants). */
+  readonly detail?: GroundDetailUniforms;
+  /** Keep the grass on earthworks (reads the terrain's `earthwork` attribute; the terrain material always sets it). */
+  readonly earthwork?: boolean;
+}
+
+/** Without options this is D11a's splat, GLSL and cache key unchanged. */
+export function createSplatChunk(uniforms: SplatUniforms, options: SplatOptions = {}): ShaderChunk {
+  const crisp = options.crisp === true;
+  const detail = options.detail;
+  const earthwork = options.earthwork === true;
+  const extras = `${crisp ? "-crisp" : ""}${detail ? "-detail" : ""}${earthwork ? "-earthwork" : ""}`;
+  const pars = `${FRAGMENT_PARS}${crisp ? CRISP_PARS : ""}${detail ? GROUND_DETAIL_PARS : ""}`;
+  const main = fragmentMain(crisp, detail !== undefined, earthwork);
   return {
-    key: "terrain-splat-v2",
+    key: extras === "" ? "terrain-splat-v2" : `terrain-splat-v4${extras}`,
     patch(shader) {
       Object.assign(shader.uniforms, uniforms);
+      if (detail) Object.assign(shader.uniforms, detail);
       ensureArtWorld(shader);
-      shader.fragmentShader = inject(shader.fragmentShader, "#include <common>", FRAGMENT_PARS, "after");
-      shader.fragmentShader = inject(shader.fragmentShader, ALBEDO_ANCHOR, FRAGMENT_MAIN, "before");
+      if (earthwork) ensureEarthworkVarying(shader);
+      shader.fragmentShader = inject(shader.fragmentShader, "#include <common>", pars, "after");
+      shader.fragmentShader = inject(shader.fragmentShader, ALBEDO_ANCHOR, main, "before");
     },
   };
 }
@@ -207,4 +283,26 @@ export function furrowStripe(x: number, y: number, k: number, spacing = FURROW_S
   const [e0, e1] = FURROW_FADE_CYCLES_PER_PX;
   const t = Math.min(1, Math.max(0, (cyclesPerPx - e0) / (e1 - e0)));
   return 0.5 + (stripe - 0.5) * (1 - t * t * (3 - 2 * t));
+}
+
+/**
+ * Mirror of the crisp mode's cut on one splat weight `w` whose screen footprint is `fw`
+ * (the shader's fwidth; 0 = a hard step): roads and yards keep their weight past the cut,
+ * fields and cobbles become all or nothing, the forest floor keeps its weight past a cut
+ * level between SPLAT_CUTS.forestFloor chosen by `noise` (0–1).
+ */
+export function crispSplatWeight(channel: keyof SplatWeights, w: number, fw = 0, noise = 0.5): number {
+  const cut = (x: number) => (fw <= 0 ? (x > 0 ? 1 : x < 0 ? 0 : 0.5) : smoothstep(0, 1, (x + fw) / (2 * fw)));
+  switch (channel) {
+    case "dirt":
+      return w * cut(w - SPLAT_CUTS.dirt);
+    case "cobble":
+      return cut(w - SPLAT_CUTS.cobble);
+    case "field":
+      return cut(w - SPLAT_CUTS.field);
+    case "forestFloor": {
+      const [lo, hi] = SPLAT_CUTS.forestFloor;
+      return w * cut(w - (lo + (hi - lo) * noise));
+    }
+  }
 }

@@ -1,4 +1,5 @@
 import type { DioramaScenery, SplatPath } from "../../core/sim/api";
+import { smoothstep } from "../math";
 
 /**
  * Paints the terrain's data textures from a scenery layout (art direction
@@ -90,11 +91,6 @@ function byte(weight: number): number {
 function writeMax(data: Uint8Array, i: number, weight: number): void {
   const v = byte(weight);
   if (v > (data[i] ?? 0)) data[i] = v;
-}
-
-function smoothstep(e0: number, e1: number, x: number): number {
-  const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
-  return t * t * (3 - 2 * t);
 }
 
 /** A splat path: every texel within half its width (feathered) of a segment. */

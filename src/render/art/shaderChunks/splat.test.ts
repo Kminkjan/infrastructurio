@@ -1,7 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { Color } from "three";
+import { Color, ShaderLib } from "three";
 import { palette } from "../palette";
-import { FURROW_FADE_CYCLES_PER_PX, FURROW_SPACING_M, createSplatUniforms, furrowNormals, furrowStripe, splatAlbedo, syncSplatColors } from "./splat";
+import { createGroundDetailUniforms } from "./groundDetail";
+import {
+  FURROW_FADE_CYCLES_PER_PX,
+  FURROW_SPACING_M,
+  SPLAT_CUTS,
+  createSplatChunk,
+  createSplatUniforms,
+  crispSplatWeight,
+  furrowNormals,
+  furrowStripe,
+  splatAlbedo,
+  syncSplatColors,
+} from "./splat";
 
 const rgb = (hex: number): [number, number, number] => {
   const c = new Color(hex);
@@ -69,5 +81,53 @@ describe("terrain splat", () => {
     u.uSplatDirt.value.setHex(0);
     syncSplatColors(u);
     expect(u.uSplatForestFloor.value.getHex()).toBe(palette.forestFloor);
+  });
+
+  it("stays D11a's chunk without options, and adds crisp cuts, ground detail and the earthwork fade only when asked", () => {
+    const patched = (options: Parameters<typeof createSplatChunk>[1]) => {
+      const chunk = createSplatChunk(createSplatUniforms(), options);
+      const shader = { uniforms: {}, vertexShader: ShaderLib.lambert.vertexShader, fragmentShader: ShaderLib.lambert.fragmentShader };
+      chunk.patch(shader);
+      return { key: chunk.key, glsl: shader.fragmentShader, uniforms: Object.keys(shader.uniforms) };
+    };
+    const d11a = patched(undefined);
+    expect(d11a.key).toBe("terrain-splat-v2");
+    expect(d11a.glsl).not.toContain("splatCut");
+    expect(d11a.glsl).not.toContain("groundDetail");
+    expect(d11a.glsl).not.toContain("earthwork");
+    const crisp = patched({ crisp: true });
+    expect(crisp.key).toBe("terrain-splat-v4-crisp");
+    expect(crisp.glsl).toContain("splat.b = splatCut( splat.b - 0.50 )");
+    const both = patched({ crisp: true, detail: createGroundDetailUniforms() });
+    expect(both.key).toBe("terrain-splat-v4-crisp-detail");
+    expect(both.glsl).toContain("groundDetail( base, splatXY, vArtWorld.y, splatUp, 1.0 )");
+    // The detail runs on the grass before the surfaces are laid over it.
+    expect(both.glsl.indexOf("base = groundDetail(")).toBeLessThan(both.glsl.indexOf("base = mix( base, uSplatForestFloor"));
+    expect(both.uniforms).toEqual(expect.arrayContaining(["uGdPatch", "uGdTufts", "uGdWaterLevel", "uGdToneSoft", "uGdPatchMix", "uGdMeadowCuts"]));
+    // On earthworks: the surfaces and the AO tint fade by the earthwork weight, the slope soil by the lip.
+    const earthwork = patched({ crisp: true, detail: createGroundDetailUniforms(), earthwork: true });
+    expect(earthwork.key).toBe("terrain-splat-v4-crisp-detail-earthwork");
+    expect(earthwork.glsl).toContain("#define TERRAIN_EARTHWORK");
+    expect(earthwork.glsl.indexOf("splat *= 1.0 - splatEarthwork;")).toBeGreaterThan(earthwork.glsl.indexOf("splat.b = splatCut"));
+    expect(earthwork.glsl.indexOf("splat *= 1.0 - splatEarthwork;")).toBeLessThan(earthwork.glsl.indexOf("base = mix( base, uSplatForestFloor"));
+    expect(earthwork.glsl).toContain("groundDetail( base, splatXY, vArtWorld.y, splatUp, 1.0 - splatLip )");
+    expect(earthwork.glsl).toContain("texture( uAoMap, splatXY / uAoSizeM ).r * ( 1.0 - splatEarthwork )");
+  });
+
+  it("cuts splat weights to crisp edges, keeping road and yard weights and fraying the forest floor", () => {
+    // Roads and yards (painted at 0.55) keep their weight past the cut; below it they vanish.
+    expect(crispSplatWeight("dirt", 1)).toBe(1);
+    expect(crispSplatWeight("dirt", 0.55)).toBe(0.55);
+    expect(crispSplatWeight("dirt", SPLAT_CUTS.dirt - 0.01)).toBe(0);
+    // Fields and cobbles are all or nothing.
+    expect([crispSplatWeight("field", 0.4), crispSplatWeight("field", 0.6)]).toEqual([0, 1]);
+    expect([crispSplatWeight("cobble", 0.49), crispSplatWeight("cobble", 0.51)]).toEqual([0, 1]);
+    // The forest floor's cut level moves with the noise.
+    expect(crispSplatWeight("forestFloor", 0.3, 0, 0)).toBe(0.3);
+    expect(crispSplatWeight("forestFloor", 0.3, 0, 1)).toBe(0);
+    expect(crispSplatWeight("forestFloor", 0.85, 0, 1)).toBe(0.85);
+    // With a pixel footprint the edge spans ±fw around the cut.
+    expect(crispSplatWeight("field", 0.5, 0.05)).toBeCloseTo(0.5, 12);
+    expect(crispSplatWeight("field", 0.56, 0.05)).toBe(1);
   });
 });

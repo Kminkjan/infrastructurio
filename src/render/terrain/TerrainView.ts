@@ -1,9 +1,10 @@
-import { Group, type Material, Mesh } from "three";
+import { BufferAttribute, type BufferGeometry, Group, type Material, Mesh } from "three";
 import type { Terrain } from "../../core/sim/api";
+import { EARTHWORK_ATTRIBUTE, EARTHWORK_ITEM_SIZE } from "../art/shaderChunks/earthwork";
 import type { WorldBox } from "../art/shadowFit";
 import type { TerrainLod } from "./offsetGrid";
-import { buildChunkData, buildWaterData, chunkCounts, terrainHeightRangeM, terrainWorldBounds, toBufferGeometry } from "./terrainGeometry";
-import { computeTerrainShading } from "./terrainShading";
+import { type MeshData, buildChunkData, buildWaterData, chunkCounts, terrainHeightRangeM, terrainWorldBounds, toBufferGeometry } from "./terrainGeometry";
+import { type TerrainShading, computeTerrainShading } from "./terrainShading";
 
 interface Chunk {
   readonly lod0: Mesh;
@@ -31,26 +32,39 @@ export class TerrainView {
   /** World box of the terrain (XZ extent, Y height range), for camera and shadow fitting. */
   readonly box: WorldBox;
   private readonly chunks: Chunk[] = [];
+  /** Chunks by y · counts.x + x, undefined where LOD0 has no triangles. */
+  private readonly grid: (Chunk | undefined)[] = [];
+  private readonly countX: number;
+  /** Per-node normals and colours the chunks were built with; earthwork rebuilds reuse them. */
+  readonly shading: TerrainShading;
   private readonly water0: Mesh | undefined;
   /** Absent when LOD1 has no water triangles (very small maps); LOD0's water stands in. */
   private readonly water1: Mesh | undefined;
   private lod: TerrainLod = 0;
 
-  constructor(terrain: Terrain, material: Material, waterMaterial: Material) {
+  /** `colours` is the baked shading recipe (a terrain look variant's; D11a's when omitted). */
+  constructor(terrain: Terrain, material: Material, waterMaterial: Material, colours?: Parameters<typeof computeTerrainShading>[1]) {
     this.group.name = "terrain";
-    const shading = computeTerrainShading(terrain);
+    const shading = computeTerrainShading(terrain, colours);
+    this.shading = shading;
     const counts = chunkCounts(terrain);
+    this.countX = counts.x;
     for (let y = 0; y < counts.y; y++) {
       for (let x = 0; x < counts.x; x++) {
         const lod0 = this.makeMesh(buildChunkData(terrain, shading, x, y, 0), material, `chunk ${x},${y} lod0`);
-        if (!lod0) continue;
+        if (!lod0) {
+          this.grid.push(undefined);
+          continue;
+        }
         const lod1 = this.makeMesh(buildChunkData(terrain, shading, x, y, 1), material, `chunk ${x},${y} lod1`);
         if (lod1) lod1.visible = false;
-        this.chunks.push({ lod0, lod1 });
+        const chunk = { lod0, lod1 };
+        this.chunks.push(chunk);
+        this.grid.push(chunk);
       }
     }
-    this.water0 = this.makeMesh(buildWaterData(terrain, shading, 0), waterMaterial, "water lod0");
-    this.water1 = this.makeMesh(buildWaterData(terrain, shading, 1), waterMaterial, "water lod1");
+    this.water0 = this.makeMesh(buildWaterData(terrain, shading, 0), waterMaterial, "water lod0", false);
+    this.water1 = this.makeMesh(buildWaterData(terrain, shading, 1), waterMaterial, "water lod1", false);
     for (const water of [this.water0, this.water1]) if (water) water.castShadow = false;
     if (this.water1) this.water1.visible = false;
 
@@ -74,6 +88,27 @@ export class TerrainView {
     if (this.water1) this.water1.visible = lod === 1;
   }
 
+  /**
+   * Swaps chunk (x, y)'s geometry at `lod` for `data` (earthworks); the old
+   * geometry is disposed, so its GPU buffers are freed. Returns false where
+   * the chunk has no mesh at that LOD.
+   */
+  replaceChunk(x: number, y: number, lod: TerrainLod, data: MeshData & { readonly earthwork?: Float32Array }): boolean {
+    const chunk = this.grid[y * this.countX + x];
+    const mesh = lod === 0 ? chunk?.lod0 : chunk?.lod1;
+    if (!mesh || data.triangleCount === 0) return false;
+    const old = mesh.geometry;
+    mesh.geometry = terrainChunkGeometry(data);
+    old.dispose();
+    return true;
+  }
+
+  /** The chunk mesh at (x, y) and `lod`, for tests and checks. */
+  chunkMesh(x: number, y: number, lod: TerrainLod): Mesh | undefined {
+    const chunk = this.grid[y * this.countX + x];
+    return lod === 0 ? chunk?.lod0 : chunk?.lod1;
+  }
+
   dispose(): void {
     for (const { lod0, lod1 } of this.chunks) {
       lod0.geometry.dispose();
@@ -85,9 +120,9 @@ export class TerrainView {
     this.group.clear();
   }
 
-  private makeMesh(data: ReturnType<typeof buildChunkData>, material: Material, name: string): Mesh | undefined {
+  private makeMesh(data: MeshData, material: Material, name: string, terrainChunk = true): Mesh | undefined {
     if (data.triangleCount === 0) return undefined;
-    const mesh = new Mesh(toBufferGeometry(data), material);
+    const mesh = new Mesh(terrainChunk ? terrainChunkGeometry(data) : toBufferGeometry(data), material);
     mesh.name = name;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
@@ -97,4 +132,12 @@ export class TerrainView {
     this.group.add(mesh);
     return mesh;
   }
+}
+
+/** A terrain chunk's geometry: the mesh data plus its vec3 `earthwork` attribute (zeros for natural ground). */
+export function terrainChunkGeometry(data: MeshData & { readonly earthwork?: Float32Array }): BufferGeometry {
+  const geometry = toBufferGeometry(data);
+  const attribute = data.earthwork ?? new Float32Array((data.positions.length / 3) * EARTHWORK_ITEM_SIZE);
+  geometry.setAttribute(EARTHWORK_ATTRIBUTE, new BufferAttribute(attribute, EARTHWORK_ITEM_SIZE));
+  return geometry;
 }

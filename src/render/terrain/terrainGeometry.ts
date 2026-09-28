@@ -5,6 +5,7 @@ import { type GroundBounds, lodBandForPpm } from "../camera/isoMath";
 import { simToWorld } from "../coords";
 import { type TerrainLod, forEachLatticeTriangle, lodCol, lodGridSize, lodRow } from "./offsetGrid";
 import type { TerrainShading } from "./terrainShading";
+import { smoothstep } from "../math";
 
 /**
  * Terrain and water meshes from the sim's heights (art direction "Terrain and
@@ -144,8 +145,7 @@ export function buildWaterData(t: Terrain, shading: TerrainShading, lod: Terrain
     const a = lodRow(lod, aj) * columns + lodCol(lod, ai, aj);
     const b = lodRow(lod, bj) * columns + lodCol(lod, bi, bj);
     const c = lodRow(lod, cj) * columns + lodCol(lod, ci, cj);
-    const near = Math.min(shading.waterDistance[a] ?? 255, shading.waterDistance[b] ?? 255, shading.waterDistance[c] ?? 255);
-    if (near <= rings) picked.push(a, b, c);
+    if (waterMeshCovers(shading.waterDistance, a, b, c, rings)) picked.push(a, b, c);
   });
 
   const vertexOf = new Int32Array(columns * rows).fill(-1);
@@ -184,6 +184,15 @@ export function buildWaterData(t: Terrain, shading: TerrainShading, lod: Terrain
   const indices = count > 0xffff ? new Uint32Array(picked.length) : new Uint16Array(picked.length);
   for (let i = 0; i < picked.length; i++) indices[i] = vertexOf[picked[i] ?? 0] ?? 0;
   return { positions, normals, colors, indices, nodeIndices, triangleCount: picked.length / 3 };
+}
+
+/**
+ * Whether the water mesh covers the lattice triangle with corner nodes a, b and c (node indices, −1 for none):
+ * one of them lies within `rings` of water. `buildWaterData` picks its triangles by it, and the ghost's ground
+ * (`heightfieldRay.ts` `waterPlane`) reads the water plane only where it is drawn.
+ */
+export function waterMeshCovers(waterDistance: Uint8Array, a: number, b: number, c: number, rings: number = WATER_MESH_RINGS): boolean {
+  return Math.min(waterDistance[a] ?? 255, waterDistance[b] ?? 255, waterDistance[c] ?? 255) <= rings;
 }
 
 /** Wraps mesh data in a BufferGeometry with bounds computed, so culling works. */
@@ -226,9 +235,4 @@ function emptyMesh(): MeshData {
     nodeIndices: new Int32Array(0),
     triangleCount: 0,
   };
-}
-
-function smoothstep(edge0: number, edge1: number, x: number): number {
-  const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
-  return t * t * (3 - 2 * t);
 }

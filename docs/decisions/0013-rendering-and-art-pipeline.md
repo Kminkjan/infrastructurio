@@ -266,6 +266,138 @@ look verdict: Look Gate A is the owner's.
   camera), cast shadows fall to the right and slightly up the screen, while art direction
   says they fall toward the lower right. Which one is intended is a Look Gate A question.
 
+## Findings (2026-09-27, terrain look variants)
+
+Recorded on branch `codex/terrain-crisp-look` at `31bc24f` (from the D3 branch at
+`c699393`) after the owner found the ground "too blurry/flat" (relayed to the implementing
+agent). Automated tests (Vitest in Node) and an **agent** browser run (headless Chrome through
+Playwright, 1280 × 800 at DPR 1, Apple M5 Pro, ANGLE Metal). The status of this ADR stays
+**Proposed**; nothing here is a look verdict, and the owner chooses among the variants
+([art direction](../art-direction.md#terrain-look-variants-2026-09-27)).
+- **Decision 3 held, with two chunk additions.**
+  - A `relief` chunk ([`relief.ts`](../../src/render/art/shaderChunks/relief.ts), keys
+    `terrain-relief-v1` and `-facets`) steepens the shading normal's slope after three's
+    normal chunk. It optionally adds each lattice triangle's plane as facet detail and draws
+    a contour hint.
+  - The splat chunk gained opt-in crisp edges and ground detail
+    ([`groundDetail.ts`](../../src/render/art/shaderChunks/groundDetail.ts)), as
+    `terrain-splat-v3-crisp-detail`.
+  - Without options the splat is D11a's `terrain-splat-v2`, byte-identical. Each new piece
+    has a float64 mirror under test.
+  - Still one terrain material. The program count in the captures is unchanged (11–13), and
+    so are the draw calls.
+- **"Smooth terrain" is contested by variant `b`,** which adds facet shading as detail on top
+  of smooth normals. That is a proposed departure pending the owner's choice; variant `a`
+  keeps smooth-only shading. The facets are not toon banding: the lighting stays continuous
+  Lambert.
+- **Decision 6 held.** No post-processing: everything is in the terrain material. The
+  lighting recipe, palette values and data-texture resolutions are unchanged, and no token
+  or texture was added.
+  - The variants set 8× anisotropic filtering on the splat and AO maps. Its measured cost was
+    about 0.
+  - The variants' shading normals come from heights smoothed twice (presentation only). Under
+    the slope gain, the Int16 heights' 1 dm steps otherwise streak along the lattice rows.
+- **Cost** (agent development readings, not gate B), from back-to-back renders closed by a
+  `readPixels`:
+  - 0.08–0.33 ms more per frame at 1280 × 800 across the captured views (0.44 → 0.72–0.77 ms
+    at Region grassland);
+  - 0.36–0.82 ms more at 2560 × 1600;
+  - draw calls unchanged.
+  - Every detail layer sits behind a uniform branch, so D11b's presets can drop layers at no
+    program cost.
+  - The initial JS grew by 3.5 kB gzip (274.49 → 278.02 kB).
+  - `EXT_disjoint_timer_query_webgl2` readings exceeded the synchronous frame time on ANGLE
+    Metal, so no GPU times are recorded.
+- **Not established:** the owner's reading of any variant, the mid laptop, real DPR 2
+  (headless Chrome kept the canvas at its CSS size) and the Low preset.
+
+## Findings (2026-09-27, render pass iteration)
+
+Recorded on branch `codex/render-earthworks-terrain`, code at `b864b05` (from `329b69a`,
+draft PR [#83](https://github.com/Kminkjan/infrastructurio/pull/83)). The trigger was owner
+feedback on look `b` with earthworks, as relayed to the implementing agent: the owner picked
+"Facets too strong/noisy" and wrote "The groundwork/dirt seems very pixely", then "Still a bit
+wonky". The look side is in
+[art direction](../art-direction.md#render-pass-iteration-2026-09-27) and the geometry in the
+[ADR 0010 finding](0010-triangular-lattice-track-geometry.md#findings-2026-09-27-render-pass-iteration).
+The evidence is automated tests (Vitest in Node) and an **agent** browser run (headless
+Chrome through Playwright, 1280 × 800 at DPR 1, Apple M5 Pro, ANGLE Metal). The status of this
+ADR stays **Proposed**; nothing here is a look verdict.
+- **Decision 3 held: still one terrain material and isolated chunks,** with new cache keys.
+  - [`earthwork`](../../src/render/art/shaderChunks/earthwork.ts) (`terrain-earthwork-v2`)
+    reads a vec3 attribute: the encoded potential, the departure, the centreline distance.
+    It declares the attribute, the varying and two weight helpers (lip, earthwork) once per
+    shader, behind a `TERRAIN_EARTHWORK` define. Its colours are grass, a 12% grass-light
+    tint on steep slopes, `earthworkFace` on the lower batter of deep cuts, and
+    `earthworkBed` on a cut shoulder.
+  - The splat gained an `earthwork` option (`terrain-splat-v4…-earthwork`), which the terrain
+    material always sets. It fades fields, roads, forest floor and the AO tint by the
+    earthwork weight, and the slope soil by the lip.
+    - Without options the splat is still D11a's `terrain-splat-v2`, byte-identical.
+    - The terrain material's key changes for every look, `d11a` too, but natural ground
+      renders as before.
+  - The relief chunk (`terrain-relief-v2`) fades its facets by the lip, under the same
+    define.
+  - [`groundDetail`](../../src/render/art/shaderChunks/groundDetail.ts) gained a soft edge
+    for the tone patches and meadow flecks, patch mixes and fleck cut levels as settings, and
+    a soil mask. At its defaults, and in look `a`, it is as before.
+  - Every new piece has a float64 mirror under test.
+- **"Smooth terrain" versus facets.** Look `b` keeps its facets (the owner's choice), at 0.8
+  instead of 2.5, and they are gone on earthworks, whose refined triangles they drew as
+  stair-steps. Look `b`'s ground detail was calmed:
+  - patches 26 m, mixes 0.08/0.07, soft edges;
+  - flecks 0.5 at cut levels 0.97 → 0.80;
+  - tufts 0.2.
+
+  The before and after table is in art direction. Looks `a` and `c` are unchanged, except that
+  `c` still follows `b` plus contours.
+- **Decision 6 held.** No post-processing, the same lighting recipe, and no palette token
+  added or changed. No texture was added. Two tokens (`earthworkFace`, `earthworkBed`) have
+  narrower roles.
+- **Cost** (agent development readings, not gate B; two runs of each build, each figure the
+  mean of 60 back-to-back renders closed by a `readPixels`).
+  - Look `b` at 1280 × 800 moved by −0.02 to +0.03 ms per frame across the eight captured
+    views (for example Region grassland 0.782/0.772 → 0.762/0.760 ms, bookmark 4
+    1.022/1.018 → 1.043/1.040 ms).
+  - At 2560 × 1600 it moved by at most +0.06 ms.
+  - Draw calls are identical.
+  - The initial JS grew from 285.89 to 287.31 kB gzip.
+  - The vec3 attribute triples the attribute memory of every terrain chunk: 12 instead of
+    4 bytes per vertex, zeros on natural ground. Not measured on the GPU.
+- **Not established:** the owner's reading; Look Gates A and B; the mid laptop, real DPR 2 and
+  the Low preset. Nor whether the soft patch edges (median ±3.5 m on the noise mirror) read as
+  calm or, again, as soft blotches.
+
+## Findings (2026-09-28, PR #83 review fixes)
+
+Recorded on branch `codex/render-earthworks-terrain`, code at `8635640` (from `81663f8`,
+draft PR [#83](https://github.com/Kminkjan/infrastructurio/pull/83)). The trigger was a code
+review of the PR in recall mode (13 findings, not adversarially verified); each was checked
+against the code before it was fixed. The evidence is automated tests and an **agent**
+capture (headless Chrome, 1280 × 800, Apple M5 Pro, ANGLE Metal, reduced motion, compared
+pixel for pixel). The status of this ADR stays **Proposed**; nothing here is a look verdict.
+- **`d11a` compiles D11a's splat again.** The render pass iteration made the terrain material
+  always set the splat's `earthwork` option, so `?terrain=d11a` compiled
+  `terrain-splat-v4-earthwork`, and the claim that it was the look Look Gate A scored had no
+  test behind it.
+  - Now the option is opt-in (`earthworkSplat`): looks `a`–`c` set it, and `d11a` compiles
+    D11a's `terrain-splat-v2` plus the `terrain-earthwork-v2` chunk. Earthworks are
+    independent of the look.
+  - The claim is now "identical where no track is built". A test pins d11a's chunk list, the
+    splat GLSL (a hash recorded from `createSplatChunk` at `61bd690`, equal at `b0a7500`, the
+    Look Gate A record) and the diorama bake (normals, colours and water rings, recorded at
+    `61bd690`). Where no track is built every terrain vertex carries a zero earthwork
+    attribute, which the earthwork chunk reads as no weight.
+  - Agent capture: d11a's four bookmarks, which build no track, are pixel-identical before and
+    after. With track built, the d11a curve views differ only on the earthworks: D11a's
+    splat still draws the forest floor and its AO tint on the formation beside the straight.
+- **Look `b` is unchanged.** Its eleven render-iteration captures are pixel-identical before
+  (`81663f8`) and after all review fixes, the seam and reach fixes included.
+- **Single sources.** One `smoothstep` for render (`render/math.ts`) replaces eight private
+  copies, which a test shows return the same values, edge cases included.
+- **Not established:** the owner's reading; Look Gates A and B; how any of this reads on
+  other GPUs.
+
 ## Revisit when
 
 - Look Gate A scores low on mood, cohesion or originality in a way parameters cannot fix
@@ -282,4 +414,14 @@ look verdict: Look Gate A is the owner's.
 - 2026-09-26: Proposed in the rail-first reset PR that adds ADRs 0009–0014 ([#61](https://github.com/Kminkjan/infrastructurio/pull/61)); owner decision pending.
 - 2026-09-26: D11a lookdev findings added (asset registry, budgets, six materials, composed
   chunks, tone-mapped edge fade, data textures, agent draw calls); status unchanged, still
+  Proposed.
+- 2026-09-27: terrain look variant findings added (a relief chunk, the splat's crisp and
+  detail options, contested smooth-terrain shading in variant `b`, agent frame costs); status
+  unchanged, still Proposed.
+- 2026-09-27: render pass iteration findings added (the earthwork chunk's vec3 attribute and
+  grass-first colours, the splat's earthwork option, facets faded on earthworks, look `b`
+  calmed, agent frame costs before and after); status unchanged, still Proposed.
+- 2026-09-28: PR #83 review findings added (`d11a` compiles D11a's splat again, identical
+  where no track is built and pinned by a test; the splat's earthwork option is opt-in; look
+  `b` pixel-identical before and after the fixes; one `smoothstep`); status unchanged, still
   Proposed.

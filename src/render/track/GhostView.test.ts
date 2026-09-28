@@ -10,8 +10,13 @@ import { GhostView, HighlightView } from "./GhostView";
  * rejection highlight skips empty and unchanged key sets (review of PR #82).
  */
 
-/** A stand-in for the tag elements: counts writes to `style.transform`. */
-function fakeDocument(writes: string[]) {
+interface FakeTag {
+  readonly style: Record<string, string>;
+  textContent: string;
+}
+
+/** A stand-in for the tag elements: counts writes to `style.transform`, and keeps the elements it made. */
+function fakeDocument(writes: string[], made: FakeTag[] = []) {
   return {
     createElement: () => {
       const style: Record<string, string> = {};
@@ -21,7 +26,9 @@ function fakeDocument(writes: string[]) {
         },
         get: () => writes.at(-1) ?? "",
       });
-      return { style, className: "", textContent: "", setAttribute: () => undefined, remove: () => undefined };
+      const el = { style, className: "", textContent: "", setAttribute: () => undefined, remove: () => undefined };
+      made.push(el);
+      return el;
     },
   };
 }
@@ -54,6 +61,37 @@ describe("ghost end-height tags", () => {
     ghost.set({ pieces: ELEVATED.map((spec) => ({ spec, status: "new" })), valid: true });
     ghost.updateTags({ ...VIEW, target: { x: 10, z: 0 } });
     expect(writes).toHaveLength(6);
+    ghost.dispose();
+  });
+});
+
+describe("ghost elevation marks", () => {
+  it("measures its drop lines and end-height tags again when the drawn ground changes under an unchanged plan", () => {
+    // PR #83 re-review: a commit sets the chained ghost before the time-sliced earthworks land, and a ghost whose plan
+    // did not change was never measured again, so a continuation off an embankment kept a "+6 m" tag at its start
+    // (the ground from before the build) and a drop line through the bank. The app now calls `refreshGround` once
+    // the earthworks have drawn the revision.
+    const tags: FakeTag[] = [];
+    vi.stubGlobal("document", fakeDocument([], tags));
+    let embankment = false;
+    // Flat ground at 0 m; once built, a 6 m embankment under the first two pieces (x < 10 m).
+    const ghost = new GhostView({ appendChild: () => undefined } as unknown as HTMLElement, (x) => (embankment && x < 10 ? 6 : 0));
+    const drops = ghost.group.children[1] as unknown as { visible: boolean; geometry: { getAttribute(name: string): { count: number } | undefined } };
+    ghost.set({ pieces: ELEVATED.map((spec) => ({ spec, status: "new" })), valid: true });
+    expect(tags.map((t) => t.textContent)).toEqual(["+6 m", "+6 m"]);
+    const before = drops.geometry.getAttribute("position")?.count ?? 0;
+    expect(before).toBeGreaterThan(0);
+
+    embankment = true;
+    expect(ghost.refreshGround()).toBe(true);
+    expect(tags.map((t) => t.textContent)).toEqual(["0 m", "+6 m"]);
+    expect(tags.map((t) => t.style.display)).toEqual(["block", "block"]);
+    // The drop line at the start (x = 0) now stands on the bank's crest, so it is gone.
+    expect(drops.geometry.getAttribute("position")?.count ?? 0).toBeLessThan(before);
+
+    ghost.set(null);
+    expect(ghost.refreshGround()).toBe(false);
+    expect(drops.visible).toBe(false);
     ghost.dispose();
   });
 });

@@ -1,9 +1,11 @@
 import type { ArcPrim, RenderPrim } from "./templates";
 
 /**
- * Render-side sampling of piece geometry (simulation model §3). Pure and
- * float-based; the tick step never calls it. The one core consumer is
- * `clearance.ts`, whose float decision is taken at commit time only.
+ * Render-side sampling of piece geometry (simulation model §3), and the
+ * single source of curve maths for render (end points, plan boxes and
+ * nearest centreline points too). Pure and float-based; the tick step never
+ * calls it. The one core consumer is `clearance.ts`, whose float decision is
+ * taken at commit time only.
  */
 
 /** A point along a piece in world metres, with its float arc length from the start. */
@@ -76,5 +78,160 @@ export function samplePiece(piece: HasPrims, maxSagittaM: number): SamplePoint[]
     }
     s += primLengthM(p);
   }
+  return out;
+}
+
+/**
+ * Points on a piece's centreline (on the arcs themselves, not their chords) no more than
+ * `maxStepM` of arc length apart: each primitive split into equal steps, both ends of the
+ * piece included, each join once. Render-side (the earthworks' neighbour bounds).
+ */
+export function sampleCentrelineEvery(piece: HasPrims, maxStepM: number): SamplePoint[] {
+  if (!(maxStepM > 0) || !Number.isFinite(maxStepM)) throw new RangeError(`maxStepM must be > 0, got ${maxStepM}`);
+  const out: SamplePoint[] = [];
+  let s = 0;
+  for (const p of piece.prims) {
+    const len = primLengthM(p);
+    const n = Math.max(1, Math.ceil(len / maxStepM));
+    for (let i = out.length === 0 ? 0 : 1; i <= n; i++) {
+      const f = i / n;
+      const q = p.kind === "line" ? { x: p.x0 + (p.x1 - p.x0) * f, y: p.y0 + (p.y1 - p.y0) * f } : arcPoint(p, f);
+      out.push({ x: q.x, y: q.y, sM: s + len * f });
+    }
+    s += len;
+  }
+  return out;
+}
+
+const TWO_PI = 2 * Math.PI;
+
+/**
+ * How far angle `angle` (rad, seen from the arc's centre) lies from the arc's start along its
+ * sweep direction, wrapped into [0, 2π): the angle is on the arc when this is at most
+ * |sweepRad|.
+ */
+export function sweepOffsetRad(p: ArcPrim, angle: number): number {
+  let delta = (angle - p.startRad) * (p.sweepRad >= 0 ? 1 : -1);
+  delta -= TWO_PI * Math.floor(delta / TWO_PI);
+  return delta;
+}
+
+/**
+ * A piece's centreline prepared for nearest-point queries (render-side, e.g. earthworks):
+ * each primitive's arc length at its start, each arc's end points (sx, sy, ex, ey per
+ * primitive; zeros for lines), the total length, and the plan box (lines' end points, arcs'
+ * ends plus every axis extreme inside the sweep).
+ */
+export interface CentrelineIndex {
+  readonly prims: readonly RenderPrim[];
+  readonly primStartM: Float64Array;
+  readonly arcEnds: Float64Array;
+  readonly lengthM: number;
+  readonly minX: number;
+  readonly minY: number;
+  readonly maxX: number;
+  readonly maxY: number;
+}
+
+export function centrelineIndex(piece: HasPrims): CentrelineIndex {
+  const prims = piece.prims;
+  const primStartM = new Float64Array(prims.length);
+  const arcEnds = new Float64Array(prims.length * 4);
+  let length = 0;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  const grow = (x: number, y: number) => {
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  };
+  prims.forEach((p, i) => {
+    primStartM[i] = length;
+    length += primLengthM(p);
+    if (p.kind === "line") {
+      grow(p.x0, p.y0);
+      grow(p.x1, p.y1);
+      return;
+    }
+    const a1 = p.startRad + p.sweepRad;
+    arcEnds[4 * i] = p.cx + p.radiusM * Math.cos(p.startRad);
+    arcEnds[4 * i + 1] = p.cy + p.radiusM * Math.sin(p.startRad);
+    arcEnds[4 * i + 2] = p.cx + p.radiusM * Math.cos(a1);
+    arcEnds[4 * i + 3] = p.cy + p.radiusM * Math.sin(a1);
+    grow(arcEnds[4 * i] ?? 0, arcEnds[4 * i + 1] ?? 0);
+    grow(arcEnds[4 * i + 2] ?? 0, arcEnds[4 * i + 3] ?? 0);
+    for (let k = 0; k < 4; k++) {
+      const angle = (k * Math.PI) / 2;
+      if (sweepOffsetRad(p, angle) <= Math.abs(p.sweepRad)) grow(p.cx + p.radiusM * Math.cos(angle), p.cy + p.radiusM * Math.sin(angle));
+    }
+  });
+  return { prims, primStartM, arcEnds, lengthM: length, minX, minY, maxX, maxY };
+}
+
+/**
+ * The centreline point nearest plan (x, y), written to `out`: its plan distance `d` and its
+ * arc length `s` from the start. Lines project and clamp; arcs clamp the angle, falling back
+ * to the nearer end point outside the sweep. Allocation-free.
+ */
+export function nearestOnCentreline(
+  c: Pick<CentrelineIndex, "prims" | "primStartM" | "arcEnds">,
+  x: number,
+  y: number,
+  out: { d: number; s: number },
+): { d: number; s: number } {
+  let bestD2 = Infinity;
+  let bestS = 0;
+  const prims = c.prims;
+  for (let i = 0; i < prims.length; i++) {
+    const prim = prims[i];
+    if (!prim) continue;
+    const s0 = c.primStartM[i] ?? 0;
+    if (prim.kind === "line") {
+      const dx = prim.x1 - prim.x0;
+      const dy = prim.y1 - prim.y0;
+      const len2 = dx * dx + dy * dy;
+      let t = len2 > 0 ? ((x - prim.x0) * dx + (y - prim.y0) * dy) / len2 : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const ex = prim.x0 + dx * t - x;
+      const ey = prim.y0 + dy * t - y;
+      const d2 = ex * ex + ey * ey;
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        bestS = s0 + t * Math.sqrt(len2);
+      }
+      continue;
+    }
+    const vx = x - prim.cx;
+    const vy = y - prim.cy;
+    const sweep = Math.abs(prim.sweepRad);
+    const delta = sweepOffsetRad(prim, Math.atan2(vy, vx));
+    if (delta <= sweep) {
+      const d = Math.sqrt(vx * vx + vy * vy) - prim.radiusM;
+      if (d * d < bestD2) {
+        bestD2 = d * d;
+        bestS = s0 + prim.radiusM * delta;
+      }
+      continue;
+    }
+    const sx = (c.arcEnds[4 * i] ?? 0) - x;
+    const sy = (c.arcEnds[4 * i + 1] ?? 0) - y;
+    const ex = (c.arcEnds[4 * i + 2] ?? 0) - x;
+    const ey = (c.arcEnds[4 * i + 3] ?? 0) - y;
+    const ds = sx * sx + sy * sy;
+    const de = ex * ex + ey * ey;
+    if (ds < bestD2) {
+      bestD2 = ds;
+      bestS = s0;
+    }
+    if (de < bestD2) {
+      bestD2 = de;
+      bestS = s0 + prim.radiusM * sweep;
+    }
+  }
+  out.d = Math.sqrt(bestD2);
+  out.s = bestS;
   return out;
 }

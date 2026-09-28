@@ -32,6 +32,9 @@ const BASE = {
   cobbleDark: 0x8e877b,
   rock: 0x9a9486,
   forestFloor: 0x71704f,
+  // earthworks-lite (2026-09-27): cut and fill faces, and the formation (bed) beside the ballast
+  earthworkFace: 0x9e8a6c,
+  earthworkBed: 0x7b705e,
   // fields
   rye: 0xc9b26b,
   hay: 0xbfb27a,
