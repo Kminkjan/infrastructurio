@@ -313,8 +313,9 @@ and arcs of the `NetworkView` render prims. Curves are sampled through
 
 ## Structures
 
-Where a piece's structure is bridge (it sits more than 4 m above terrain, or crosses water),
-choose the type per span, first match wins:
+Where a piece's structure is bridge (it sits more than 8 m above terrain since the owner
+decision 2026-09-28 "M2", 4 m before, or crosses water), choose the type per span, first match
+wins:
 
 1. over water → **steel Warren truss**;
 2. clear span over 30 m → **steel Warren truss**;
@@ -1000,7 +1001,12 @@ the aids in effect. The ghost adds structure marks in its own colour (solid deck
 for a bridge, dashed bore edges at ±2.6 m for a tunnel), and the tooltip adds a structure line
 ("Structure: bridge", or counts when a plan mixes). Rest views are unchanged.
 
-**Earthworks, skirts, scenery.** Bridges and tunnels are never conformed (tested). Ground track
+**Earthworks, skirts, scenery.** Bridges and tunnels are never conformed (tested). *Since the
+owner decision 2026-09-28 "M2" (a deck may sit 2 m into the bank near an abutment), a bridge
+the natural ground comes near takes a cut down to its deck, never a fill, and a portal's plug
+reaches as far as the relief around it needs
+([ADR 0010 M2 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-thresholds-m2)).*
+Ground track
 gets **ballast skirts**: the shoulders run on at their own slope to 2.92 m out and 0.62 m under
 the track height, inside the 3 m formation, so they show only where the drawn ground falls away
 from the ballast (with `?earthworks=0`, on the natural leave-alone band, at the far LOD, at a

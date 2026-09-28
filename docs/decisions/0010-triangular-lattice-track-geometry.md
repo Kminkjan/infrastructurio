@@ -1534,6 +1534,121 @@ are automated (Vitest 4.1.10, Node 26.7.0, macOS 26.6.2, Apple M5 Pro) unless la
 - **Not established:** the owner's reading; how the core lane's inferred structures and grade
   rule change these plans; timings on the gate hardware.
 
+## Findings (2026-09-28, D4 thresholds M2)
+
+Recorded on branch `codex/d4-structures` (`main` at `81779af` with the core half `11d627e` and the
+render half `9138731` merged at `c21e941`), code at `9693116` (core and tool), `dd1e8fc` (render)
+and `b897159` (e2e), [#68](https://github.com/Kminkjan/infrastructurio/issues/68). Measurements are
+automated (Vitest 4.1.10, Node 26.7.0, macOS 26.6.2, Apple M5 Pro) unless labelled agent
+(Playwright 1.63.0, headless system Chrome, same machine). The status of this ADR stays Proposed:
+the owner decision below sets D4's thresholds and accepts no ADR. The #68 body still states ±4 m;
+amending it is the owner's.
+- **Owner decision (2026-09-28, as relayed to the integrating agent): "M2: three changes".**
+  "Cuttings/embankments up to 8 m; abutments may sit 2 m into the bank within 15 m of a bridge
+  end; drags starting on water begin at deck height. Keeps 6 m tunnel cover, 10 m portal zone,
+  4 m water clearance. Free drags 95.3% accepted, both your scenes build."
+- **As built** ([`track/structure.ts`](../../src/core/track/structure.ts),
+  [`track/validate.ts`](../../src/core/track/validate.ts)):
+  - **Band ±8 m.** `GROUND_BAND_MM` is 8000, which sets inference (ground within −8 ≤ z − h ≤ +8 m
+    and dry, bridge beyond +8 m or over water, tunnel beyond −8 m), a portal (a tunnel node under
+    ≤ 8 m of cover) and the shallow-tunnel test (nowhere deeper than 8 m).
+  - **Abutments.** An abutment is a bridge node on dry land within the band. A deck sample below
+    the terrain passes when it dips at most 2 m (`ABUTMENT_DIP_MM`) and lies within 15 m along the
+    track (`ABUTMENT_ZONE_MM`) of an abutment, the distance walked through neighbouring bridge
+    pieces as the portal walk is; anywhere else any dip fails `bridge-below-ground`, whose message
+    now says which ("…dips 2.5 m below the terrain at an abutment, more than the 2 m a deck may
+    sit in the bank…", or "…with no abutment within 15 m…"). A node is its own abutment, so the
+    tolerance matters between nodes: on curves and shifts, at secondary midpoints. Defaults to
+    test: the dry-land condition (a node over water within 8 m of the bed is no abutment) and the
+    deepest failing dip as the one reported.
+  - **Deck-height start.** The track tool anchors a free drag on a water node (a `node` pick,
+    not existing track) at the water level + 4.0 m, with no height steps, so it still plans in
+    "auto" (`ToolCtx.waterDeckZmm`, from the core's `waterDeckMm`). Chosen over a planner lift:
+    `Drag.from.zMm` already is "the tool's choice", so `Drag` is unchanged; the start stays at the
+    deck when height keys switch to "fixed"; and the tooltip's end height stays the end above the
+    ground (the water surface there).
+  - **Integration.** The Bridge and Tunnel tools now pass `Drag.structure`, which neither lane
+    wired, so the planner validates candidates as the forced command will.
+  - **Consequences.** With the band (8 m) deeper than the cover (6 m), a node under less than 6 m
+    is itself a portal, so the cover rule binds only between nodes. A forced tunnel piece must lie
+    deeper than 8 m somewhere, and no diorama slope rises 8 m in one lattice step (the steepest is
+    0.66), so the Tunnel tool cannot start at a free node on the ground; it continues from track
+    already that deep (the e2e does, from a Track drag that ends inside a hill).
+- **Re-measured** (an uncommitted probe on the committed generator
+  [`tests/support/autoGrade.ts`](../../tests/support/autoGrade.ts), 1,000 free drags and 150
+  chains, seed "auto-grade-probe"; the committed test runs 600 + 80). Before M2 the core half
+  measured 72.8% accepted with the same generator and seed, 80.0% of free drags and chain starts.
+  - All 1,690 drags: 1,499 accepted (88.7%). Rejected: `bridge-too-low-over-water` 89,
+    `out-of-bounds` 32, `bridge-below-ground` 29, `tunnel-too-shallow` 18, `kinked-join` 12,
+    `tracks-too-close` 6, `vertical-clearance` 3, `grade-too-steep` 2.
+  - The 1,000 free drags: 953 accepted (95.3%); rejected `bridge-too-low-over-water` 32,
+    `bridge-below-ground` 10, `tunnel-too-shallow` 5. With the chains' first drags: 1,093 of 1,150
+    (95.0%); chained continuations 406 of 540 (75.2%). Free drags starting on water: 61 of 67
+    (91.0%); on land 892 of 933 (95.6%), where 32 of the 41 rejections are land too near the water
+    to climb 4 m at 35‰.
+  - New pieces of accepted plans: ground 88.3% of pieces (86.3% of length), bridge 8.8% (11.0%),
+    tunnel 2.9% (2.7%); of free drags 89.3%, 7.4% and 3.2% of pieces.
+  - Node height minus the ground over 31,013 nodes: 28.0% on it; |d| p50 0.67 m, p95 10.12 m, max
+    25.47 m; beyond ±4 m 16.9%, beyond ±8 m 7.2%. Grades over 29,701 pieces: 30–35‰ 74.5%, over
+    35‰ 0.0% (two chained plans pinned to their own track, which preview rejects).
+  - These reproduce the relayed 95.3% (free) and 88.7% (all) exactly.
+- **The owner's scenes build** (agent, e2e in [`earthworks.e2e.ts`](../../tests/e2e/earthworks.e2e.ts)):
+  the hill curve (226, 100) → (233, 117) as two ground pieces, a 6.6 m cutting and a 7.6 m
+  embankment; the lake-shore curve (50, 203) → (34, 246) as 13 ground pieces and 7 bridge pieces,
+  the curve's deck up to 1.3 m under the hill's flank near its abutment.
+- **Open point 4 under ±8 m** (committed, [`planner.grade.test.ts`](../../src/core/track/planner.grade.test.ts)):
+  300 dry straight lines that only a tunnel can take (the highest 35‰ profile more than 8 m under
+  the ground somewhere) turned up in 26,508 tries; the planner's profile builds all 300, and so
+  does the deepest 35‰ profile. At ±4 m it was 3.3% and 1.7% of such lines.
+- **Render, for the tolerance** ([`terrain/earthworks.ts`](../../src/render/terrain/earthworks.ts),
+  [`structures/StructureView.ts`](../../src/render/structures/StructureView.ts)):
+  - A deck set into the bank would be covered by the natural ground, since the conform left
+    bridges alone. A bridge piece the natural ground comes near (within 0.6 m of its lowest bed
+    anywhere its cut could reach: `cutsUnderDeck`) now takes the cut envelope only, never a fill;
+    a deck clear of the ground never enters the pass. A test builds a deck 1 m under a ridge's
+    crest: the drawn ground is cut to the deck there and never rises over the natural anywhere.
+  - Byte pin re-recorded deliberately ([`earthworksGolden.test.ts`](../../src/render/terrain/earthworksGolden.test.ts)):
+    its 40 plans now build 327 ground pieces (411 before D4, 299 under the core half's rules), cuts
+    and fills to 8.49 m and 8.75 m, 6,670 refined triangles. Under the core half's rules this code
+    with the bridge cut disabled drew every hash of `c21e941` exactly; with it on, one deck within
+    0.6 m of the ground there added 7 refined triangles. The terrain bakes did not change.
+  - Portals now sit under up to 8 m of cover. On a hill rising behind the face the approach
+    cutting's rounded end reached about 23 m, past the plug sized from the node's cover (17.4 m),
+    and the captures showed a dark gap behind the east portal. The plug now reaches as far as the
+    relief around the portal needs (`pointCutReachM`), which doubles the 43-piece tunnel's rebuild
+    (median 6.2–6.4 → 11.9–12.3 ms, two runs each). The cheaper fix, stopping the approach cutting at
+    the portal plane, needs structure topology in the earthworks and is not done.
+  - Visibility still holds: 300 plans, 5,347 pieces, 0.000% of rail tops buried at LOD0 and LOD1
+    (the test conforms every piece, to cuts of 19.1 m and fills of 27.7 m). The D3 render-lift probe
+    now measures only pieces with both nodes on the ground (1,004 of 5,347); straights keep 0.000%
+    of rail tops buried at the 0.15 m lift.
+  - Rebuild of 10-piece edits on the diorama (dev measurements, not gates; load average 5–6, three
+    runs each): median 2.36–2.75 ms, p95 4.80–7.62 ms, against 1.95–2.38 and 4.99–6.03 ms at
+    `c21e941` on the same machine and load. Both miss the provisional 3 ms of gate B8
+    (authoritative only in the [acceptance gates](../evidence/m4/2026-09-26-acceptance-gates.md)),
+    which B8 counts for all static layers.
+- **Captures** (agent, [`tests/e2e/d4.capture.ts`](../../tests/e2e/d4.capture.ts), images in the
+  gitignored `test-results/d4/`; notes, not a look verdict): the owner's two scenes, an all-ground
+  drag with cuts and fills to 8 m through forest, an automatic tunnel (two tunnels with a long
+  cutting between), automatic bridges over the river and the lake. Decks meet the banks at their
+  abutments, the deck set into the lake shore's flank sits in a shallow cut (H shows the notch), no
+  fill stands under a bridge, and behind each portal the plug closes the hill over the bore.
+  Remaining defects:
+  - an approach embankment's rounded end runs out under a bridge's first span: on the low lake and
+    river banks it forms a grassy spit into the water under the truss (the abutment cone noted by
+    the render half, now common, since automatic water bridges start 4 m or more over low shores);
+  - at the deeper portals, a stepped shading line where the plug's flank meets the approach
+    cutting (the render half's faint ragged line, clearer now);
+  - a lighter wedge at the top inside the bore at a front view;
+  - the truss's members read as faint lines at Region.
+- **Tests** (automated at `b897159`): 745 in 89 files, all passing; 13 of 13 Playwright e2e. Changed
+  expectations are listed in the commits; each follows a threshold (4.5 m, 6 m and 7 m cases now lie
+  inside the band, 5.5 m plateaus are cuttings, 0.5 m dips at abutments pass) or a sim that judged
+  a seeded map other than the view's terrain.
+- **Not established:** whether M2 feels right (the owner's feel check; nothing here is human
+  evidence); the Look Gates; timings on the gate hardware; that curve samples decide identically
+  across JavaScript engines.
+
 ## Revisit when
 
 - The D3 feel check finds construction unsatisfying for reasons that planner tuning, chained
@@ -1610,3 +1725,8 @@ are automated (Vitest 4.1.10, Node 26.7.0, macOS 26.6.2, Apple M5 Pro) unless la
   cleared around them, render's span layout with piers clear of other tracks, piers on the drawn
   ground, the portal and hill plug over the approach cutting's end, ballast skirts, the abutment
   cone observed, the D3 planner's ramped decks); status unchanged, still Proposed.
+- 2026-09-28: D4 thresholds M2 findings added (the relayed owner decision "M2: three changes"
+  verbatim, the ±8 m band, abutments 2 m into the bank within 15 m, the deck-height start in the
+  tool, the re-measured acceptance, reasons and structure mix, open point 4 at ±8 m, the render's
+  cut under decks and plug sizing, the re-recorded byte pin, rebuild costs, captures and remaining
+  defects); status unchanged, still Proposed.

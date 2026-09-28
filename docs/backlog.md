@@ -399,6 +399,12 @@ stacked track readable and pickable.
   - tunnel when h − z > 4 m.
 
   The Bridge and Tunnel tools force the structure.
+  *Thresholds changed by the owner decision 2026-09-28, "M2" (as relayed): the band is ±8 m,
+  a bridge deck may sit up to 2 m into the bank within 15 m of an abutment, and a drag
+  starting on water begins at the deck height; 6 m of cover, the 10 m portal zone and the
+  4.0 m water clearance stay. Built on branch `codex/d4-structures`. The issue body still
+  states ±4 m; amending it and ticking criteria are the owner's
+  ([ADR 0010 M2 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-thresholds-m2)).*
 - [ ] Negative fixtures:
   - `grade-too-steep`, `needs-bridge`, `needs-tunnel`, `bridge-below-ground`;
   - `bridge-too-low-over-water` (below water + 4.0 m);
@@ -410,6 +416,9 @@ stacked track readable and pickable.
 - [ ] A fixture shows ordinary seeded hills still admit a tunnel given the 4 m ground band
   and 6 m cover rule
   ([simulation model open point 4](simulation-model.md#19-open-points-2026-09-26)).
+  *At the ±8 m band of the owner decision 2026-09-28 "M2", the committed fixture finds 300
+  lines only a tunnel can take and the planner builds all of them. This does not tick the
+  criterion.*
 
 *Render*
 - [ ] Structures follow rules:

@@ -65,8 +65,10 @@ blocked. Carried in `FrameView.signalAspect`.
 
 The planner's height mode for a drag with no height steps (`Drag.heightMode: "auto"`, owner
 decision 2026-09-28, D4): track follows the ground wherever it can within 35‰, the end
-included, and the rest becomes cuttings and embankments (±4 m) or, beyond that, the bridges
-and tunnels [structure](#structure-ground-bridge-tunnel) inference picks. The end may sit
+included, and the rest becomes cuttings and embankments (±8 m since the owner decision
+2026-09-28 "M2", ±4 m before) or, beyond that, the bridges and tunnels
+[structure](#structure-ground-bridge-tunnel) inference picks. A free drag starting on water
+begins at the deck height, the water level + 4.0 m (M2). The end may sit
 above or below the ground, and the tooltip shows by how much. With height steps pressed the
 mode is "fixed": the end sits that many steps above the ground, and the inner nodes are
 fitted to 35‰ the same way. See [the simulation model §8](simulation-model.md#8-planner).
@@ -378,8 +380,9 @@ its shortest platform, and reversal is allowed at platform stops.
 
 The mouth of a tunnel, where a tunnel piece meets the terrain surface; it is rendered with
 a hill plug. Within 10 m of a portal the 6 m minimum tunnel cover does not apply. As built
-(D4): a node of a tunnel piece with at most 4 m of cover (the track within the ground band
-there), and the 10 m are measured along the track, through neighbouring tunnel pieces.
+(D4): a node of a tunnel piece with the track within the ground band there (at most 8 m of
+cover since the owner decision 2026-09-28 "M2", 4 m before), and the 10 m are measured along
+the track, through neighbouring tunnel pieces.
 
 ### Precision mode
 
@@ -506,11 +509,13 @@ See [piece](#piece-straight-curve-shift).
 
 A per-piece property, inferred (`auto`) or forced by the Bridge and Tunnel tools. With
 terrain height h (the bed under water), judged along the whole piece (D4: straights exactly,
-curves and shifts every 0.5 m):
-- **ground** needs −4 m ≤ z − h ≤ +4 m and no water;
-- **bridge** is needed more than 4 m above terrain or over water; its deck may not dip
-  below the terrain and must stay 4.0 m above the water;
-- **tunnel** is needed more than 4 m below terrain or under water (below the bed), with at
+curves and shifts every 0.5 m; the band ±8 m since the owner decision 2026-09-28 "M2",
+±4 m before):
+- **ground** needs −8 m ≤ z − h ≤ +8 m and no water;
+- **bridge** is needed more than 8 m above terrain or over water; its deck may dip at most
+  2 m below the terrain, and only within 15 m along the track of an abutment (a bridge node on
+  dry land within the band), and must stay 4.0 m above the water;
+- **tunnel** is needed more than 8 m below terrain or under water (below the bed), with at
   least 6 m cover except within 10 m of a [portal](#portal).
 
 Rendering chooses a stone arch viaduct (4–20 m over land), a steel Warren truss (over water
