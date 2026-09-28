@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { flatTerrain, simOn } from "../../../tests/support/simOn";
 import type { PieceSpec } from "../geometry/piece";
 import type { Heading } from "../lattice";
-import { type Command, HISTORY_DEPTH, type Result, createSim } from "./api";
+import { type Command, GROUND_BAND_MM, HISTORY_DEPTH, type Result, createSim, generateTerrain, groundMmAt, isPortal } from "./api";
 
 // Flat dry ground at 0 m, so track at z = 0 lies on it (until D4, the seeded map "d2-api", whose ground at
 // 10–40 m the D4 terrain rules now judge: track at z = 0 lay under it).
@@ -190,5 +190,19 @@ describe("createSim construction commands", () => {
     // Found in review: a height past 2^53 used to commit with an inexact grade.
     expect(s.execute(build([straight(5, 5, 0, 0, Number.MAX_SAFE_INTEGER)]))).toMatchObject({ ok: false, reason: { code: "out-of-bounds" } });
     expect(s.network().pieces).toHaveLength(0);
+  });
+});
+
+describe("the core's portal definition (D4 second feel-check fixes, 2026-09-28)", () => {
+  it("exposes isPortal: a tunnel node within the ±8 m band of cover, over the natural terrain without a ground query", () => {
+    expect(isPortal(TERRAIN, { q: 5, r: 5, zMm: -GROUND_BAND_MM })).toBe(true);
+    expect(isPortal(TERRAIN, { q: 5, r: 5, zMm: -GROUND_BAND_MM - 1 })).toBe(false);
+    // The dead end of the Straight line (220, 140) → (236, 140) on the diorama lies under 11.2 m of natural cover: no
+    // portal in the core, where the renderer's buffer-end rule (`PORTAL_BUFFER_MAX_COVER_M`, 12 m) opens one.
+    const diorama = generateTerrain({ seed: "baltic-diorama", columns: 400, rows: 346 });
+    const end = { q: 236, r: 140 };
+    const zMm = (groundMmAt(diorama, end) ?? 0) - 11_200;
+    expect(isPortal(diorama, { ...end, zMm })).toBe(false);
+    expect(isPortal(diorama, { ...end, zMm: zMm + 3200 })).toBe(true);
   });
 });
