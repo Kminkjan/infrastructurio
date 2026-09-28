@@ -22,7 +22,10 @@ interface Hook {
   network(): { pieces: Piece[] };
   structureStats(): { tunnels: number; portals: number };
   drawnHeightM(x: number, y: number): number;
-  structures: { plugHeightAt(x: number, y: number): number };
+  structures: {
+    plugHeightAt(x: number, y: number): number;
+    readonly portalOutlines: readonly { frame: { x: number; y: number; z: number; tx: number; ty: number }; wings: { left: number; right: number } }[];
+  };
 }
 
 async function settle(page: Page): Promise<void> {
@@ -80,18 +83,36 @@ test("a portal beside a neighbour's cutting: the drawn ground stays continuous a
         return Number.isNaN(p) || p <= d ? d : p;
       };
       // Lines 0.25 m apart in both directions over 60 × 40 m around each portal: the largest step between neighbours.
+      // The portal's face and its splayed wings (30° toward the approach, to their end piers; owner decision
+      // 2026-09-28 "Splayed wing walls") stand over the plug's front edge: steps within 1.3 m of that masonry are
+      // skipped (until the splay, the band 1.3 m either side of the face plane).
+      const outlines = h.structures.portalOutlines;
+      const cos = Math.sqrt(3) / 2;
+      const segDist = (px: number, py: number, ax: number, ay: number, bx: number, by: number) => {
+        const dx = bx - ax;
+        const dy = by - ay;
+        const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy || 1)));
+        return Math.hypot(px - ax - t * dx, py - ay - t * dy);
+      };
+      const inMasonry = (x: number, y: number) =>
+        outlines.some(({ frame: f, wings }) => {
+          const s = (x - f.x) * f.tx + (y - f.y) * f.ty;
+          const u = (x - f.x) * f.ty - (y - f.y) * f.tx;
+          const end = (side: 1 | -1, m: number) => [-0.5 * (m + 0.6), side * (4.2 + cos * (m + 0.6))] as const;
+          const [ls, lu] = end(-1, wings.left);
+          const [rs, ru] = end(1, wings.right);
+          return Math.min(segDist(s, u, ls, lu, 0, -4.2), segDist(s, u, 0, -4.2, 0, 4.2), segDist(s, u, 0, 4.2, rs, ru)) <= 1.3;
+        });
       let worst = 0;
       let at = { x: 0, y: 0 };
       for (const q of [267, 290]) {
         const cx = 5 * (q + 129 / 2);
         const cy = 129 * 2.5 * Math.sqrt(3);
-        // The portal face and its wings stand in the plane x = cx, 1 m thick, over the plug's front edge: skip that band.
-        const inFace = (x: number) => Math.abs(x - cx) <= 1.3;
         for (let y = cy - 20; y <= cy + 20; y += 1) {
           let prev = surface(cx - 30, y);
           for (let x = cx - 29.75; x <= cx + 30; x += 0.25) {
             const z = surface(x, y);
-            if (!inFace(x) && !inFace(x - 0.25) && Math.abs(z - prev) > worst) {
+            if (!inMasonry(x, y) && !inMasonry(x - 0.25, y) && Math.abs(z - prev) > worst) {
               worst = Math.abs(z - prev);
               at = { x, y };
             }
@@ -99,11 +120,10 @@ test("a portal beside a neighbour's cutting: the drawn ground stays continuous a
           }
         }
         for (let x = cx - 30; x <= cx + 30; x += 1) {
-          if (inFace(x)) continue;
           let prev = surface(x, cy - 20);
           for (let y = cy - 19.75; y <= cy + 20; y += 0.25) {
             const z = surface(x, y);
-            if (Math.abs(z - prev) > worst) {
+            if (!inMasonry(x, y) && !inMasonry(x, y - 0.25) && Math.abs(z - prev) > worst) {
               worst = Math.abs(z - prev);
               at = { x, y };
             }
@@ -111,6 +131,7 @@ test("a portal beside a neighbour's cutting: the drawn ground stays continuous a
           }
         }
       }
+      if (outlines.length === 0) throw new Error("no portal outlines");
       // The neighbour's rails: the drawn surface (terrain and plug) under the rail tops along its whole length.
       let railWorst = -Infinity;
       for (const p of beside) {
@@ -129,8 +150,8 @@ test("a portal beside a neighbour's cutting: the drawn ground stays continuous a
     { beside },
   );
   console.log(`[feel-check e2e] around the portals: largest step ${probe.worst.toFixed(3)} m over 0.25 m at (${probe.at.x.toFixed(1)}, ${probe.at.y.toFixed(1)}); neighbour's rail tops clear by ${(-probe.railWorst).toFixed(2)} m`);
-  // The steepest designed face is the 2 : 1 headwall behind a portal (0.5 m per 0.25 m); the D4 render's plug edge
-  // over a neighbour's cutting stood metres proud.
+  // The steepest designed faces are 45° (the headwall behind a portal, the bank beyond a wing: 0.25 m per 0.25 m) and
+  // the 1 : 1.5 slopes; the D4 render's plug edge over a neighbour's cutting stood metres proud.
   expect(probe.worst).toBeLessThan(0.6);
   expect(probe.railWorst).toBeLessThanOrEqual(0);
   await undoToEmpty(page);
