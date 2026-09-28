@@ -559,7 +559,7 @@ if (import.meta.env.DEV) {
       tool: () => {
         const t = construction.trackState;
         const target = t.target ? { kind: t.target.kind, q: t.target.node.q, r: t.target.node.r, zMm: t.target.node.zMm, pieceKey: t.target.pieceKey ?? null } : null;
-        return { active: construction.activeTool, phase: t.phase, heightSteps: t.heightSteps, cursor: t.cursor, structure: t.structure, target };
+        return { active: construction.activeTool, phase: t.phase, heightSteps: t.heightSteps, cursor: t.cursor, mode: t.mode, target };
       },
       hud: () => store.getSnapshot(),
       /** True once a frame has rendered and the track and earthworks match the current network revision. */

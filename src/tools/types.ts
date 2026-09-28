@@ -54,14 +54,16 @@ export interface ToolPick {
 }
 
 /**
- * What a track-family tool builds (architecture "Tools": Bridge and Tunnel are the track tool with the
- * structure forced; Track uses Auto, where the core infers each piece's structure).
+ * How a track-family tool lays its heights (architecture "Tools"; owner decision 2026-09-28, "One 'Straight
+ * line' tool", which replaced the Bridge and Tunnel tools): Track ("follow") follows the ground within 35‰
+ * (auto-grade); Straight line ("straight") lays one steady grade from the start to the end, ignoring the
+ * ground. Both build with structure "auto", so the core infers each piece's bridge, tunnel or ground.
  */
-export type StructureMode = "auto" | Exclude<Structure, "ground">;
+export type TrackMode = "follow" | "straight";
 
 export type ToolEvent =
-  /** The tool took over; `structure` picks the Track (auto, the default), Bridge or Tunnel mode. */
-  | { readonly type: "activate"; readonly structure?: StructureMode }
+  /** The tool took over; `mode` picks Track ("follow", the default) or Straight line ("straight"). */
+  | { readonly type: "activate"; readonly mode?: TrackMode }
   | { readonly type: "deactivate" }
   /** The pointer moved; `pick` is null off the map. */
   | { readonly type: "pointer-move"; readonly pick: ToolPick | null; readonly screen: ScreenPoint }
@@ -96,8 +98,8 @@ export interface GhostPiece {
   readonly status: GhostStatus;
   /**
    * The piece's structure as it would be built: a new piece's from the preview's `diff.added` (the core's
-   * resolved structure, so Auto shows what inference chose), a reused piece's from the network, and the
-   * forced structure (or ground) when the preview rejected the plan.
+   * resolved structure, so the ghost shows what inference chose), a reused piece's from the network, and
+   * ground when the preview rejected the plan.
    */
   readonly structure: Structure;
 }

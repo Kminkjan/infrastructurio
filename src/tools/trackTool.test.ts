@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { makeTerrain } from "../../tests/support/makeTerrain";
 import { type Drag, type Sim, type Terrain, generateTerrain, waterDeckMm } from "../core/sim/api";
 import { createWorld } from "../core/sim/world";
-import { HINT_LINE, formatHeight } from "./format";
+import { HINT_LINE, STRAIGHT_HINT_LINE, formatHeight } from "./format";
 import { pickAtNode } from "./picks";
 import { createPreviewMemo } from "./previewMemo";
 import { DRAG_THRESHOLD_PX, type TrackToolState, initialTrackState, reduceTrackTool } from "./trackTool";
@@ -563,43 +563,93 @@ describe("track tool: height, precision and keyboard", () => {
   });
 });
 
-/** Flat dry land at 0 m with a 15 m cliff from q = 12 east (row-independent), for Tunnel drags into it. */
+/** Flat dry land at 0 m with a 15 m cliff from q = 12 east (row-independent): a straight line into it tunnels. */
 const CLIFF = makeTerrain(TERRAIN.columns, TERRAIN.rows, (q) => (q >= 12 ? 150 : 0), -100);
 
 /** Land at 11 m with a lake (bed 7 m, water level 10 m) from q = 20 east: water nodes carry the deck at 14 m. */
 const LAKE = makeTerrain(TERRAIN.columns, TERRAIN.rows, (q) => (q >= 20 ? 70 : 110), 100);
 
-describe("track tool: Bridge and Tunnel modes (D4)", () => {
-  it("builds with the forced structure, and the ghost and tooltip name it", () => {
-    // A bridge on flat ground at its own level (a deck on the ground breaks no rule), and a tunnel into a cliff from
-    // its foot: since D4 a forced tunnel on flat ground is no deeper than a cutting and is rejected.
-    for (const [structure, terrain, from] of [
-      ["bridge", undefined, 10],
-      ["tunnel", CLIFF, 11],
-    ] as const) {
-      const t = terrain ? session({ terrain }) : session({ flat: true });
-      t.send({ type: "activate", structure });
-      expect(t.state.structure).toBe(structure);
-      t.down(from, 10);
-      const fx = t.move(from + 4, 10);
-      // The planner validates its candidates with the forced structure.
-      expect(t.drags.at(-1)?.structure).toBe(structure);
-      const ghost = ghostOf(fx);
-      expect(ghost?.pieces.map((p) => p.structure)).toEqual([structure, structure, structure, structure]);
-      expect(ghost?.valid).toBe(true);
-      const tip = tooltipOf(fx);
-      expect(tip?.structure).toBe(`Structure: ${structure}`);
-      expect(tip?.lines[1]).toBe(`Structure: ${structure}`);
-      const done = t.up(from + 4, 10);
-      const exec = last(done, "execute");
-      expect(exec?.command).toMatchObject({ type: "build-track", structure });
-      expect(t.sim.network().pieces.every((p) => p.structure === structure)).toBe(true);
-    }
-    // The Track tool leaves the structure to the core's inference and says nothing of it to the planner.
-    const track = session({ flat: true });
-    track.down(10, 10);
-    track.move(14, 10);
-    expect(track.drags.at(-1)?.structure).toBeUndefined();
+/** Land at 20 m with a dry valley 10 m deep for q 16–26 (row-independent): a level straight line bridges it. */
+const VALLEY = makeTerrain(TERRAIN.columns, TERRAIN.rows, (q) => (q >= 16 && q <= 26 ? 100 : 200), -100);
+
+describe("track tool: Straight line mode (owner decision 2026-09-28, \"One 'Straight line' tool\")", () => {
+  /** A straight line from (q0, 10) to (q1, 10) with the tool in mode "straight". */
+  function straightLine(terrain: Terrain | undefined, q0: number, q1: number) {
+    const t = terrain ? session({ terrain }) : session({ flat: true });
+    t.send({ type: "activate", mode: "straight" });
+    expect(t.state.mode).toBe("straight");
+    t.down(q0, 10);
+    const fx = t.move(q1, 10);
+    return { t, fx };
+  }
+
+  /** Every piece rises by the same share of the height change (a steady grade, largest-remainder rounding). */
+  function steady(pieces: readonly { from: { zMm: number }; z1Mm: number }[]): boolean {
+    const rises = pieces.map((p) => p.z1Mm - p.from.zMm);
+    return Math.max(...rises) - Math.min(...rises) <= 1;
+  }
+
+  it("bridges a valley on a level line, ground at both ends", () => {
+    const { t, fx } = straightLine(VALLEY, 6, 36);
+    expect(t.drags.at(-1)?.heightMode).toBe("straight");
+    const plan = t.state.plan;
+    if (!plan) throw new Error("no plan");
+    expect(plan.pieces.every((p) => p.from.zMm === 20_000 && p.z1Mm === 20_000)).toBe(true);
+    const kinds = ghostOf(fx)?.pieces.map((p) => p.structure) ?? [];
+    expect(kinds[0]).toBe("ground");
+    expect(kinds.at(-1)).toBe("ground");
+    expect(kinds).toContain("bridge");
+    expect(kinds).not.toContain("tunnel");
+    expect(ghostOf(fx)?.valid).toBe(true);
+    const tip = tooltipOf(fx);
+    expect(tip?.structure).toMatch(/^Structure: \d+ bridge, \d+ ground$/);
+    expect(tip?.hint).toBe(STRAIGHT_HINT_LINE);
+    const exec = last(t.up(36, 10), "execute");
+    expect(exec?.command).toMatchObject({ type: "build-track", structure: "auto" });
+    expect(t.sim.network().pieces.some((p) => p.structure === "bridge")).toBe(true);
+  });
+
+  it("tunnels through a hill: the end the ground wants is out of 35‰ reach, so it stops where 35‰ reaches", () => {
+    // 26 pieces (130 m) from the plain at 0 m to the cliff top at 15 m: 35‰ reaches 4.55 m, and the line holds
+    // that grade into the cliff, a tunnel under 10 m and more of rock.
+    const { t, fx } = straightLine(CLIFF, 4, 30);
+    const plan = t.state.plan;
+    if (!plan?.end) throw new Error("no plan");
+    expect(plan.end.node.zMm).toBe(26 * 175);
+    expect(steady(plan.pieces)).toBe(true);
+    const kinds = ghostOf(fx)?.pieces.map((p) => p.structure) ?? [];
+    expect(kinds.slice(0, 7).every((k) => k === "ground")).toBe(true);
+    expect(kinds.filter((k) => k === "tunnel").length).toBeGreaterThan(10);
+    expect(ghostOf(fx)?.valid).toBe(true);
+    // The end sits 10.5 m under the ground there, and the tooltip says so.
+    expect(tooltipOf(fx)?.metrics?.endHeight).toBe(formatHeight(26 * 175 - 15_000).replace(/^/, "End height "));
+  });
+
+  it("lays ground on flat land, and the height keys raise the end on a steady grade", () => {
+    const { t, fx } = straightLine(undefined, 10, 20);
+    expect(ghostOf(fx)?.pieces.every((p) => p.structure === "ground")).toBe(true);
+    expect(tooltipOf(fx)?.structure).toBe("Structure: ground");
+    t.send({ type: "height", delta: 1 });
+    const plan = t.state.plan;
+    expect(plan?.end?.node.zMm).toBe(STEP_MM);
+    expect(steady(plan?.pieces ?? [])).toBe(true);
+    expect(t.drags.at(-1)?.heightMode).toBe("straight");
+    // No structure is forced on the planner (the Bridge and Tunnel tools are gone).
+    expect(t.drags.at(-1)?.structure).toBeUndefined();
+  });
+
+  it("crosses a lake as a bridge from a start on the water, at the deck height", () => {
+    const t = session({ terrain: LAKE });
+    t.send({ type: "activate", mode: "straight" });
+    t.down(22, 10);
+    t.move(34, 10);
+    // The deck start (M2) is 14 m; four steps put the end 4 m over the water surface too: a level deck.
+    for (let i = 0; i < 4; i++) t.send({ type: "height", delta: 1 });
+    const fx = t.move(34, 10);
+    expect(t.state.plan?.pieces.every((p) => p.from.zMm === 14_000 && p.z1Mm === 14_000)).toBe(true);
+    const ghost = ghostOf(fx) ?? ghostOf(t.all);
+    expect(ghost?.pieces.every((p) => p.structure === "bridge")).toBe(true);
+    expect(ghost?.valid).toBe(true);
   });
 
   it("starts a free drag on water at the deck height, the water level + 4.0 m, still auto-graded (M2)", () => {
@@ -633,18 +683,19 @@ describe("track tool: Bridge and Tunnel modes (D4)", () => {
   });
 
   it("reads each new piece's structure from the preview's diff, and a reused piece's from the network", () => {
-    const t = session({ flat: true });
-    // Ground track first (Track mode, auto), then a Bridge drag that runs back over it and on.
-    t.drag([10, 10], [13, 10]);
+    const t = session({ terrain: VALLEY });
+    // Ground track first (Track mode), then a straight line that runs back over it and on across the valley.
+    t.drag([8, 10], [11, 10]);
     t.send({ type: "escape" });
     t.send({ type: "escape" });
     t.send({ type: "deactivate" });
-    t.send({ type: "activate", structure: "bridge" });
-    t.down(10, 10);
-    const fx = t.move(16, 10);
+    t.send({ type: "activate", mode: "straight" });
+    t.down(8, 10);
+    const fx = t.move(30, 10);
     const ghost = ghostOf(fx);
-    expect(ghost?.pieces.map((p) => `${p.status}:${p.structure}`)).toEqual(["reused:ground", "reused:ground", "reused:ground", "new:bridge", "new:bridge", "new:bridge"]);
-    expect(tooltipOf(fx)?.structure).toBe("Structure: 3 bridge, 3 ground");
+    const labels = ghost?.pieces.map((p) => `${p.status}:${p.structure}`) ?? [];
+    expect(labels.slice(0, 3)).toEqual(["reused:ground", "reused:ground", "reused:ground"]);
+    expect(labels).toContain("new:bridge");
   });
 
   it("keeps the Track tool's tooltip as it was for all-ground plans, and starts each activation in its own mode", () => {
@@ -653,12 +704,13 @@ describe("track tool: Bridge and Tunnel modes (D4)", () => {
     const tip = tooltipOf(t.move(14, 10));
     expect(tip?.structure).toBeNull();
     expect(tip?.lines[1]).toMatch(/^Length /);
+    expect(tip?.hint).toBe(HINT_LINE);
     expect(ghostOf(t.all)?.pieces.every((p) => p.structure === "ground")).toBe(true);
     t.send({ type: "deactivate" });
-    expect(t.state.structure).toBe("auto");
-    t.send({ type: "activate", structure: "tunnel" });
+    expect(t.state.mode).toBe("follow");
+    t.send({ type: "activate", mode: "straight" });
     t.send({ type: "deactivate" });
     t.send({ type: "activate" });
-    expect(t.state.structure).toBe("auto");
+    expect(t.state.mode).toBe("follow");
   });
 });

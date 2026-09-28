@@ -5,7 +5,7 @@ import type { HudActions, HudState, HudStore, HudTool, HudTooltip } from "./stor
 /**
  * The React HUD (architecture "UI (HUD)", ADR 0009): the construction
  * tooltip, the toast, the aria-live status line and a minimal bottom
- * toolbar (Track, Bridge and Tunnel, then undo/redo; later slices add the
+ * toolbar (Track and Straight line, then undo/redo; later slices add the
  * other tools), with a chip over it naming the occlusion aids in effect (H,
  * U; keyboard only, announced on the status line). It renders only when the
  * store publishes, never per frame.
@@ -207,9 +207,8 @@ function keepFocus(e: MouseEvent): void {
 
 /** The tool buttons: label, key and tooltip. */
 const TOOLS: readonly { readonly tool: Exclude<HudTool, "select">; readonly label: string; readonly key: string; readonly title: string }[] = [
-  { tool: "track", label: "Track", key: "1", title: "Track (1): the structure follows the ground; Esc returns to Select" },
-  { tool: "bridge", label: "Bridge", key: "5", title: "Bridge (5): track on a bridge; H hides decks, C picks what lies under one" },
-  { tool: "tunnel", label: "Tunnel", key: "6", title: "Tunnel (6): track in a tunnel; U shows tunnels through the ground" },
+  { tool: "track", label: "Track", key: "1", title: "Track (1): follows the ground; Esc returns to Select" },
+  { tool: "straight", label: "Straight", key: "5", title: "Straight line (5): one steady grade from start to end; bridges and tunnels as needed" },
 ];
 
 export function Toolbar({ store, actions }: { readonly store: HudStore; readonly actions: HudActions }) {

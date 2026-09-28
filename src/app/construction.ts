@@ -12,7 +12,7 @@ import type { FlashView, GhostView, HighlightView } from "../render/track/GhostV
 import type { SnapRing } from "../render/track/SnapRing";
 import { type PreviewMemo, createPreviewMemo } from "../tools/previewMemo";
 import { type TrackToolState, initialTrackState, reduceTrackTool } from "../tools/trackTool";
-import type { StructureMode, ToolCtx, ToolEffect, ToolEvent, ToolSettings, TooltipModel } from "../tools/types";
+import type { ToolCtx, ToolEffect, ToolEvent, ToolSettings, TooltipModel, TrackMode } from "../tools/types";
 import { type HudStore, type HudTool, isTrackTool } from "../ui/store";
 
 /**
@@ -33,16 +33,18 @@ const CURSOR_MARGIN_PX = 80;
 const TOAST_MS = 2600;
 const PREVIEW_SAMPLES = 512;
 
-/** The structure each track-family tool builds with (architecture "Tools": Bridge and Tunnel force theirs). */
-export function structureModeOf(tool: "track" | "bridge" | "tunnel"): StructureMode {
-  return tool === "track" ? "auto" : tool;
+/**
+ * How each track-family tool lays heights (architecture "Tools"; owner decision 2026-09-28, "One 'Straight line'
+ * tool", which replaced Bridge and Tunnel): Track follows the ground, Straight line lays one steady grade.
+ */
+export function trackModeOf(tool: "track" | "straight"): TrackMode {
+  return tool === "track" ? "follow" : "straight";
 }
 
-const ACTIVATION: Readonly<Record<"track" | "bridge" | "tunnel", string>> = {
+const ACTIVATION: Readonly<Record<"track" | "straight", string>> = {
   track: "Track tool. Drag to lay track, or click to start and click again to lay it. Arrow keys move a cursor; Enter starts and lays. Esc steps back.",
-  bridge:
-    "Bridge tool. Drag to lay track on a bridge: stone arches over land, a steel truss over water or a long span, a plate girder over track. H hides decks; C picks what lies under one. Esc steps back.",
-  tunnel: "Tunnel tool. Drag to lay track in a tunnel, with a portal wherever it meets daylight. U shows tunnels through the ground. Esc steps back.",
+  straight:
+    "Straight line tool. Drag to lay one steady grade from start to end, whatever the ground does: bridges over valleys and water and tunnels through hills, as needed. [ ] raise or lower the end. H hides decks, U shows tunnels. Esc steps back.",
 };
 
 export interface ConstructionDeps {
@@ -158,7 +160,7 @@ export class Construction {
     this.d.lattice.setBuildMode(isTrackTool(tool));
     this.d.canvas.style.cursor = isTrackTool(tool) ? "crosshair" : "";
     if (isTrackTool(tool)) {
-      this.dispatch({ type: "activate", structure: structureModeOf(tool) });
+      this.dispatch({ type: "activate", mode: trackModeOf(tool) });
       if (this.d.precisionHeld()) this.dispatch({ type: "precision", held: true });
       this.announce(ACTIVATION[tool]);
     } else {
@@ -167,7 +169,7 @@ export class Construction {
     this.d.requestFrame("overlay");
   }
 
-  /** Whether a track-family tool (Track, Bridge, Tunnel) is active. */
+  /** Whether a track-family tool (Track, Straight line) is active. */
   get trackToolActive(): boolean {
     return isTrackTool(this.tool);
   }

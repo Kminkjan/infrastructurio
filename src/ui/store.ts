@@ -8,11 +8,14 @@
  * layer depends on react and its own store only.
  */
 
-export type HudTool = "select" | "track" | "bridge" | "tunnel";
+export type HudTool = "select" | "track" | "straight";
 
-/** The track-family tools: Track (auto structure), Bridge and Tunnel (forced). */
-export function isTrackTool(tool: HudTool): tool is "track" | "bridge" | "tunnel" {
-  return tool === "track" || tool === "bridge" || tool === "tunnel";
+/**
+ * The track-family tools: Track (follows the ground) and Straight line (one steady grade; owner decision
+ * 2026-09-28, "One 'Straight line' tool", which replaced Bridge and Tunnel). Both let the core infer structures.
+ */
+export function isTrackTool(tool: HudTool): tool is "track" | "straight" {
+  return tool === "track" || tool === "straight";
 }
 
 /** The occlusion aids' state (presentation only): H hides decks, U shows the underground x-ray. */

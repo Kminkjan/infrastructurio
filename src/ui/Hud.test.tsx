@@ -63,15 +63,16 @@ describe("HUD markup", () => {
     expect(html).not.toMatch(/#[0-9a-fA-F]{6}\b/);
   });
 
-  it("offers Track, Bridge and Tunnel with their keys, presses the active one, and names the occlusion aids in effect (D4)", () => {
-    const store = createHudStore({ ...INITIAL_HUD_STATE, tool: "bridge", views: { decksHidden: true, xray: true } });
+  it("offers Track and Straight line with their keys, presses the active one, and names the occlusion aids in effect", () => {
+    // Straight line (5) replaced Bridge (5) and Tunnel (6): owner decision 2026-09-28, "One 'Straight line' tool".
+    const store = createHudStore({ ...INITIAL_HUD_STATE, tool: "straight", views: { decksHidden: true, xray: true } });
     const html = renderToStaticMarkup(<Hud store={store} actions={{ selectTool: () => {}, undo: () => {}, redo: () => {} }} />);
     const buttons = [...html.matchAll(/<button[^>]*aria-pressed="(true|false)"[^>]*aria-keyshortcuts="(\d)"[^>]*>([A-Za-z]+)<kbd>/g)].map((m) => [m[3], m[2], m[1]]);
     expect(buttons).toEqual([
       ["Track", "1", "false"],
-      ["Bridge", "5", "true"],
-      ["Tunnel", "6", "false"],
+      ["Straight", "5", "true"],
     ]);
+    expect(html).toContain('title="Straight line (5): one steady grade from start to end; bridges and tunnels as needed"');
     expect(html).toContain('data-testid="view-chip" aria-hidden="true">Decks hidden (H) · Underground x-ray (U)<');
     const plain = renderToStaticMarkup(<Hud store={createHudStore()} actions={{ selectTool: () => {}, undo: () => {}, redo: () => {} }} />);
     expect(plain).not.toContain("view-chip");

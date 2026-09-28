@@ -5,13 +5,18 @@
  * - Undo Ctrl/Cmd+Z; redo Ctrl/Cmd+Shift+Z or Ctrl+Y; letters compared
  *   case-insensitively (Shift turns `z` into `Z`), by `key`, so they follow
  *   the keyboard layout. They work in every tool.
- * - 1 selects Track, 5 Bridge and 6 Tunnel (the tool-set keys, architecture
- *   "Tools"; 2–4 and 7 stay unbound until their tools exist). A digit matches
- *   by character (Shift allowed, for layouts like AZERTY that shift for
- *   digits), or unshifted by physical key (top row or numpad), except where
- *   that key types the camera's zoom characters (+ = − _: AZERTY's 6 key is
- *   its "−", which keeps zooming out). Never with Ctrl, Cmd or Alt. Esc steps
- *   the track tool back one level, and from Idle returns to Select.
+ * - 1 selects Track and 5 Straight line (the tool-set keys, architecture
+ *   "Tools"; 2–4 stay reserved for Signal, Station and Depot and 7 for
+ *   Demolish, unbound until those tools exist). Straight line took 5, Bridge's
+ *   old key, when it replaced the Bridge (5) and Tunnel (6) tools (owner
+ *   decision 2026-09-28, "One 'Straight line' tool"), so the planned 1–7 order
+ *   keeps; 6 is unbound now. A digit matches by character (Shift allowed, for
+ *   layouts like AZERTY that shift for digits), or unshifted by physical key
+ *   (top row or numpad), except where that key types the camera's zoom
+ *   characters (+ = − _: AZERTY's 6 key is its "−", which keeps zooming out;
+ *   AZERTY's 5 key types "(", so it selects Straight line by physical key).
+ *   Never with Ctrl, Cmd or Alt. Esc steps the track tool back one level, and
+ *   from Idle returns to Select.
  * - Occlusion aids (D4), unmodified letters in every tool: H hides bridge
  *   decks, U toggles the underground x-ray, C cycles the stacked picks under
  *   the pointer (a track-family tool only). They match by character (`key`),
@@ -71,7 +76,7 @@ export interface KeyContext {
 export type CursorDirection = "up" | "down" | "left" | "right";
 
 /** Tools a key selects. */
-export type KeyTool = "track" | "bridge" | "tunnel";
+export type KeyTool = "track" | "straight";
 
 export type KeyAction =
   | { readonly kind: "undo" }
@@ -90,8 +95,8 @@ export type KeyAction =
   /** Not ours: offer it to the camera. */
   | { readonly kind: "camera" };
 
-/** The tool-set keys (architecture "Tools": Track 1 … Bridge 5, Tunnel 6), by digit. */
-const TOOL_KEYS: Readonly<Record<string, KeyTool>> = { "1": "track", "5": "bridge", "6": "tunnel" };
+/** The tool-set keys (architecture "Tools": Track 1, Straight line 5), by digit. */
+const TOOL_KEYS: Readonly<Record<string, KeyTool>> = { "1": "track", "5": "straight" };
 /** The camera's zoom characters (`CameraController`), which a digit's physical key never takes. */
 const ZOOM_CHARS: ReadonlySet<string> = new Set(["+", "=", "-", "_"]);
 /** The camera's physical keys (`CameraController`): pan and rotate. */

@@ -345,3 +345,66 @@ describe("the diorama under auto-grade (dev measurements, not gates)", () => {
     expect(stats.structures.get("tunnel") ?? 0).toBeGreaterThan(0);
   });
 });
+
+describe('straight height mode (owner decision 2026-09-28, "One \'Straight line\' tool")', () => {
+  /** A straight drag east along row 60 from col c0 to col c1: from the ground there, the end wanted `liftMm` above the ground at c1. */
+  function straightDrag(t: Terrain, c0: number, c1: number, liftMm = 0): Drag {
+    const auto = eastDrag(t, c0, c1);
+    return { ...auto, dzMm: auto.dzMm + liftMm, heightMode: "straight" };
+  }
+
+  it("lays one steady grade to the end, whatever the ground between does", () => {
+    // A 6 m ridge between flats at 20 m: auto-grade climbs over it; a straight line runs level through it.
+    const t = profileTerrain((col) => 200 + Math.max(0, 60 - Math.abs(col - 100) * 3));
+    const w = createWorld(t);
+    const plan = w.plan(straightDrag(t, 80, 120));
+    expect(plan.pieces).toHaveLength(40);
+    expect(plan.pieces.every((p) => p.from.zMm === 20_000 && p.z1Mm === 20_000)).toBe(true);
+    // Two metres up at the far end: 2,000 mm apportioned by length over the 40 pieces, 50 mm each.
+    const lifted = w.plan(straightDrag(t, 80, 120, 2000));
+    expect(lifted.pieces.map((p) => p.z1Mm - p.from.zMm)).toEqual(Array(40).fill(50));
+    expect(lifted.end?.node.zMm).toBe(22_000);
+  });
+
+  it("moves an end 35‰ cannot reach to the nearest height it can, so a straight line is never too steep", () => {
+    // From a plain at 0 m to a plateau at 30 m over 20 pieces (100 m): 35‰ reaches 3.5 m, so the end sits at 3.5 m.
+    const t = profileTerrain((col) => (col >= 110 ? 300 : 0));
+    const w = createWorld(t);
+    const plan = w.plan(straightDrag(t, 90, 110));
+    expect(plan.end?.node.zMm).toBe(3500);
+    expect(plan.pieces.every((p) => p.z1Mm - p.from.zMm === 175)).toBe(true);
+    expect(within35(plan.pieces)).toBe(true);
+    const down = w.plan({ ...straightDrag(t, 90, 110), dzMm: -50_000 });
+    expect(down.end?.node.zMm).toBe(-3500);
+  });
+
+  it("keeps a snapped port's height, and a port out of 35‰ reach gives a ramp preview rejects as too steep", () => {
+    const t = profileTerrain(() => 200);
+    const w = createWorld(t);
+    // An existing buffer end 4 m up at col 110, row 60 (q 80), facing west.
+    const stub: PieceSpec[] = [{ kind: "straight", from: { q: 80, r: ROW, zMm: 24_000 }, heading: 0, z1Mm: 24_000 }];
+    ok(w.run(build(stub), true));
+    const near = w.plan(straightDrag(t, 100, 110));
+    expect(near.snapped).toEqual({ q: 80, r: ROW, zMm: 24_000 });
+    expect(near.end?.node.zMm).toBe(24_000);
+    const verdict = w.run(build(near.pieces), false);
+    expect(verdict.ok).toBe(false);
+    expect(!verdict.ok && verdict.reason.code).toBe("grade-too-steep");
+  });
+
+  it("gives the structures from inference: a bridge over a valley, a tunnel through a hill, ground on the flat", () => {
+    const valley = profileTerrain((col) => (col >= 95 && col <= 115 ? 80 : 200));
+    const hill = profileTerrain((col) => (col >= 95 && col <= 125 ? 350 : 200));
+    const flat = profileTerrain(() => 200);
+    const kinds = (t: Terrain, c0: number, c1: number): string[] => {
+      const w = createWorld(t);
+      const plan = w.plan(straightDrag(t, c0, c1));
+      return ok(w.run(build(plan.pieces), false)).diff.added.map((a) => a.structure);
+    };
+    expect(kinds(valley, 80, 130)).toContain("bridge");
+    expect(kinds(valley, 80, 130)).not.toContain("tunnel");
+    expect(kinds(hill, 80, 140)).toContain("tunnel");
+    expect(kinds(hill, 80, 140)).not.toContain("bridge");
+    expect(new Set(kinds(flat, 80, 130))).toEqual(new Set(["ground"]));
+  });
+});

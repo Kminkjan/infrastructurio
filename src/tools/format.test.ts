@@ -96,13 +96,13 @@ describe("tooltip text", () => {
     expect(splitReason({ message: "Nothing to undo." })).toEqual({ reason: "Nothing to undo", fix: null });
   });
 
-  it("names the structure when a plan is not all ground (D4)", () => {
-    expect(formatStructures("auto", ["ground", "ground"])).toBeNull();
-    expect(formatStructures("bridge", ["bridge", "bridge"])).toBe("Structure: bridge");
-    expect(formatStructures("tunnel", ["tunnel"])).toBe("Structure: tunnel");
-    expect(formatStructures("auto", ["ground", "bridge", "tunnel", "bridge"])).toBe("Structure: 2 bridge, 1 tunnel, 1 ground");
-    // A forced mode over pieces that all exist as ground still says so.
-    expect(formatStructures("bridge", ["ground"])).toBe("Structure: ground");
-    expect(formatStructures("auto", [])).toBeNull();
+  it("names the structure when a plan is not all ground (D4), and always for a straight line", () => {
+    expect(formatStructures("follow", ["ground", "ground"])).toBeNull();
+    expect(formatStructures("follow", ["ground", "bridge", "tunnel", "bridge"])).toBe("Structure: 2 bridge, 1 tunnel, 1 ground");
+    expect(formatStructures("straight", ["bridge", "bridge"])).toBe("Structure: bridge");
+    expect(formatStructures("straight", ["tunnel"])).toBe("Structure: tunnel");
+    // A straight line says so even when every piece is ground.
+    expect(formatStructures("straight", ["ground"])).toBe("Structure: ground");
+    expect(formatStructures("follow", [])).toBeNull();
   });
 });

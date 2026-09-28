@@ -18,7 +18,7 @@ import {
 import { buildTooltip, formatCounts, formatHeight, formatStructures, splitReason } from "./format";
 import { nodesAt, pickAtNode } from "./picks";
 import { commandKey } from "./previewMemo";
-import type { GhostModel, Reduced, ScreenPoint, StructureMode, ToolCtx, ToolEffect, ToolEvent, ToolPick } from "./types";
+import type { GhostModel, Reduced, ScreenPoint, ToolCtx, ToolEffect, ToolEvent, ToolPick, TrackMode } from "./types";
 
 /**
  * The track tool (issue #67 "Tool and input"), a pure reducer:
@@ -52,6 +52,15 @@ import type { GhostModel, Reduced, ScreenPoint, StructureMode, ToolCtx, ToolEffe
  * own track (reused pieces) leaves it outward, so the chain goes on. A plan
  * ending on an existing node within half a step of that node's height takes
  * its height too (outside precision mode).
+ *
+ * Straight line (owner decision 2026-09-28, "One 'Straight line' tool", which
+ * replaced the Bridge and Tunnel tools): the same reducer in mode "straight".
+ * The drag plans one steady grade from the start to the end in the planner's
+ * "straight" height mode, ignoring the ground; the end sits `heightSteps` above
+ * the ground at the end node, moved by the planner to the nearest height 35‰
+ * reaches from the start, and the core infers each piece's structure (bridges
+ * over valleys and water, tunnels through hills). Both modes build with
+ * structure "auto".
  *
  * After a commit the app executes and sends `refresh`; that re-plan's
  * announcement leads with the build result, so a screen reader hears both.
@@ -99,11 +108,11 @@ export interface TrackToolState {
   readonly snapKey: string | null;
   /** A commit's "Built…" text, waiting to lead the announcement of the re-plan that follows it. */
   readonly built: string | null;
-  /** D4: Track builds with structure auto; the Bridge and Tunnel tools force one. */
-  readonly structure: StructureMode;
+  /** Track follows the ground; Straight line lays one steady grade (both build with structure "auto"). */
+  readonly mode: TrackMode;
 }
 
-export function initialTrackState(structure: StructureMode = "auto"): TrackToolState {
+export function initialTrackState(mode: TrackMode = "follow"): TrackToolState {
   return {
     phase: "idle",
     target: null,
@@ -121,7 +130,7 @@ export function initialTrackState(structure: StructureMode = "auto"): TrackToolS
     viewKey: null,
     snapKey: null,
     built: null,
-    structure,
+    mode,
   };
 }
 
@@ -135,7 +144,7 @@ function step(s: TrackToolState, e: ToolEvent, ctx: ToolCtx, out: ToolEffect[]):
   switch (e.type) {
     case "activate":
       // Precision starts off: the modifier may have been released while the tool was inactive.
-      return present({ ...initialTrackState(e.structure ?? "auto"), radiusM: s.radiusM }, ctx, out);
+      return present({ ...initialTrackState(e.mode ?? "follow"), radiusM: s.radiusM }, ctx, out);
 
     case "deactivate":
       out.push({ type: "ghost", ghost: null }, { type: "tooltip", tooltip: null }, { type: "snap", snap: null }, { type: "highlight", keys: [] });
@@ -288,7 +297,9 @@ function startAt(s: TrackToolState, pick: ToolPick, ctx: ToolCtx): TrackToolStat
   }
   const ground = ctx.groundZmm(pick.node.q, pick.node.r);
   const stepMm = ctx.settings.heightStepMm;
-  const heightSteps = ground === undefined ? 0 : Math.round((pick.node.zMm - ground) / stepMm);
+  // A straight line ends on the ground plus the steps pressed since it started (owner decision 2026-09-28), so it
+  // starts with none, whatever the start's own height; Track keeps the start's height above ground.
+  const heightSteps = s.mode === "straight" || ground === undefined ? 0 : Math.round((pick.node.zMm - ground) / stepMm);
   return {
     ...s,
     anchor: { node: pick.node, heading: undefined },
@@ -378,7 +389,7 @@ function present(s: TrackToolState, ctx: ToolCtx, out: ToolEffect[], lead: strin
   const end = plan.end;
   const ground = end ? ctx.groundZmm(end.node.q, end.node.r) : undefined;
   const endHeightMm = end ? end.node.zMm - (ground ?? end.node.zMm) : 0;
-  const command: Command | null = plan.fit === "none" ? null : { type: "build-track", pieces: plan.pieces, structure: s.structure };
+  const command: Command | null = plan.fit === "none" ? null : { type: "build-track", pieces: plan.pieces, structure: "auto" };
   const tipAnchor = s.cursor ? target.node : null;
   const viewKey = [
     ctx.network.rev,
@@ -391,9 +402,9 @@ function present(s: TrackToolState, ctx: ToolCtx, out: ToolEffect[], lead: strin
 
   const verdict = command ? ctx.preview(command) : null;
   const rejection = verdict && !verdict.ok ? verdict.reason : null;
-  const ghost = command ? ghostOf(plan, verdict, ctx.network, s.structure) : null;
-  const structure = ghost ? formatStructures(s.structure, ghost.pieces.map((p) => p.structure)) : null;
-  const tooltip = buildTooltip({ plan, endHeightMm, rejection, precision: s.precision, anchor: tipAnchor, structure });
+  const ghost = command ? ghostOf(plan, verdict, ctx.network) : null;
+  const structure = ghost ? formatStructures(s.mode, ghost.pieces.map((p) => p.structure)) : null;
+  const tooltip = buildTooltip({ plan, endHeightMm, rejection, precision: s.precision, anchor: tipAnchor, structure, mode: s.mode });
   out.push(
     { type: "ghost", ghost },
     { type: "tooltip", tooltip },
@@ -417,16 +428,15 @@ function planFor(s: TrackToolState, anchor: Anchor, target: ToolPick, ctx: ToolC
   const lift = s.heightSteps * stepMm;
   const from = anchor.node;
   const groundOr = (q: number, r: number): number => ctx.groundZmm(q, r) ?? from.zMm;
-  // D4 auto-grade: with no height steps the planner chooses the end height too (within 35‰), so no re-plan.
-  const heightMode = s.heightSteps === 0 ? "auto" : "fixed";
+  // D4 auto-grade: with no height steps the planner chooses the end height too (within 35‰), so no re-plan. A
+  // straight line takes the end the tool wants (the ground there plus the steps) and the planner keeps it in reach.
+  const heightMode = s.mode === "straight" ? "straight" : s.heightSteps === 0 ? "auto" : "fixed";
   const drag = (dzMm: number): Drag => ({
     from,
     ...(anchor.heading === undefined ? {} : { fromHeading: anchor.heading }),
     to: target.pointMm,
     dzMm,
     heightMode,
-    // The Bridge and Tunnel tools: the planner validates its candidates with the structure the build will carry.
-    ...(s.structure === "auto" ? {} : { structure: s.structure }),
     magnetism: !s.precision,
     ...(ctx.settings.radiusCapM === undefined ? {} : { radiusCapM: ctx.settings.radiusCapM }),
     ...(s.precision ? { precision: { radiusM: s.radiusM, ...(s.endHeading === undefined ? {} : { endHeading: s.endHeading }) } } : {}),
@@ -463,12 +473,12 @@ function pieceKeys(network: NetworkView): ReadonlyMap<PieceKey, Structure> {
 
 /**
  * The ghost: each piece new or reused, with its structure as it would be built (a new piece's from the
- * preview's `diff.added`, a reused piece's from the network, else the forced structure or ground).
+ * preview's `diff.added`, a reused piece's from the network, else ground).
  */
-function ghostOf(plan: TrackPlan, verdict: Result | null, network: NetworkView, mode: StructureMode): GhostModel {
+function ghostOf(plan: TrackPlan, verdict: Result | null, network: NetworkView): GhostModel {
   const existing = pieceKeys(network);
   const added = verdict?.ok ? new Map(verdict.diff.added.map((r) => [r.key, r.structure])) : undefined;
-  const fallback: Structure = mode === "auto" ? "ground" : mode;
+  const fallback: Structure = "ground";
   return {
     pieces: plan.pieces.map((spec) => {
       const key = canonicalKey(spec);

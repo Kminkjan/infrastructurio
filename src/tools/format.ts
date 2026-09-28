@@ -1,5 +1,5 @@
 import { type Counts, type NodeRef, type PieceSpec, type Reason, type Structure, type TrackPlan, resolvePiece } from "../core/sim/api";
-import type { GradeLevel, StructureMode, TooltipMetrics, TooltipModel } from "./types";
+import type { GradeLevel, TooltipMetrics, TooltipModel, TrackMode } from "./types";
 
 /**
  * Tooltip text (issue #67 "Presentation"). Display units (m, %) appear only
@@ -12,6 +12,8 @@ import type { GradeLevel, StructureMode, TooltipMetrics, TooltipModel } from "./
  */
 
 export const HINT_LINE = "Hold Ctrl (⌥ on Mac) for precision · [ ] change height";
+/** The Straight line tool's hint (owner decision 2026-09-28, "One 'Straight line' tool"). */
+export const STRAIGHT_HINT_LINE = "Straight line: bridges and tunnels as needed · [ ] change end height";
 export const PRECISION_CONTROLS = "wheel radius · Q/E end heading";
 
 /** Grade colour bands in ‰: green ≤ 1.5 %, amber up to the 35‰ (3.5 %) maximum, red above it. */
@@ -107,13 +109,13 @@ export function splitReason(reason: Pick<Reason, "message">): { reason: string; 
 /**
  * The tooltip's structure line (D4): "Structure: bridge" when every piece shares one structure, counts
  * when they mix ("Structure: 2 bridge, 1 tunnel, 3 ground", zeros left out), and nothing for a Track
- * plan that is all ground (the D3 tooltip, unchanged).
+ * plan that is all ground (the D3 tooltip, unchanged). A straight line always shows it.
  */
-export function formatStructures(mode: StructureMode, structures: readonly Structure[]): string | null {
+export function formatStructures(mode: TrackMode, structures: readonly Structure[]): string | null {
   if (structures.length === 0) return null;
   const counts: Record<Structure, number> = { bridge: 0, tunnel: 0, ground: 0 };
   for (const s of structures) counts[s] += 1;
-  if (counts.ground === structures.length && mode === "auto") return null;
+  if (counts.ground === structures.length && mode === "follow") return null;
   const kinds = (["bridge", "tunnel", "ground"] as const).filter((k) => counts[k] > 0);
   if (kinds.length === 1) return `Structure: ${kinds[0]}`;
   return `Structure: ${kinds.map((k) => `${counts[k]} ${k}`).join(", ")}`;
@@ -129,6 +131,8 @@ export interface TooltipInput {
   readonly anchor: NodeRef | null;
   /** The structure line (`formatStructures`), or null. */
   readonly structure?: string | null;
+  /** The tool's mode: the Straight line tool has its own hint line. */
+  readonly mode?: TrackMode;
 }
 
 export function buildTooltip(input: TooltipInput): TooltipModel {
@@ -149,6 +153,7 @@ export function buildTooltip(input: TooltipInput): TooltipModel {
     if (invalid.fix) lines.push(invalid.fix);
   }
   if (precision) lines.push(precision);
-  lines.push(HINT_LINE);
-  return { counts, structure, metrics, note, invalid, precision, hint: HINT_LINE, lines, anchor: input.anchor };
+  const hint = input.mode === "straight" ? STRAIGHT_HINT_LINE : HINT_LINE;
+  lines.push(hint);
+  return { counts, structure, metrics, note, invalid, precision, hint, lines, anchor: input.anchor };
 }

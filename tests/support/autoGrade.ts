@@ -32,6 +32,13 @@ import { simOn } from "./simOn";
  * along a heading, half aim at a free pointer within ±150 m; a quarter of the
  * free starts have no heading. Starts lie at least 300 m inside the map.
  *
+ * `mode: "straight"` makes the same drags as the Straight line tool does
+ * (owner decision 2026-09-28, "One 'Straight line' tool"): `heightMode:
+ * "straight"`, the end wanted on the ground at the pointer's node, planned once
+ * more when the plan ends on another node (as the tool does). The tool's ground
+ * is the sim's effective ground (`sim.groundMm`, D4 feel-check fixes), the
+ * terrain on an empty network.
+ *
  * `measureAutoGrade` summarises what the rules make of them: the share
  * accepted, the rejection reasons, the structure mix, how far nodes sit from
  * the ground and how steep the pieces are. A dev measurement, not a gate.
@@ -48,17 +55,27 @@ function point(q: number, r: number): { xMm: number; yMm: number } {
   return { xMm: Math.round(w.x * 1000), yMm: Math.round(w.y * 1000) };
 }
 
-function autoDrag(terrain: Terrain, from: NodeRef, fromHeading: Heading | undefined, to: { xMm: number; yMm: number }): Drag {
+export type SampleMode = "auto" | "straight";
+
+function autoDrag(sim: Sim, from: NodeRef, fromHeading: Heading | undefined, to: { xMm: number; yMm: number }, mode: SampleMode = "auto"): Drag {
   const end = nearestNode({ x: to.xMm / 1000, y: to.yMm / 1000 });
   return {
     from,
     ...(fromHeading === undefined ? {} : { fromHeading }),
     to,
     // As the tool: the ground at the pointer's node, or the start's own height off the map.
-    dzMm: (groundMmAt(terrain, end) ?? from.zMm) - from.zMm,
+    dzMm: (sim.groundMm(end.q, end.r) ?? from.zMm) - from.zMm,
     magnetism: true,
-    heightMode: "auto",
+    heightMode: mode,
   };
+}
+
+/** Plans a drag as the tool does: a straight line whose plan ends on another node is planned again for the ground there. */
+function planAsTool(sim: Sim, drag: Drag): TrackPlan {
+  const plan = sim.planTrack(drag);
+  if (drag.heightMode !== "straight" || !plan.end || plan.snapped) return plan;
+  const want = (sim.groundMm(plan.end.node.q, plan.end.node.r) ?? drag.from.zMm) - drag.from.zMm;
+  return want === drag.dzMm ? plan : sim.planTrack({ ...drag, dzMm: want });
 }
 
 type Prng = ReturnType<typeof createPrng>;
@@ -74,7 +91,7 @@ function pointerFrom(prng: Prng, s: { q: number; r: number }, heading: Heading):
 }
 
 /** `free` independent drags on an empty network, then `chains` chains built on their own networks. */
-export function autoGradeSamples(free: number, chains: number, seed = "auto-grade-probe"): AutoGradeSample[] {
+export function autoGradeSamples(free: number, chains: number, seed = "auto-grade-probe", mode: SampleMode = "auto"): AutoGradeSample[] {
   const { terrain, sim } = diorama();
   const prng = createPrng(seed);
   const out: AutoGradeSample[] = [];
@@ -84,7 +101,7 @@ export function autoGradeSamples(free: number, chains: number, seed = "auto-grad
     const to = pointerFrom(prng, s, heading);
     const fromHeading = !to.straight && prng.nextInt(2) === 0 ? undefined : heading;
     const from = { q: s.q, r: s.r, zMm: toolStartMm(terrain, s) };
-    const plan = sim.planTrack(autoDrag(terrain, from, fromHeading, to));
+    const plan = planAsTool(sim, autoDrag(sim, from, fromHeading, to, mode));
     if (plan.fit === "none") continue;
     out.push({ plan, verdict: sim.preview({ type: "build-track", pieces: plan.pieces, structure: "auto" }), chained: false });
   }
@@ -96,7 +113,7 @@ export function autoGradeSamples(free: number, chains: number, seed = "auto-grad
     const length = 3 + prng.nextInt(4);
     for (let k = 0; k < length; k++) {
       const to = pointerFrom(prng, from, heading ?? (HEADINGS[prng.nextInt(12)] ?? 0));
-      const plan = chainSim.planTrack(autoDrag(terrain, from, heading, to));
+      const plan = planAsTool(chainSim, autoDrag(chainSim, from, heading, to, mode));
       if (plan.fit === "none" || !plan.end) continue;
       const command = { type: "build-track", pieces: plan.pieces, structure: "auto" } as const;
       const verdict = chainSim.preview(command);

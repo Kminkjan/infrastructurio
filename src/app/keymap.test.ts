@@ -24,14 +24,17 @@ describe("key routing", () => {
     expect(classifyKey(key("z", "KeyW", { ctrlKey: true }), select)).toEqual({ kind: "undo" });
   });
 
-  it("selects Track on 1, Bridge on 5 and Tunnel on 6, and routes Esc to the tool", () => {
+  it("selects Track on 1 and Straight line on 5 (6 is unbound since it replaced Bridge and Tunnel), and routes Esc to the tool", () => {
     expect(classifyKey(key("1", "Digit1"), select)).toEqual({ kind: "select-tool", tool: "track" });
     expect(classifyKey(key("1", "Numpad1"), track)).toEqual({ kind: "select-tool", tool: "track" });
-    expect(classifyKey(key("5", "Digit5"), select)).toEqual({ kind: "select-tool", tool: "bridge" });
-    expect(classifyKey(key("6", "Numpad6"), track)).toEqual({ kind: "select-tool", tool: "tunnel" });
-    // AZERTY types "&" on the top-row 1 key: the physical key still selects; Shift gives the digit itself.
+    expect(classifyKey(key("5", "Digit5"), select)).toEqual({ kind: "select-tool", tool: "straight" });
+    expect(classifyKey(key("5", "Numpad5"), track)).toEqual({ kind: "select-tool", tool: "straight" });
+    expect(classifyKey(key("6", "Digit6"), select)).toEqual({ kind: "camera" });
+    expect(classifyKey(key("6", "Numpad6"), track)).toEqual({ kind: "camera" });
+    // AZERTY types "&" on the top-row 1 key and "(" on the 5 key: the physical key still selects; Shift gives the digit.
     expect(classifyKey(key("&", "Digit1"), select)).toEqual({ kind: "select-tool", tool: "track" });
-    expect(classifyKey(key("6", "Digit6", { shiftKey: true }), select)).toEqual({ kind: "select-tool", tool: "tunnel" });
+    expect(classifyKey(key("(", "Digit5"), select)).toEqual({ kind: "select-tool", tool: "straight" });
+    expect(classifyKey(key("5", "Digit5", { shiftKey: true }), select)).toEqual({ kind: "select-tool", tool: "straight" });
     // …but its 6 key types "-", the camera's zoom-out, which stays the camera's.
     expect(classifyKey(key("-", "Digit6"), select)).toEqual({ kind: "camera" });
     // 2–4 and 7 stay unbound until their tools exist; modified digits are not tools.
