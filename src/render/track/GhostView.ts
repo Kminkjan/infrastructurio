@@ -12,7 +12,7 @@ import { type NetworkPiece, type NetworkView, type PieceKey, type PieceSpec, typ
 import { cssColor, palette } from "../art/palette";
 import { type IsoView, worldToScreen } from "../camera/isoMath";
 import { simToWorld } from "../coords";
-import { type RibbonPiece, buildRibbons, elevationMarks, heightTagText } from "./ghostGeometry";
+import { type GhostCentreline, type RibbonPiece, buildRibbons, elevationMarks, heightTagText, heldEndLine } from "./ghostGeometry";
 import type { TrackCentreline } from "./trackGeometry";
 
 /**
@@ -23,7 +23,9 @@ import type { TrackCentreline } from "./trackGeometry";
  *   behind a hill or under a bridge still shows faintly;
  * - `GhostView`: the planned track, new `ghostValid` white, reused
  *   `ghostReused` cyan, invalid `ghostInvalid` red and dashed; an elevated
- *   ghost adds drop lines every 20 m and end-height tags;
+ *   ghost adds drop lines every 20 m and end-height tags; an end the 3.5 %
+ *   limit holds off the ground adds its own drop line in `signalAmber`
+ *   (the grade band's amber), drawn see-through too, so it shows inside a hill;
  * - `HighlightView`: existing pieces a rejection names, in red;
  * - `FlashView`: the pieces an undo or redo changed, for 400 ms.
  * All colours are palette tokens; materials skip tone mapping so the
@@ -101,11 +103,16 @@ export class OverlayRibbons {
   }
 }
 
-/** A spec or key resolved to its centreline; undefined when it does not resolve. */
-export function centrelineOfSpec(spec: PieceSpec): TrackCentreline | undefined {
+/**
+ * A spec resolved to its centreline, marked `reversed` when the resolved piece's canonical direction runs from the
+ * spec's far end back to its `from` (the ghost's end marks read it in travel order); undefined when it does not resolve.
+ */
+export function centrelineOfSpec(spec: PieceSpec): GhostCentreline | undefined {
   const res = resolvePiece(spec);
   if (!res.ok) return undefined;
-  return { prims: res.piece.prims, z0M: res.piece.ends[0].node.zMm / 1000, z1M: res.piece.ends[1].node.zMm / 1000 };
+  const [a, b] = res.piece.ends;
+  const reversed = a.node.q !== spec.from.q || a.node.r !== spec.from.r || a.node.zMm !== spec.from.zMm;
+  return { prims: res.piece.prims, z0M: a.node.zMm / 1000, z1M: b.node.zMm / 1000, reversed };
 }
 
 export function centrelineOfKey(key: PieceKey): TrackCentreline | undefined {
@@ -117,7 +124,13 @@ export function centrelineOfKey(key: PieceKey): TrackCentreline | undefined {
 export interface GhostInput {
   readonly pieces: readonly { readonly spec: PieceSpec; readonly status: "new" | "reused"; readonly structure?: Structure }[];
   readonly valid: boolean;
+  /** The 3.5 % limit holds the plan's end off the ground: draw the held-end drop line (owner decision 2026-09-28). */
+  readonly endHeld?: boolean;
 }
+
+/** The held-end line's opacities: depth-tested, and see-through for the part inside a hill (a 1 px line at 0.5 did not read on the terrain; agent capture, 2026-09-29). */
+export const HELD_DEPTH_OPACITY = 0.95;
+export const HELD_THROUGH_OPACITY = 0.85;
 
 /**
  * The ghost's structure marks (D4), in the piece's ghost colour: a bridge shows its deck's edges (solid
@@ -158,6 +171,11 @@ export class GhostView {
   private dropGeometry = new BufferGeometry();
   private readonly dropMaterial: LineBasicMaterial;
   private readonly drops: LineSegments;
+  private heldGeometry = new BufferGeometry();
+  private readonly heldMaterials: readonly [LineBasicMaterial, LineBasicMaterial];
+  /** The held-end line: the see-through pass, then the depth-tested one over it. */
+  private readonly heldLines: readonly [LineSegments, LineSegments];
+  private endHeld = false;
   private readonly tags: HTMLDivElement[];
   private readonly tagAnchors: Vector3[] = [new Vector3(), new Vector3()];
   /** Each tag's last written CSS px position; NaN forces the next write. */
@@ -167,7 +185,7 @@ export class GhostView {
   ];
   private tagsShown = false;
   /** The centrelines the ghost shows, kept so its elevation marks can be measured again (`refreshGround`). */
-  private lines: readonly TrackCentreline[] = [];
+  private lines: readonly GhostCentreline[] = [];
 
   constructor(
     tagParent: HTMLElement,
@@ -185,7 +203,20 @@ export class GhostView {
     this.drops.renderOrder = DEPTH_ORDER;
     this.drops.frustumCulled = false;
     this.drops.visible = false;
-    this.group.add(this.ribbons.group, this.drops, this.marks.group);
+    const held = { color: palette.signalAmber, transparent: true, depthWrite: false, toneMapped: false } as const;
+    this.heldMaterials = [
+      new LineBasicMaterial({ ...held, opacity: HELD_THROUGH_OPACITY, depthTest: false }),
+      new LineBasicMaterial({ ...held, opacity: HELD_DEPTH_OPACITY, depthTest: true }),
+    ];
+    this.heldLines = [new LineSegments(this.heldGeometry, this.heldMaterials[0]), new LineSegments(this.heldGeometry, this.heldMaterials[1])];
+    this.heldLines.forEach((line, i) => {
+      line.name = i === 0 ? "ghost held end (through)" : "ghost held end";
+      // Over the white drop line an elevated end already has at the same place.
+      line.renderOrder = i === 0 ? THROUGH_ORDER : DEPTH_ORDER + 1;
+      line.frustumCulled = false;
+      line.visible = false;
+    });
+    this.group.add(this.ribbons.group, this.drops, this.marks.group, ...this.heldLines);
     this.tags = [0, 1].map(() => {
       const el = document.createElement("div");
       el.setAttribute("aria-hidden", "true");
@@ -221,10 +252,15 @@ export class GhostView {
     return this.marks.group.visible;
   }
 
+  /** Whether the held-end drop line shows (the 3.5 % limit holds a Straight line's end off the ground), for checks. */
+  get heldVisible(): boolean {
+    return this.heldLines[1].visible;
+  }
+
   /** Shows a plan, or hides the ghost for null. */
   set(ghost: GhostInput | null): void {
     const pieces: RibbonPiece[] = [];
-    const lines: TrackCentreline[] = [];
+    const lines: GhostCentreline[] = [];
     const structured: { centreline: TrackCentreline; color: number; structure: Structure }[] = [];
     if (ghost) {
       for (const p of ghost.pieces) {
@@ -239,6 +275,7 @@ export class GhostView {
     this.ribbons.set(pieces, ghost !== null && !ghost.valid);
     this.marks.set(structureMarks(structured));
     this.lines = lines;
+    this.endHeld = ghost?.endHeld === true;
     this.measure();
   }
 
@@ -262,6 +299,15 @@ export class GhostView {
     this.drops.geometry = this.dropGeometry;
     old.dispose();
     this.drops.visible = marks.dropLines.length > 0;
+    const heldLine = this.endHeld ? heldEndLine(this.lines, this.groundM) : new Float32Array(0);
+    const oldHeld = this.heldGeometry;
+    this.heldGeometry = new BufferGeometry();
+    if (heldLine.length > 0) this.heldGeometry.setAttribute("position", new BufferAttribute(heldLine, 3));
+    for (const line of this.heldLines) {
+      line.geometry = this.heldGeometry;
+      line.visible = heldLine.length > 0;
+    }
+    oldHeld.dispose();
     this.tagsShown = marks.elevated && marks.ends.length === 2;
     marks.ends.forEach((end, i) => {
       const el = this.tags[i];
@@ -306,6 +352,8 @@ export class GhostView {
     this.marks.dispose();
     this.dropGeometry.dispose();
     this.dropMaterial.dispose();
+    this.heldGeometry.dispose();
+    for (const m of this.heldMaterials) m.dispose();
     for (const el of this.tags) el.remove();
     this.group.clear();
   }

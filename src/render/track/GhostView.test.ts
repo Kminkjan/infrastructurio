@@ -96,6 +96,40 @@ describe("ghost elevation marks", () => {
   });
 });
 
+describe("ghost held end", () => {
+  it("draws the held-end drop line only while the plan's end is held, in two passes, and measures it again with the ground", () => {
+    vi.stubGlobal("document", fakeDocument([]));
+    let ground = 0;
+    const ghost = new GhostView({ appendChild: () => undefined } as unknown as HTMLElement, () => ground);
+    const lines = ["ghost held end (through)", "ghost held end"].map((name) => ghost.group.getObjectByName(name) as unknown as { visible: boolean; renderOrder: number; material: { depthTest: boolean }; geometry: { getAttribute(name: string): { count: number; getY(i: number): number } | undefined } });
+    const buried = [0, 1, 2, 3].map((i): PieceSpec => ({ kind: "straight", from: { q: i, r: 0, zMm: -11_200 }, heading: 0, z1Mm: -11_200 }));
+    const pieces = buried.map((spec) => ({ spec, status: "new" as const, structure: "tunnel" as const }));
+
+    ghost.set({ pieces, valid: true, endHeld: true });
+    expect(ghost.heldVisible).toBe(true);
+    expect(lines.map((l) => l.visible)).toEqual([true, true]);
+    // The see-through pass shows the part inside the hill; the depth-tested pass draws over it.
+    expect(lines.map((l) => l.material.depthTest)).toEqual([false, true]);
+    expect(lines[0]?.renderOrder).toBeLessThan(lines[1]?.renderOrder ?? 0);
+    expect(lines[1]?.geometry.getAttribute("position")?.count).toBe(4);
+    expect(lines[1]?.geometry.getAttribute("position")?.getY(1)).toBe(0);
+
+    // The drawn ground rose (the earthworks landed): the line follows it.
+    ground = 2;
+    expect(ghost.refreshGround()).toBe(true);
+    expect(lines[1]?.geometry.getAttribute("position")?.getY(1)).toBe(2);
+
+    // Not held (or no flag, as other ghosts send): no line.
+    ghost.set({ pieces, valid: true, endHeld: false });
+    expect(ghost.heldVisible).toBe(false);
+    ghost.set({ pieces, valid: true });
+    expect(ghost.heldVisible).toBe(false);
+    ghost.set(null);
+    expect(lines.map((l) => l.visible)).toEqual([false, false]);
+    ghost.dispose();
+  });
+});
+
 describe("rejection highlight", () => {
   it("skips empty and unchanged key sets, and re-resolves keys only for a new network revision", () => {
     const sim = createSim({ terrain: { seed: "d3-highlight", columns: 60, rows: 52 } });

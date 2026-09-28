@@ -1,9 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { type PieceSpec, resolvePiece } from "../../core/sim/api";
 import { palette } from "../art/palette";
-import { DASH_OFF_M, DASH_ON_M, RIBBON_LIFT_M, buildRibbons, clipFrames, dashIntervals, elevationMarks, heightTagText } from "./ghostGeometry";
+import {
+  DASH_OFF_M,
+  DASH_ON_M,
+  HELD_BAR_HALF_M,
+  RIBBON_LIFT_M,
+  buildRibbons,
+  clipFrames,
+  dashIntervals,
+  elevationMarks,
+  heightTagText,
+  heldEndLine,
+  travelFrames,
+} from "./ghostGeometry";
 import { type TrackCentreline, sampleCentreline } from "./trackGeometry";
-import { GHOST_BORE_EDGE_M, GHOST_DECK_EDGE_M, GHOST_MARK_HALF_M, structureMarks } from "./GhostView";
+import { GHOST_BORE_EDGE_M, GHOST_DECK_EDGE_M, GHOST_MARK_HALF_M, centrelineOfSpec, structureMarks } from "./GhostView";
 
 function line(spec: PieceSpec): TrackCentreline {
   const res = resolvePiece(spec);
@@ -98,5 +110,49 @@ describe("ghost geometry", () => {
     expect(tunnel.map((b) => b.offsetM)).toEqual([GHOST_BORE_EDGE_M, -GHOST_BORE_EDGE_M]);
     expect(tunnel.every((b) => b.dash !== undefined && b.color === palette.ghostInvalid)).toBe(true);
     expect(structureMarks([{ centreline: c, color: palette.ghostValid, structure: "ground" }])).toEqual([]);
+  });
+
+  it("draws a held end's drop line from the ribbon at the plan's end to the ground, with a bar across the track there", () => {
+    // Eight straights 11.2 m under ground at 0 m (the owner's example): the line rises from the end at x = 40 m.
+    const buried = heldEndLine(run(-11_200), () => 0);
+    expect(buried).toHaveLength(12);
+    const at = (i: number) => [buried[i * 3], buried[i * 3 + 1], buried[i * 3 + 2]];
+    expect(at(0)).toEqual([40, expect.closeTo(-11.2 + RIBBON_LIFT_M, 5), -0]);
+    expect(at(1)).toEqual([40, 0, -0]);
+    // The bar lies across the track (north–south here) on the ground, the ribbon's width (Float32 positions).
+    expect(at(2)).toEqual([40, 0, expect.closeTo(HELD_BAR_HALF_M, 6)]);
+    expect(at(3)).toEqual([40, 0, expect.closeTo(-HELD_BAR_HALF_M, 6)]);
+    // Above the ground it runs down; on the ground, off the map or with no plan there is nothing to draw.
+    const raised = heldEndLine(run(6000), () => 1);
+    expect([raised[1], raised[4]]).toEqual([expect.closeTo(6 + RIBBON_LIFT_M, 5), 1]);
+    expect(heldEndLine(run(0), () => 0.02)).toHaveLength(0);
+    expect(heldEndLine(run(-11_200), () => undefined)).toHaveLength(0);
+    expect(heldEndLine([], () => 0)).toHaveLength(0);
+  });
+
+  it("reads a ghost's pieces in travel order, so its end marks stand at the plan's own ends on a drag west", () => {
+    // Found in the D4 tools pass (agent capture, 2026-09-29): a piece on heading 3, 6 or 7 resolves in its canonical
+    // direction, from its travel end back to its `from`, so on a drag west the end tags and the held-end line stood at
+    // the inner ends of the first and last pieces (a tag read +10.5 m 5 m in from an end the tooltip put at +11.2 m).
+    const west = [0, 1, 2, 3].map((i) => {
+      const c = centrelineOfSpec({ kind: "straight", from: { q: -i, r: 0, zMm: 6000 + 500 * i }, heading: 6, z1Mm: 6500 + 500 * i });
+      if (!c) throw new Error("no centreline");
+      return c;
+    });
+    expect(west.map((c) => c.reversed)).toEqual([true, true, true, true]);
+    const first = travelFrames(west[0] ?? run(0)[0]!);
+    expect([first[0]?.x, first[0]?.z, first[0]?.sM, first[0]?.tx]).toEqual([0, 6, 0, -1]);
+    expect([first.at(-1)?.x, first.at(-1)?.z, first.at(-1)?.sM]).toEqual([-5, 6.5, 5]);
+    const marks = elevationMarks(west, () => 0);
+    expect(marks.ends.map((e) => [e.x, e.aboveM])).toEqual([
+      [0, 6],
+      [-20, 8],
+    ]);
+    // The drop line stations run from the drag's start too: x = 0 and −20 m (the end), as on a drag east.
+    expect([marks.dropLines[0], marks.dropLines[6]]).toEqual([0, -20]);
+    const buried = heldEndLine(west, () => 12);
+    expect([buried[0], buried[3]]).toEqual([-20, -20]);
+    // An eastward piece keeps its canonical direction.
+    expect(centrelineOfSpec({ kind: "straight", from: { q: 0, r: 0, zMm: 0 }, heading: 0, z1Mm: 0 })?.reversed).toBe(false);
   });
 });

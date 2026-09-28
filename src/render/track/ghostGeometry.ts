@@ -4,7 +4,8 @@ import { TRACK_RAIL_TOP_M, type TrackCentreline, type TrackFrame, sampleCentreli
 /**
  * Construction overlays as data (art direction "Overlays and construction
  * feedback"): flat ribbons along planned or highlighted pieces, dashed for an
- * invalid plan, and the drop lines and end-height tags of an elevated ghost.
+ * invalid plan, the drop lines and end-height tags of an elevated ghost, and
+ * the drop line of an end the 3.5 % limit holds off the ground.
  * Ribbons float just above the rail tops so a reused (cyan) piece shows over
  * the built track it matches.
  */
@@ -126,6 +127,28 @@ export function buildRibbons(pieces: readonly RibbonPiece[], dashed: boolean): R
   return { positions: new Float32Array(pos), colors: new Float32Array(col), indices: new Uint32Array(idx), vertexCount: count };
 }
 
+/**
+ * A ghost piece's centreline, and whether it runs against the plan (the ghost's pieces come in travel order, but a
+ * resolved piece keeps its canonical direction, so a piece on heading 3, 6 or 7 samples from its travel end back to
+ * its travel start). The end marks read it in travel order (`travelFrames`); ribbons are symmetric and need not.
+ */
+export interface GhostCentreline extends TrackCentreline {
+  readonly reversed?: boolean;
+}
+
+/** A ghost piece's frames in travel order: reversed ones back to front, with their arc length and tangent flipped. */
+export function travelFrames(c: GhostCentreline): TrackFrame[] {
+  const frames = sampleCentreline(c, RIBBON_MAX_SAGITTA_M);
+  if (!c.reversed) return frames;
+  const length = frames[frames.length - 1]?.sM ?? 0;
+  const out: TrackFrame[] = [];
+  for (let i = frames.length - 1; i >= 0; i--) {
+    const f = frames[i];
+    if (f) out.push({ x: f.x, y: f.y, z: f.z, sM: length - f.sM, tx: -f.tx, ty: -f.ty });
+  }
+  return out;
+}
+
 export interface ElevationMarks {
   /** World-space segment pairs from the ghost down to the terrain. */
   readonly dropLines: Float32Array;
@@ -139,10 +162,12 @@ export interface ElevationMarks {
  * Drop lines every 20 m of plan length (and at the end), wherever the ghost
  * is more than 0.5 m above the terrain, plus both ends' heights above the
  * terrain for the end-height tags. `groundM` samples the terrain in sim
- * metres; off the map it returns undefined and no line is drawn.
+ * metres; off the map it returns undefined and no line is drawn. The pieces
+ * are read in travel order (`travelFrames`), so the tags stand at the plan's
+ * own ends on a drag west or south too.
  */
 export function elevationMarks(
-  pieces: readonly TrackCentreline[],
+  pieces: readonly GhostCentreline[],
   groundM: (x: number, y: number) => number | undefined,
 ): ElevationMarks {
   const lines: number[] = [];
@@ -161,7 +186,7 @@ export function elevationMarks(
     }
   };
   for (const c of pieces) {
-    const frames = sampleCentreline(c, RIBBON_MAX_SAGITTA_M);
+    const frames = travelFrames(c);
     const length = frames[frames.length - 1]?.sM ?? 0;
     while (next <= offset + length) {
       const at = clipFrames(frames, next - offset, next - offset)[0] ?? frames[0];
@@ -179,6 +204,34 @@ export function elevationMarks(
     ends.push(endOf(lastFrame, groundM));
   }
   return { dropLines: new Float32Array(lines), ends, elevated };
+}
+
+/** Half the length of the held-end line's bar across the track on the ground: the ribbon's half width. */
+export const HELD_BAR_HALF_M = RIBBON_HALF_WIDTH_M;
+/** No held-end line where the end lies this close to the ground: there is nothing to draw between them. */
+export const HELD_MIN_GAP_M = 0.05;
+
+/**
+ * The held end's drop line (owner decision 2026-09-28, "Keep the limit, show it"): when the 3.5 % limit holds a
+ * Straight line's end off the ground, a line from the ribbon at the plan's end straight up or down to the ground
+ * there, and a bar across the track on the ground, so the gap between the end and the ground reads at a glance
+ * (above or below it, through the hill). World-space segment pairs, like `elevationMarks`' drop lines; empty with
+ * no pieces, off the map, or when the end lies on the ground.
+ */
+export function heldEndLine(pieces: readonly GhostCentreline[], groundM: (x: number, y: number) => number | undefined): Float32Array {
+  const last = pieces[pieces.length - 1];
+  if (!last) return new Float32Array(0);
+  const frames = travelFrames(last);
+  const f = frames[frames.length - 1];
+  const ground = f ? groundM(f.x, f.y) : undefined;
+  if (!f || ground === undefined || Math.abs(f.z - ground) < HELD_MIN_GAP_M) return new Float32Array(0);
+  // The bar lies along the left normal (−ty, tx), centred on the end's plan position.
+  const bx = -f.ty * HELD_BAR_HALF_M;
+  const by = f.tx * HELD_BAR_HALF_M;
+  return new Float32Array([
+    f.x, f.z + RIBBON_LIFT_M, -f.y, f.x, ground, -f.y,
+    f.x - bx, ground, -(f.y - by), f.x + bx, ground, -(f.y + by),
+  ]);
 }
 
 function endOf(f: TrackFrame, groundM: (x: number, y: number) => number | undefined): { x: number; y: number; z: number; aboveM: number } {

@@ -17,6 +17,8 @@ import { dragBetween, lookAtNode, nodeScreen, openDiorama, snapshot, undoToEmpty
  *   (263, 58), whose tunnel peaked at 9.07 m and is one cutting since.
  * - The lake is one Straight line drag from a hill on its north shore, (65, 200) on heading 3 for 60 pieces: a bridge
  *   over 24 water nodes, then ground.
+ * - The held end is the diagnosis' scene B, Straight (220, 140) → (236, 140): the 3.5 % limit holds its end 11.2 m under
+ *   the hill, which the ghost, the tooltip and the status line show (owner decision 2026-09-28, "Keep the limit, show it").
  */
 
 interface Terrain {
@@ -34,7 +36,8 @@ interface Hook {
   aids(): { decksHidden: boolean; xray: boolean };
   trackBridgeShown(): boolean;
   ghostMarks(): boolean;
-  tool(): { active: string; mode: string; target: { kind: string; q: number; r: number; zMm: number; pieceKey: string | null } | null };
+  ghostHeld(): boolean;
+  tool(): { active: string; mode: string; phase: string; heightSteps: number; target: { kind: string; q: number; r: number; zMm: number; pieceKey: string | null } | null };
   planScreen(x: number, y: number, z: number): { x: number; y: number };
 }
 
@@ -73,6 +76,12 @@ const HILL = { q: 254, r: 129, length: 48 } as const;
 
 /** The lake crossing: 60 secondary pieces north (heading 3) from a 34 m hill at (65, 200), over 24 water nodes. */
 const LAKE_LINE = { q: 65, r: 200, dq: -1, dr: 2, length: 60 } as const;
+
+/**
+ * The diagnosis' scene B: a Straight line east from (220, 140) to (236, 140), 16 pieces. The ground at the end stands
+ * 14 m above the start and 35‰ reaches 2.8 m, so the 3.5 % limit holds the end 11.2 m under the hill.
+ */
+const HELD_LINE = { q: 220, r: 140, length: 16 } as const;
 
 test("builds a level bridge across the river with a Track drag from the water, hides its deck with H, cycles stacked picks with C, and undoes to empty", async ({ page }) => {
   const errors: string[] = [];
@@ -231,6 +240,49 @@ test("lays a tunnel through a hill with one Straight line drag: portals at both 
   await undoToEmpty(page);
   await page.waitForFunction(() => window.__diorama?.ready === true);
   expect(await page.evaluate(() => (window.__diorama as unknown as Hook).structureStats())).toMatchObject({ tunnels: 0, portals: 0 });
+  expect((await snapshot(page)).pieces).toBe(0);
+  expect(errors).toEqual([]);
+});
+
+test("shows a Straight line end the 3.5 % limit holds: drop line, tooltip and status; ] keeps the steps, [ lowers from the held end", async ({ page }) => {
+  // Owner decision 2026-09-28, "Keep the limit, show it". Agent evidence only: it checks the cue is shown, not how it reads.
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await openDiorama(page);
+  const { q, r, length } = HELD_LINE;
+  const hook = () => page.evaluate(() => {
+    const h = window.__diorama as unknown as Hook;
+    return { held: h.ghostHeld(), steps: h.tool().heightSteps, phase: h.tool().phase };
+  });
+  await lookAtNode(page, q + length / 2, r, 4);
+  await page.keyboard.press("5");
+  const from = await nodeScreen(page, q, r);
+  const to = await nodeScreen(page, q + length, r);
+  await page.mouse.move(from.x, from.y, { steps: 4 });
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 16 });
+  const text = "End held 11.2 m below the ground by the 3.5 % limit";
+  const tooltip = page.getByTestId("construction-tooltip");
+  await expect(tooltip).toContainText("End height −11.2 m");
+  await expect(tooltip).toContainText(text);
+  await expect(page.getByTestId("status-line")).toContainText(text);
+  expect(await hook()).toEqual({ held: true, steps: 0, phase: "dragging" });
+
+  // ] presses further into the limit: the steps stay, and the status line names the limit.
+  for (let i = 0; i < 16; i++) await page.keyboard.press("]");
+  await expect(page.getByTestId("status-line")).toHaveText(`Height unchanged: end held 11.2 m below the ground by the 3.5 % limit.`);
+  await expect(tooltip).toContainText(text);
+  expect(await hook()).toEqual({ held: true, steps: 0, phase: "dragging" });
+
+  // [ lowers the end at once, from where it is held: 12 m below the ground, which 35‰ reaches, so nothing is held.
+  await page.keyboard.press("[");
+  await expect(tooltip).toContainText("End height −12 m");
+  await expect(tooltip).not.toContainText("End held");
+  expect(await hook()).toEqual({ held: false, steps: -12, phase: "dragging" });
+
+  await page.keyboard.press("Escape");
+  await page.mouse.up();
+  await page.keyboard.press("Escape");
   expect((await snapshot(page)).pieces).toBe(0);
   expect(errors).toEqual([]);
 });

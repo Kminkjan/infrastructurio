@@ -558,6 +558,8 @@ if (import.meta.env.DEV) {
       },
       trackBridgeShown: () => trackView.bridgeTrackShown,
       ghostMarks: () => ghost.marksVisible,
+      /** Whether the ghost draws the held-end drop line (a Straight line end the 3.5 % limit holds off the ground). */
+      ghostHeld: () => ghost.heldVisible,
       /** Drawn (conformed) and natural terrain height (m) at sim plan (x, y), LOD0 or LOD1. */
       drawnHeightM: (x: number, y: number, lod: 0 | 1 = 0) => (lod === 0 ? earthworks.heightfield : earthworks.heightfieldLod1).heightAtM(x, y),
       naturalHeightM: (x: number, y: number, lod: 0 | 1 = 0) => (lod === 0 ? earthworks.heightfield : earthworks.heightfieldLod1).naturalAtM(x, y),
