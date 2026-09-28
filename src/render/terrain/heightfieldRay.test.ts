@@ -1,15 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { Vector3 } from "three";
 import { equals, nearestNode, toWorld } from "../../core/lattice";
-import { nodeOfOffset } from "../../core/terrain";
+import { DEFAULT_TERRAIN_SIZE, generateTerrain, nodeOfOffset } from "../../core/terrain";
 import { createPrng } from "../../core/util/prng";
 import { makeTerrain } from "../../../tests/support/makeTerrain";
 import { ISO_PITCH_RAD, cameraBasis } from "../camera/isoMath";
 import { simToWorld, worldToSim } from "../coords";
 import { type PieceSpec, resolvePiece } from "../../core/sim/api";
 import { DrawnHeightfield, conformTerrain } from "./earthworks";
-import { intersectTerrain, raycastTerrain, sampleTerrainHeightM, visibleGroundM } from "./heightfieldRay";
+import { intersectTerrain, raycastTerrain, sampleTerrainHeightM, visibleGroundM, waterPlane } from "./heightfieldRay";
 import { forEachLatticeTriangle } from "./offsetGrid";
+import { WATER_MESH_RINGS, buildWaterData } from "./terrainGeometry";
+import { computeTerrainShading, computeWaterDistance } from "./terrainShading";
 
 /** Two-sided Möller–Trumbore: ray parameter of the hit, or undefined. */
 function rayTriangle(o: Vector3, d: Vector3, a: Vector3, b: Vector3, c: Vector3): number | undefined {
@@ -169,7 +171,7 @@ describe("heightfield ray", () => {
       return { key: res.piece.key, prims: res.piece.prims, z0Mm: 17_000, z1Mm: 17_000 };
     });
     const field = conformTerrain(t, { pieces });
-    const water = t.waterLevelDm / 10;
+    const water = waterPlane(t, computeWaterDistance(t));
     const y0 = 20 * 2.5 * Math.sqrt(3);
     // On the floor beside the track: the drawn 17 m, where the sim's heights say 20 m.
     expect(sampleTerrainHeightM(t, 5 * (21 + 10), y0 + 1)).toBeCloseTo(20, 9);
@@ -178,5 +180,73 @@ describe("heightfield ray", () => {
     expect(visibleGroundM(field, water, 200, 40)).toBe(sampleTerrainHeightM(t, 200, 40));
     expect(visibleGroundM(field, water, 20, 40)).toBe(10);
     expect(visibleGroundM(field, water, -5, 40)).toBeUndefined();
+  });
+
+  it("reads the water plane only where its mesh is drawn: a dry cutting below the water level shows its floor", () => {
+    // Re-review finding (PR #83): the ghost's ground took max(drawn, water level) everywhere, but the water mesh covers
+    // only triangles within WATER_MESH_RINGS of water, so over a dry cutting deeper than the water level the tags and
+    // drop lines measured from a water plane that is not there. A lake west of column 10 (bed 9 m, water at 10 m),
+    // land at 11 m east of it, and two runs at 8.5 m: one far from the lake, one inside the mesh's rings.
+    const t = makeTerrain(80, 40, (_q, _r, col) => (col < 10 ? 90 : 110));
+    const run = (q0: number, r: number) =>
+      Array.from({ length: 11 }, (_, i) => {
+        const res = resolvePiece({ kind: "straight", from: { q: q0 + i, r, zMm: 8500 }, heading: 0, z1Mm: 8500 } as PieceSpec);
+        if (!res.ok) throw new Error(res.failure.message);
+        return { key: res.piece.key, prims: res.piece.prims, z0Mm: 8500, z1Mm: 8500 };
+      });
+    const distance = computeWaterDistance(t);
+    const field = conformTerrain(t, { pieces: [...run(30, 20), ...run(-8, 30)] });
+    const water = waterPlane(t, distance);
+    // Far from the lake (columns 40–51 on row 20: 30 rings away) the cutting's floor is drawn at 8.5 m, 1.5 m under
+    // the water level, and no water mesh covers it: the ghost measures the floor.
+    const far = { x: 5 * (35 + 10), y: 20 * 2.5 * Math.sqrt(3) };
+    expect(distance[20 * t.columns + 45]).toBeGreaterThan(WATER_MESH_RINGS);
+    expect(field.heightAtM(far.x, far.y)).toBeCloseTo(8.5, 5);
+    expect(water.covers(far.x, far.y)).toBe(false);
+    expect(visibleGroundM(field, water, far.x, far.y)).toBeCloseTo(8.5, 5);
+    // Beside the lake (column 12 on row 30: 2 rings away) the water mesh is drawn over the cutting, so the player
+    // sees water there, and so does the ghost.
+    const near = { x: 5 * 12, y: 30 * 2.5 * Math.sqrt(3) };
+    expect(distance[30 * t.columns + 12]).toBeLessThanOrEqual(WATER_MESH_RINGS);
+    expect(field.heightAtM(near.x, near.y)).toBeCloseTo(8.5, 5);
+    expect(water.covers(near.x, near.y)).toBe(true);
+    expect(visibleGroundM(field, water, near.x, near.y)).toBe(10);
+    // The plane covers exactly the triangles `buildWaterData` draws.
+    const shading = computeTerrainShading(t);
+    const mesh = buildWaterData(t, shading, 0);
+    const drawn = new Set<string>();
+    for (let i = 0; i < mesh.indices.length; i += 3) {
+      const corners = [0, 1, 2].map((k) => mesh.nodeIndices[mesh.indices[i + k] ?? 0] ?? 0).sort((a, b) => a - b);
+      drawn.add(corners.join(","));
+    }
+    let checked = 0;
+    forEachLatticeTriangle(0, t.columns - 1, 0, t.rows - 1, (ai, aj, bi, bj, ci, cj) => {
+      const corners = [aj * t.columns + ai, bj * t.columns + bi, cj * t.columns + ci];
+      const c = corners.map((n) => toWorld(nodeOfOffset(n % t.columns, Math.floor(n / t.columns))));
+      const cx = (c[0]!.x + c[1]!.x + c[2]!.x) / 3;
+      const cy = (c[0]!.y + c[1]!.y + c[2]!.y) / 3;
+      expect(water.covers(cx, cy), `triangle ${corners.join(",")}`).toBe(drawn.has(corners.sort((a, b) => a - b).join(",")));
+      checked += 1;
+    });
+    expect(checked).toBeGreaterThan(5000);
+  });
+
+  it("reads the diorama's dry cutting floor, seven rings from water (the re-review's case)", () => {
+    // Offset (41, 141) lies 7 rings from water on natural ground about 11.5 m high; an 11-piece straight there with its
+    // bed at 8.5 m draws its floor at 8.5 m, and the ghost read the 10 m water level.
+    const t = generateTerrain({ seed: "baltic-diorama", ...DEFAULT_TERRAIN_SIZE });
+    const distance = computeWaterDistance(t);
+    expect(distance[141 * t.columns + 41]).toBe(7);
+    const node = nodeOfOffset(41, 141);
+    const pieces = Array.from({ length: 11 }, (_, i) => {
+      const res = resolvePiece({ kind: "straight", from: { q: node.q - 5 + i, r: node.r, zMm: 8500 }, heading: 0, z1Mm: 8500 } as PieceSpec);
+      if (!res.ok) throw new Error(res.failure.message);
+      return { key: res.piece.key, prims: res.piece.prims, z0Mm: 8500, z1Mm: 8500 };
+    });
+    const field = conformTerrain(t, { pieces });
+    const at = toWorld(node);
+    expect(field.naturalAtM(at.x, at.y)).toBeGreaterThan(t.waterLevelDm / 10 + 1);
+    expect(field.heightAtM(at.x, at.y)).toBeCloseTo(8.5, 5);
+    expect(visibleGroundM(field, waterPlane(t, distance), at.x, at.y)).toBeCloseTo(8.5, 5);
   });
 });

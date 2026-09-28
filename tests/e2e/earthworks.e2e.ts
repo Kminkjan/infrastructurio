@@ -1,5 +1,5 @@
 import { type Page, expect, test } from "@playwright/test";
-import { dragBetween, lookAtNode, nodeScreen, openDiorama, snapshot, undoToEmpty } from "./hook";
+import { dragBetween, findDryRun, lookAtNode, nodeScreen, openDiorama, snapshot, undoToEmpty } from "./hook";
 
 /**
  * Earthworks-lite e2e (agent evidence: the real pointer lays the track; the
@@ -238,5 +238,89 @@ test("the owner's lake-shore curve: rails stay clear, the fill meets the water a
   const stats = await page.evaluate(() => (window.__diorama as unknown as { earthworksStats(): { chunksWithEarthworks: number; refinedTriangles: number } }).earthworksStats());
   expect(stats.chunksWithEarthworks).toBe(0);
   expect(stats.refinedTriangles).toBe(0);
+  expect(errors).toEqual([]);
+});
+
+/** Holds the page's animation frames (the frame loop, and so the time-sliced earthworks) until `releaseFrames`. */
+async function holdFrames(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as unknown as { __held?: FrameRequestCallback[]; __raf?: typeof requestAnimationFrame };
+    w.__held = [];
+    w.__raf = window.requestAnimationFrame;
+    window.requestAnimationFrame = (callback) => {
+      w.__held?.push(callback);
+      return 1e9 + (w.__held?.length ?? 0);
+    };
+  });
+  // A frame the real clock had queued before the hold still runs; let it pass.
+  await page.waitForTimeout(150);
+}
+
+async function releaseFrames(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as unknown as { __held?: FrameRequestCallback[]; __raf?: typeof requestAnimationFrame };
+    if (w.__raf) window.requestAnimationFrame = w.__raf;
+    const held = w.__held ?? [];
+    w.__held = [];
+    for (const callback of held) window.requestAnimationFrame(callback);
+  });
+}
+
+/** The ghost's drop-line vertex count, read from the scene graph. */
+async function ghostDropVertices(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const scene = (window.__diorama as unknown as { scene: { getObjectByName(name: string): { children: { geometry?: { getAttribute(n: string): { count: number } | undefined } }[] } | undefined } }).scene;
+    return scene.getObjectByName("ghost")?.children[1]?.geometry?.getAttribute("position")?.count ?? 0;
+  });
+}
+
+test("a chained ghost set before the earthworks land measures its tags again once they do", async ({ page }) => {
+  // PR #83 re-review: the commit sets the chained ghost before the time-sliced conform lands, and its tags and drop
+  // lines were never measured again, so a continuation off a new embankment read "+6 m" at its start (the ground
+  // from before the build) until the snapped node changed. Frames are held so the commit and the continuation's
+  // ghost both land before the earthworks sync, as on a slow frame; the keyboard lays the track.
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await openDiorama(page);
+  const { q, r } = await findDryRun(page, 32, 0.3);
+  await lookAtNode(page, q + 15, r, 4);
+  const start = await nodeScreen(page, q, r);
+  await page.mouse.move(start.x, start.y);
+  await page.keyboard.press("1");
+  await page.mouse.move(start.x + 1, start.y);
+  await page.keyboard.press("Enter");
+  // A 20-piece plan east whose end stands 6 m above the ground: an embankment once built.
+  for (let i = 0; i < 20; i++) await page.keyboard.press("ArrowRight");
+  for (let i = 0; i < 6; i++) await page.keyboard.press("PageUp");
+  await page.waitForFunction(() => window.__diorama?.ready === true);
+
+  await holdFrames(page);
+  await page.keyboard.press("Enter");
+  for (let i = 0; i < 10; i++) await page.keyboard.press("ArrowRight");
+  const tags = page.locator(".ghost-height-tag");
+  const before = await tags.allTextContents();
+  const dropsBefore = await ghostDropVertices(page);
+  const pending = await page.evaluate(() => {
+    const h = window.__diorama as unknown as { earthworksStats(): { appliedRev: number; pieces: number }; network(): { rev: number } };
+    return { rev: h.network().rev, appliedRev: h.earthworksStats().appliedRev, pieces: h.earthworksStats().pieces };
+  });
+  await releaseFrames(page);
+  await page.waitForFunction(() => window.__diorama?.ready === true);
+  const after = await tags.allTextContents();
+  const dropsAfter = await ghostDropVertices(page);
+  console.log(`[earthworks e2e] chained ghost: tags ${JSON.stringify(before)} → ${JSON.stringify(after)}, drop-line vertices ${dropsBefore} → ${dropsAfter}; earthworks while held ${JSON.stringify(pending)}`);
+  expect((await snapshot(page)).pieces).toBe(20);
+  // While held, the embankment was not drawn yet: the start stood 6 m over the natural ground.
+  expect(pending.appliedRev).toBeLessThan(pending.rev);
+  expect(pending.pieces).toBe(0);
+  expect(before[0]).toBe("+6 m");
+  // Drawn, the start stands on the embankment's crest, and its drop line through the bank is gone.
+  await expect(tags.first()).toHaveText("0 m");
+  expect(after[1]).toBe("+6 m");
+  expect(dropsAfter).toBeLessThan(dropsBefore);
+
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await undoToEmpty(page);
   expect(errors).toEqual([]);
 });

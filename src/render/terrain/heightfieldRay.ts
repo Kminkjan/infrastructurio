@@ -1,8 +1,8 @@
 import { Vector3, type Vector3Like } from "three";
 import { type Axial, type Terrain, heightDmAt, nearestNode, terrainBoundsM } from "../../core/sim/api";
 import { type SimPoint, simToWorld, worldToSim } from "../coords";
-import { type LodLattice, lodLattice, naturalHeightM } from "./earthworks";
-import { terrainHeightRangeM } from "./terrainGeometry";
+import { type LodLattice, lodLattice, lodNodeIndex, naturalHeightM } from "./earthworks";
+import { terrainHeightRangeM, waterMeshCovers } from "./terrainGeometry";
 
 /**
  * Analytic terrain picking (architecture "Picking", step 4): march a view ray
@@ -75,16 +75,52 @@ export interface HeightSampler {
   readonly maxZ: number;
 }
 
+/** The water plane as drawn: its height, and whether it is drawn over plan (x, y). */
+export interface WaterPlane {
+  readonly levelM: number;
+  covers(x: number, y: number): boolean;
+}
+
+/**
+ * The LOD0 water plane (`terrainGeometry.ts` `buildWaterData`): at the water level over every lattice triangle
+ * with a corner within WATER_MESH_RINGS of water (`waterMeshCovers`, from the shading's `waterDistance`), and
+ * nowhere else.
+ */
+export function waterPlane(t: Terrain, waterDistance: Uint8Array): WaterPlane {
+  const lat = lodLattice(t, 0);
+  const a = lat.spacingM;
+  return {
+    levelM: t.waterLevelDm / 10,
+    covers(x: number, y: number): boolean {
+      // The lattice triangle holding (x, y), as `naturalHeightM` finds it.
+      const rf = y / (a * HALF_SQRT3);
+      const qf = x / a - rf / 2;
+      const Q = Math.floor(qf);
+      const R = Math.floor(rf);
+      const down = qf - Q + (rf - R) <= 1;
+      return down
+        ? waterMeshCovers(waterDistance, lodNodeIndex(t, lat, Q, R), lodNodeIndex(t, lat, Q + 1, R), lodNodeIndex(t, lat, Q, R + 1))
+        : waterMeshCovers(waterDistance, lodNodeIndex(t, lat, Q + 1, R), lodNodeIndex(t, lat, Q, R + 1), lodNodeIndex(t, lat, Q + 1, R + 1));
+    },
+  };
+}
+
+const HALF_SQRT3 = Math.sqrt(3) / 2;
+
 /**
  * The ground the player sees at sim plan (x, y), metres: the drawn surface (`surface`, the
  * earthworks' conformed heightfield, natural wherever nothing is refined), or the water
- * plane over a lower bed; undefined off the map. The ghost's drop lines and end-height
- * tags measure against it (PR #83 review), so they meet a cutting's floor or an
- * embankment's crest where it is drawn; sim-facing heights keep the tool's `groundMmAt`.
+ * plane where it is drawn over a lower surface; undefined off the map. The ghost's drop
+ * lines and end-height tags measure against it (PR #83 review), so they meet a cutting's
+ * floor or an embankment's crest where it is drawn; sim-facing heights keep the tool's
+ * `groundMmAt`. The water counts only where its mesh is drawn: a dry cutting below the
+ * water level away from any water shows its floor (PR #83 re-review; it read the water
+ * level there), while a cutting within the mesh's rings of a lake shows the water over it.
  */
-export function visibleGroundM(surface: Pick<HeightSampler, "heightAtM">, waterLevelM: number, x: number, y: number): number | undefined {
+export function visibleGroundM(surface: Pick<HeightSampler, "heightAtM">, water: WaterPlane, x: number, y: number): number | undefined {
   const h = surface.heightAtM(x, y);
-  return Number.isNaN(h) ? undefined : Math.max(h, waterLevelM);
+  if (Number.isNaN(h)) return undefined;
+  return h < water.levelM && water.covers(x, y) ? water.levelM : h;
 }
 
 /** The ray being marched, in sim space with a unit direction; module scratch so marching never allocates. */

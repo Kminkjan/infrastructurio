@@ -31,7 +31,7 @@ import { SceneryView, registerSceneryAssets } from "../render/scenery/SceneryVie
 import { SceneryClearance } from "../render/scenery/clearance";
 import { EarthworksView } from "../render/terrain/EarthworksView";
 import { TerrainView } from "../render/terrain/TerrainView";
-import { raycastTerrain, visibleGroundM } from "../render/terrain/heightfieldRay";
+import { raycastTerrain, visibleGroundM, waterPlane } from "../render/terrain/heightfieldRay";
 import { LatticeOverlay } from "../render/terrain/latticeMaterial";
 import { terrainLodForPpm, terrainWorldBounds } from "../render/terrain/terrainGeometry";
 import { TERRAIN_LOOKS, applyTerrainLook, setTerrainAnisotropy, terrainChunkOptions } from "../render/terrain/terrainLook";
@@ -148,14 +148,14 @@ const earthworks = new EarthworksView({
   scenery: clearanceOf(sceneryView),
   enabled: earthworksOn,
 });
-const waterLevelM = terrain.waterLevelDm / 10;
 /**
  * The surface under the ghost's drop lines and end-height tags: the drawn terrain (the earthworks' conformed LOD0
- * surface, which picking marches too), or the water plane over a lower bed, so a line meets a cutting's floor where
- * it is drawn and a tag over water reads the height above the water (PR #83 review). Off earthworks it is the
- * tool's ground at nodes (`groundMmAt`), which stays the sim-facing height.
+ * surface, which picking marches too), or the water plane where it is drawn over a lower surface, so a line meets a
+ * cutting's floor where it is drawn and a tag over water reads the height above the water (PR #83 review and
+ * re-review). Off earthworks it is the tool's ground at nodes (`groundMmAt`), which stays the sim-facing height.
  */
-const groundM = (x: number, y: number): number | undefined => visibleGroundM(earthworks.heightfield, waterLevelM, x, y);
+const water = waterPlane(terrain, terrainView.shading.waterDistance);
+const groundM = (x: number, y: number): number | undefined => visibleGroundM(earthworks.heightfield, water, x, y);
 const ghost = new GhostView(viewport, groundM);
 const highlight = new HighlightView();
 const flash = new FlashView(reducedMotion);
@@ -314,6 +314,8 @@ const tweak = showTweakPanel(params)
 // The camera state last frame, so a still pointer re-picks when the view moves under it, and the
 // screen-anchored overlays (end-height tags, the cursor's tooltip) move only when the projection changed.
 const lastView = { x: Number.NaN, z: Number.NaN, ppm: Number.NaN, yaw: Number.NaN, width: Number.NaN, height: Number.NaN };
+/** The earthworks revision the ghost's drop lines and height tags last measured (`GhostView.refreshGround`). */
+let ghostSurfaceRev = -1;
 
 scheduler.onFrame((frame) => {
   controller.update(frame);
@@ -334,6 +336,13 @@ scheduler.onFrame((frame) => {
   const syncStart = performance.now();
   trackView.sync(sim.network());
   earthworks.sync(sim.network(), Math.max(1, 8 - (performance.now() - syncStart)));
+  // Once the conformed LOD0 surface of a revision is drawn, the ghost measures its marks again: a commit sets the
+  // chained ghost before the earthworks land (PR #83 re-review), and this frame draws the refreshed marks.
+  const surfaceRev = earthworks.surfaceRev;
+  if (surfaceRev !== ghostSurfaceRev) {
+    ghostSurfaceRev = surfaceRev;
+    if (surfaceRev >= 0 && ghost.refreshGround()) ghost.updateTags(camera);
+  }
   trackView.setLod(camera.ppm);
   if (flash.update(frame.nowMs)) scheduler.requestFrame("overlay");
   snapRing.update(camera.camera, camera.ppm);
