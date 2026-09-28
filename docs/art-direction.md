@@ -1060,3 +1060,58 @@ The initial JS is 308.02 kB gzip.
 legibility; the mid laptop, real DPR 2 and the Low preset; LOD1 forms for the far band (the
 registry returns LOD0's). Whether a mound over a shallow portal or a deeper portal should be the
 answer is the core lane's (auto structures keep tunnel ends near 4 m of cover).
+
+## Portals, plugs and approaches: feel-check fixes (2026-09-28)
+
+**Status (2026-09-28, agent):** built on branch `codex/d4-structures` (draft PR
+[#84](https://github.com/Kminkjan/infrastructurio/pull/84)). **Not judged:** the owner reads it,
+and nothing here is a Look Gate result. The [Structures (D4 render)](#structures-d4-render-2026-09-28)
+section stays as written; this supersedes its plug and wing descriptions. The trigger was the
+owner's feel check of this build ("Not yet": "Too many red drags", "Structures look off"); the
+numbers and the root cause are in the
+[ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-feel-check-fixes).
+
+- **Approach cuttings and embankments end at the structure.** A ground chain's earthworks stop
+  at the plane through the node where a tunnel or bridge goes on, rising (a cut) or falling (a
+  fill) at 45° behind it: the cutting ends at the portal face and the embankment at the
+  abutment. Until then each piece's rounded end ran on under the bridge's first span (the
+  abutment cone) or cut a bowl into the hill behind the portal.
+- **The hill plug is only a mound over the bore.** It stands where the drawn ground behind the
+  face is lower than the face top, flat over the bore's drawn depth and falling at 1 : 1.5 to
+  1 : 2 at its sides and 1 : 3 behind, smooth-maxed with the drawn ground over 0.6 m. It fades
+  into the drawn ground at the edges of its region, so its outline meets the terrain within its
+  4 cm lift. It stays under every other track's cut envelope, so it never covers a neighbour's
+  formation or rails, and it never reads the natural hill: the D4 plug refilled a neighbour's
+  cutting from it, drawing a raised block with open, sawtoothed edges and a long shadow. A deep
+  portal, whose hill already stands over the face, draws no plug.
+- **Wing walls fit the portal's own cutting.** Each wing runs out until its 1 : 1.5 coping meets
+  the approach's section in front of the face (or higher drawn ground), never down into a lower
+  neighbour's cutting, and stops 0.5 m short of any other track's formation.
+- **Palette.** No token changed. The earthwork colours (grassed banks, earth only on the lower
+  batter of cuts deeper than about 1.5 m) are the render pass iteration's, unchanged in code
+  since `main` (checked); the deeper D4 cuttings show more of that lower batter.
+
+**Agent observations** (headless Chrome through Playwright, 1280 × 800, Apple M5 Pro, ANGLE
+Metal; `CAPTURE=1 npx playwright test --project=capture tests/e2e/d4fix.capture.ts`, images in
+the gitignored `test-results/d4-fix/after/`, the owner's scene before the fix in
+`test-results/d4-fix/before/`; notes, not a look verdict):
+- **The owner's scene** (`owner-*`): the drag beside the hill curve is a second cutting parallel
+  to the curve's, with no portal, no plug and the lattice lines continuous. Before, it showed a
+  portal on the curve's cutting floor, a plug block with open edges over the curve's track, a
+  long shadow and oversized wings at the far portal.
+- **A tunnel through the open hill east of the curve** (`straight-tunnel-*`, one Straight line
+  drag): each portal stands at the end of its cutting with the wings on the cutting walls and
+  a grassed mound rising behind to the hill. With a 2 : 1 headwall, tried first, the crest
+  behind the wings drew a sawtooth; at 45° a faint step remains at one wing's far end.
+- **A neighbour's cutting 10 m beside the portals** (`neighbour-*`): the neighbour's formation
+  stays clear, the wings on that side stop short of it, and the mound meets its cutting slope.
+- **The lake** (`straight-lake-*`, one Straight line drag from the north shore): a truss over
+  the water on a stone approach viaduct, ground beyond.
+- **The D4 scenes** (`test-results/d4/d4fix/`, `tests/e2e/d4.capture.ts`): unchanged apart
+  from the river bridge's north end, where the approach embankment's grassy spit under the
+  first span is gone.
+- No page errors or warnings.
+
+**Open (not established here):** how the owner reads any of it; Look Gates A and B; whether
+cut faces should show earth at all (open since the render pass iteration); a headwall that
+rounds its crest at any steepness.

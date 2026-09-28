@@ -1651,6 +1651,155 @@ amending it is the owner's.
   evidence); the Look Gates; timings on the gate hardware; that curve samples decide identically
   across JavaScript engines.
 
+## Findings (2026-09-28, D4 feel-check fixes)
+
+Recorded on branch `codex/d4-structures` (draft PR [#84](https://github.com/Kminkjan/infrastructurio/pull/84)),
+from `3a4c2f5`, code at `ff9ce36` (the effective ground), `5e4ccbf` (the plug and wings), `e900629` (the
+Straight line tool) and `408258a` (plug caps, wing stops, the 45° headwall, e2e),
+[#68](https://github.com/Kminkjan/infrastructurio/issues/68). Measurements are automated (Vitest 4.1.10,
+Node 26.7.0, macOS 26.6.2, Apple M5 Pro) unless labelled agent (Playwright 1.63.0, headless system Chrome,
+same machine). The status of this ADR stays Proposed: the owner decision below replaces two tools and
+accepts no ADR.
+- **Owner feedback (2026-09-28, as relayed to the implementing agent), the feel check of this build:
+  "Not yet".** The owner picked "Too many red drags" and "Structures look off", with a Close screenshot
+  in build mode. The relaying agent's reading of the screenshot (its description, not the owner's words):
+  1. a tunnel portal on visibly flat ground, made by an ordinary Track-tool auto drag (owner: "Track tool
+     (1), auto"): big flat triangular wing walls, oversized, running diagonally away from the portal; a
+     short raised track stub leading into the portal; the portal right beside an existing curved ground
+     track;
+  2. a tall thin dark shadow streak rising above the portal;
+  3. a jagged tear in the terrain left of the portal, where the lattice overlay lines break along a
+     sawtooth;
+  4. a jagged break in the existing track's ballast near that tear;
+  5. large brown earthwork patches around the existing track.
+
+  About red drags the owner wrote: "Tunnel tool, i dont really get it".
+- **Owner decision (2026-09-28, as relayed): "One 'Straight line' tool".** "Replace Bridge (5) and Tunnel
+  (6) with one tool: the drag builds a steady-grade line from start to end, ignoring the ground; bridges
+  appear over valleys/water and tunnels through hills automatically. Track (1) keeps following the
+  ground."
+- **Root cause, reproduced before any fix** (Node on the diorama, then the browser). The core inferred
+  structures and auto-graded against the natural terrain, while the renderer drew the committed track's
+  cuttings and embankments.
+  - After the hill curve (226, 100) → (233, 117) (two ground pieces, a 6.6 m cutting), the Track drag
+    (234, 114) → (234, 102) built `ggggttttttgg` at `3a4c2f5`. Its six tunnel pieces lay under 3.9–7.9 m of
+    drawn cover, where the natural hill stood up to 9.2 m over them: tunnels in the curve's cutting, a
+    portal on its floor.
+  - The hill plug filled the approach cutting's rounded end from the natural hill (`min(N, T)`), inside a
+    rectangle that also covered the curve's cutting. So it drew the natural hill back over the curve's
+    track: a raised block whose open edges, triangles picked by centroid, were the sawtooth tear. It buried
+    the curve's ballast there and cast the tall shadow. The agent capture `test-results/d4-fix/before/`
+    shows all of it, the far portal's oversized wings included: they were sized against the cut-away
+    natural hill.
+  - A sweep of 10 drags from every node in (215–245, 92–125) found 8 tunnel drags whose tunnel pieces had
+    less than 8 m of drawn cover everywhere. Drags that start on the cutting's floor built no tunnel: the
+    raised stub was the drag's first ground piece at the natural height. The hypothesis held.
+- **The fix: one effective ground** ([`track/earthworks.ts`](../../src/core/track/earthworks.ts),
+  [`track/ground.ts`](../../src/core/track/ground.ts)).
+  - The earthworks rule moved from the renderer into the core unchanged: envelopes, reaches, the smooth
+    clamp, neighbour settling and bridge cuts. With the new clip planes disabled it drew every hash of the
+    byte pin at `3a4c2f5` exactly (checked).
+  - The world keeps each revision's settled earthwork pieces incrementally. A property test holds the
+    incremental result equal to a fresh derivation over random builds, undos and redos.
+  - Rule 4 samples it wherever a committed piece's earthworks reach an added piece, every 0.5 m whatever
+    the kind, and keeps the exact natural samples elsewhere, bit for bit. Portals and abutments read it at
+    their nodes; water stays natural.
+  - Auto-grade and straight lines target it. "Fixed" keeps D3's lift over the natural terrain, since under
+    existing track the effective ground is that track's own formation and would zero every pin's offset
+    (four D3 pin tests showed it).
+  - The track tool starts free nodes on it (`sim.groundMm`). The renderer meshes its pieces (`sim.ground()`)
+    and no longer settles reaches itself.
+  - Floats as for clearance and curve samples, decided at commit time; node heights are rounded to integer
+    mm.
+- **Chains stop at structures** (new rule, render and core alike).
+  - Each piece's nearest-point end cone reached past its chain's end: under a bridge's first span (the
+    abutment cone the D4 render recorded) and into the hill behind a portal (the bowl the plug filled). A
+    first clip on the last piece alone left the earlier pieces' cones reaching past it: a bridge chain's
+    second-to-last cone cut a tunnel's cover to 4 m (a render test caught it).
+  - So every earthwork piece carries the clip planes of its chain's ends within 120 m along the track: the
+    plane through the end node, square to the track.
+  - A structure end's plane is fixed: past it the envelopes rise (a cut) or fall (a fill) at 45° from the
+    section at the plane. Tried first: 2 : 1, whose crest drew a sawtooth behind the wings in the captures;
+    and 1 : 1.5, which ate 12 m into the hill behind a portal, so a tunnel piece laid later from the portal
+    had a portal of its own (two walk tests caught it).
+  - A buffer end's plane clips only a query for a command that joins it, and then hard, as if the chain
+    ended there. A chained drag into a hill is judged like the single drag (tested).
+  - The byte pin was re-recorded deliberately: refined triangles 6,670 → 6,275; deepest cut and fill
+    8.49 m and 8.75 m → 8.00 m and 7.86 m (only those cones passed the band); 12 fewer scenery items
+    cleared.
+- **Portals and plugs** ([`structures/plug.ts`](../../src/render/structures/plug.ts),
+  [art direction](../art-direction.md#portals-plugs-and-approaches-feel-check-fixes-2026-09-28)).
+  - The plug is only the mound over the bore, smooth-maxed with the drawn ground (never the natural). It
+    fades to the drawn ground 1.5–3.5 m inside its region's edge and is drawn only where it rises.
+  - It stays under the other tracks' cut envelopes ("cuts win"): in the first browser check the mound
+    buried a neighbour's rails 1.6 m deep.
+  - The wings follow the portal's own section (or higher drawn ground), never a lower neighbour's cutting,
+    and stop 0.5 m short of another formation.
+  - A tunnel run rebuilds when track near it changes.
+  - Portal definition: unchanged. With the effective ground no tunnel end in the acceptance populations
+    below lies under less than 2.1 m of ground (p5 4.6 m, median 7.8 m; 3 of 162 under 4 m), so no portal
+    stands on flat ground there. A rule for a portal's minimum cover is not added; see "Not established".
+- **Straight line tool** (Straight, key 5).
+  - The track tool in `TrackMode` "straight" and the planner's additive `Drag.heightMode: "straight"`: one
+    steady grade from the start to the end, apportioned by length.
+  - The end is the ground at the end node plus the height steps, moved to the nearest height 35‰ reaches
+    from the start. Clamping rather than rejecting, so a straight line is never red for its grade alone. A
+    snapped port keeps its height; out of reach, `preview` rejects it as `grade-too-steep`.
+  - No pins, no water floors: inference makes the bridges and tunnels.
+  - Key 5 was Bridge's, so the planned 1–7 order keeps; 6 is unbound. `build-track`'s `structure` and
+    `Drag.structure` stay for replays and tests; no tool forces a structure.
+- **Acceptance, re-measured** (the committed generator
+  [`tests/support/autoGrade.ts`](../../tests/support/autoGrade.ts), seed "auto-grade-probe", 1,000 free
+  drags and 150 chains; an uncommitted probe; the tool's ground is now `sim.groundMm`).
+  - Track, the same drags: 1,499 of 1,690 accepted (88.7%), 953 of the 1,000 free drags (95.3%), chained
+    continuations 406 of 540 (75.2%). Every count and reason matches the M2 finding exactly. The population
+    starts free drags on an empty network, and chains continue from their own clipped ends, so the effective
+    ground rarely differs there.
+  - Straight line, the same starts and pointers: 1,399 of 1,690 accepted (82.8%), 892 of the free drags
+    (89.2%), chained 377 of 540 (69.8%).
+    - Rejected: `bridge-too-low-over-water` 177 (lines leaving low banks), `bridge-below-ground` 38,
+      `out-of-bounds` 30, `tunnel-too-shallow` 22, `vertical-clearance` 10, `kinked-join` 7,
+      `tracks-too-close` 7.
+    - New pieces of accepted plans: ground 89.9%, bridge 6.9%, tunnel 3.2%. Grades: median 21.7‰; none over
+      35‰.
+- **Performance** (dev measurements, not gates; load average 8–14, alternating runs against a worktree
+  of `3a4c2f5`).
+  - The committed `sim/perf.test.ts` workload, three runs each: `planTrack` p95 0.68–0.72 → 0.68–0.78 ms;
+    preview p95 0.16–0.18 → 0.19–0.21 ms.
+  - Drags starting beside a 500-piece ground network (the new dense sampling), three runs each:
+    `planTrack` p95 0.25–0.28 → 0.45–0.48 ms, max 0.58–0.73 → 1.99–2.55 ms; preview p95 0.07–0.10 →
+    0.13–0.15 ms.
+  - A 10-piece edit, execute plus the earthworks sync: execute median 0.14–0.21 → 0.31–0.36 ms (the
+    settle moved into the commit); both p95 4.8–6.5 → 5.7–6.4 ms.
+  - Preview stays far inside gate B3 and planning near its previous p95 (gates authoritative only in the
+    [acceptance gates](../evidence/m4/2026-09-26-acceptance-gates.md)).
+  - The build is 316.60 kB gzip.
+- **Tests** (automated at `408258a`): 761 in 90 files, all passing; 16 of 16 Playwright e2e (agent).
+  - New: the effective ground (the owner's scene builds as ground; the tool's ground on a cutting floor;
+    incremental equals fresh; the chain planes at a portal; a chained drag judged like a single drag;
+    water and far nodes untouched); the straight mode in the planner (steady grade, the 35‰ clamp, ports,
+    valley → bridge, hill → tunnel, flat → ground) and in the tool (the same three, a lake from the water,
+    the ghost from the diff); plug tests (the outline meets the drawn ground, no refill of a neighbour's
+    cutting, under a neighbour's cut envelope, nothing on a deep portal, wings stopped); a feel-check e2e
+    (the owner's scene all ground; around a portal with a neighbour's cutting the largest step of the
+    drawn surface is 0.495 m over 0.25 m, the 45° headwall, and the neighbour's rail tops stay 0.41 m
+    clear).
+  - Changed because the effective ground or the new tool legitimately changes them: the tool test's run
+    under a node of the same height is a bridge (a ground run's formation is the ground there); the
+    chaining test reads the ground before the build; the cutting-floor e2e start is now on the floor (it
+    asserted the natural hill's 2+ m); the Bridge, Tunnel, keymap and HUD tests are now Straight line's;
+    the plug's bowl-fill test became "nothing on a deep portal"; the byte pin (above).
+- **Colours (item 5).** The earthwork shader chunk, the mesh colours, the terrain look and shading are
+  byte-identical to `main` (the owner-approved render pass iteration): grassed banks, earth on the lower
+  batter of cuts deeper than about 1.5 m. The brown areas are that rule on D4's deeper cuttings (to 8 m),
+  not a regression, so nothing was restored.
+- **Not established:** whether the fixes and the Straight line tool feel right (the owner's feel check;
+  nothing here is human evidence); the Look Gates; a portal rule for tunnel ends under little cover (none
+  in the populations, but curves could still make one); partition independence beyond the tested chained
+  drag (a drag that loops back beside itself is judged without its own new pieces' earthworks); that
+  curve samples and the effective ground decide identically across JavaScript engines; timings on the gate
+  hardware.
+
 ## Revisit when
 
 - The D3 feel check finds construction unsatisfying for reasons that planner tuning, chained
@@ -1732,3 +1881,7 @@ amending it is the owner's.
   tool, the re-measured acceptance, reasons and structure mix, open point 4 at ±8 m, the render's
   cut under decks and plug sizing, the re-recorded byte pin, rebuild costs, captures and remaining
   defects); status unchanged, still Proposed.
+- 2026-09-28: D4 feel-check fixes findings added (the relayed owner feedback "Not yet" and the owner
+  decision "One 'Straight line' tool" verbatim, the reproduced root cause, the effective ground moved into
+  the core, chains clipped at structures, the plug, wings and headwall, the Straight line tool, the
+  re-measured acceptance, performance, tests, the unchanged colours); status unchanged, still Proposed.

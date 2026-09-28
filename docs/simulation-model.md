@@ -320,8 +320,17 @@ and its [version 2 note](decisions/0010-triangular-lattice-track-geometry.md#fin
 - **Save.** Only `{seed, generatorVersion}` is saved; heights are regenerated on load.
   Open (D12): while the size is parametrised, a save must also carry `{columns, rows}`, or
   each generator version must fix them.
-- **No terrain editing in M4.** Earthworks (embankments, cuttings, ballast skirts) are
-  render-only. They never change the simulation's h.
+- **No terrain editing in M4.** Earthworks (embankments, cuttings, ballast skirts) never
+  change the terrain's heights. Until 2026-09-28 they were render-only, and the rules judged
+  track against the natural terrain alone. **Since the D4 feel-check fixes (2026-09-28)** the
+  earthworks rule is the core's ([`track/earthworks.ts`](../src/core/track/earthworks.ts)).
+  The world keeps the earthworks of each revision as the **effective ground**
+  ([`track/ground.ts`](../src/core/track/ground.ts)): the terrain as the committed track's
+  cuttings and embankments shape it. Auto-grade (§8), rule 4 (§9) and the track tool read it,
+  and the renderer meshes the same pieces through `sim.ground()`, so a drag through an existing
+  cutting is judged against the cutting as drawn
+  ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-feel-check-fixes)).
+  Water stays the natural terrain's.
 
 ## 8. Planner
 
@@ -390,7 +399,21 @@ Whether auto-grade feels right is the owner's to judge.
     fitted to 35‰ (below);
   - **"auto"** (no height steps, the tool's default): the planner also chooses the end, the
     ground there as far as 35‰ reaches from the start and the pins; inner nodes follow the
-    ground within 35‰.
+    ground within 35‰;
+  - **"straight"** (the Straight line tool; owner decision 2026-09-28, "One 'Straight line'
+    tool", which replaced the Bridge and Tunnel tools): one steady grade from the start to
+    the end, apportioned by length with largest-remainder rounding, whatever the ground does.
+    The end is the drag's (the ground at the end node plus the height steps), moved to the
+    nearest height 35‰ reaches from the start, so a straight line is never too steep. A
+    snapped port keeps its height, and one out of reach gives a ramp that `preview` rejects
+    as `grade-too-steep`. There are no pins and no water floors: structure inference (§9)
+    makes the bridges and tunnels.
+
+  **Ground (since the D4 feel-check fixes, 2026-09-28):** "auto" and "straight" read the
+  effective ground (§7), with the earthworks of the committed nodes on the drag's path treated
+  as ending at their buffer ends' planes, so a chained drag sees what a single drag would.
+  "fixed" keeps D3's lift over the natural terrain: under existing track the effective ground
+  is that track's own formation, which would zero every pin's offset.
 
   Until 2026-09-27 the absolute height change was spread instead, so hills between the ends
   swallowed the track
@@ -578,6 +601,12 @@ tracks.
     at the edge midpoint it crosses); curves and shifts are sampled every 0.5 m of arc. Over
     water, h is the bed; track at or above the bed is in or over the water, below it under
     the water.
+  - **Effective ground (since the D4 feel-check fixes, 2026-09-28):** h is the effective
+    ground (§7) wherever a committed piece's earthworks reach the piece, and such a piece is
+    sampled every 0.5 m whatever its kind. Elsewhere it keeps the exact natural samples above.
+    Portals and abutments read the effective ground at their nodes, and water stays natural.
+    The earthworks of the committed pieces ending at nodes the command joins count as ending
+    at those nodes' planes.
   - **Inference:** in or over water: bridge; under water: tunnel; above and below the band
     both: the larger excess; else as the bullets above.
   - **Rules per structure:** ground needs a bridge above the band or in or over water, and a
@@ -596,7 +625,10 @@ tracks.
     near water), `bridge-below-ground` 74 (mostly single-grade curves over mixed ground).
     **Under M2** (1,690 drags, the same generator): 88.7% accepted, 95.3% of the 1,000 free
     drags; `bridge-too-low-over-water` 89 (mostly land too near the water to climb 4 m at
-    35‰), `out-of-bounds` 32, `bridge-below-ground` 29, `tunnel-too-shallow` 18.
+    35‰), `out-of-bounds` 32, `bridge-below-ground` 29, `tunnel-too-shallow` 18. **With the
+    effective ground** (2026-09-28, the same drags): unchanged, 88.7% and 95.3%. The same
+    drags as straight lines: 82.8% accepted, 89.2% of the free drags, with
+    `bridge-too-low-over-water` 177 (lines leaving low banks) the main cause.
 - **Rule 6 details.**
   - Exemptions: shared nodes, turnout fans and diamond arms.
   - Broadphase: an incremental spatial hash with 20 m cells.

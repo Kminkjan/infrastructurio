@@ -78,16 +78,16 @@ Each label records that the file is present, not that its tests pass on a given 
 | Sim façade, remap, views, save | [src/core/sim/](../src/core/sim/) | **D2**: `world.ts` and the first slice of `api.ts` (`createSim`; `preview`, `execute` and `network()`; build, demolish, undo and redo), which also re-exports the lattice and terrain helpers. **D3**: additive re-exports of the scenario types, `resolvePiece` and `pieceFromKey` (the ghost draws unbuilt specs). `api.ts` grows from here; remap in S11a/b; views and save in S12 | S2–S3 (D2); (D10, D12) |
 | Scenario | [src/core/scenarios/](../src/core/scenarios/) | **D11a**: `baltic-diorama.ts` builds the static scenery layout (towns with lots, church, windmill, farmsteads, strip fields, forest density and trees, dirt roads, telegraph poles, lamps, fences, haystacks) from the terrain and a seed, integer-only, with a golden hash; `placeNames.ts` is the Baltic name list. D1 terrain moved to generator version 2 in the same branch | D1, D11a |
 | Renderer host, scheduler, camera, perf monitor | [src/render/core/](../src/render/core/), [src/render/camera/](../src/render/camera/) | **D1**: `RendererHost`, `FrameScheduler`, `PerfMonitor` (F3); `isoMath`, `IsoCamera`, `CameraController`. Pure parts unit-tested. **D3**: `CameraController` attaches no listeners; `InputRouter` offers it each gesture first | R0 (D1) |
-| Terrain, lighting, lattice shader | [src/render/terrain/](../src/render/terrain/), [src/render/art/](../src/render/art/) | **D1**: chunked lattice-triangle terrain (LOD0/LOD1), depth-tinted water, `lighting` with a fitted shadow map (`shadowFit`), lattice overlay (`shaderChunks/lattice`, `terrain/latticeMaterial`). **Earthworks-lite** (2026-09-27, D4's conform pulled forward, render only): `earthworks` (the pure conform and chunk pass), `earthworkMesh` (refined, watertight chunk geometry), `EarthworksView` (diffs by revision, 8 ms slices, the drawn heightfield), the `earthwork` chunk and `scenery/clearance`; see the [ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-earthworks-lite). Look not judged | R1 (D1), R2 (earthworks-lite) |
+| Terrain, lighting, lattice shader | [src/render/terrain/](../src/render/terrain/), [src/render/art/](../src/render/art/) | **D1**: chunked lattice-triangle terrain (LOD0/LOD1), depth-tinted water, `lighting` with a fitted shadow map (`shadowFit`), lattice overlay (`shaderChunks/lattice`, `terrain/latticeMaterial`). **Earthworks-lite** (2026-09-27, D4's conform pulled forward, render only): `earthworks` (the pure conform and chunk pass), `earthworkMesh` (refined, watertight chunk geometry), `EarthworksView` (diffs by revision, 8 ms slices, the drawn heightfield), the `earthwork` chunk and `scenery/clearance`; see the [ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-earthworks-lite). **D4 feel-check fixes** (2026-09-28): the rule moved into the core (`core/track/earthworks.ts`, kept per revision as the effective ground in `core/track/ground.ts`); `earthworks` keeps the chunk pass and `EarthworksView` meshes `sim.ground()`'s settled pieces, whose chains stop at bridge and tunnel ends ([ADR 0010 feel-check finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-feel-check-fixes)). Look not judged | R1 (D1), R2 (earthworks-lite) |
 | Track meshes | [src/render/track/](../src/render/track/) | **D3**: `trackGeometry` (ballast, sleepers and rails through `geometry/sample.ts`), `TrackBatch` (a `BatchedMesh` per layer, or 128 m chunk-merged meshes without multi-draw), `TrackView` (diffs by revision and piece key, 8 ms slices, far LOD), `ghostGeometry` and `GhostView` (the two-pass ghost, rejection highlight, undo/redo flash, drop lines and end-height tags), `SnapRing`. Earthworks under the track: see the terrain row (earthworks-lite, 2026-09-27). **D4 render** (2026-09-28, branch `codex/d4-structures-render`): bridge track in its own batch set (H hides it), tunnel track not drawn, ballast skirts on ground track, the ghost's structure marks. Turnout timbers and blades planned | R2, R4 (D3); R2 (D4) |
-| Structures | [src/render/structures/](../src/render/structures/) | **D4 render** (2026-09-28): `runs` (bridge and tunnel runs from the sections), `runPath`, `layout` (the structure-choice rule: supports, piers clear of other tracks, span types), `assets` (six `AssetRegistry` kinds: arch, truss and girder spans, pier, abutment, portal), `place` (bending along a run), `plug` (the hill plug in the terrain's material), `StructureView` (diffs runs by signature, 8 ms slices, H and U, the DECK and TUNNEL pick proxies); see [art direction](art-direction.md#structures-d4-render-2026-09-28). D4 thresholds "M2" (2026-09-28, branch `codex/d4-structures`): a deck the ground comes near takes a cut in `terrain/earthworks` (`cutsUnderDeck`), never a fill, and plugs reach as far as the relief around a portal needs; see the [ADR 0010 M2 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-thresholds-m2). Look not judged | R2 (D4) |
+| Structures | [src/render/structures/](../src/render/structures/) | **D4 render** (2026-09-28): `runs` (bridge and tunnel runs from the sections), `runPath`, `layout` (the structure-choice rule: supports, piers clear of other tracks, span types), `assets` (six `AssetRegistry` kinds: arch, truss and girder spans, pier, abutment, portal), `place` (bending along a run), `plug` (the hill plug in the terrain's material), `StructureView` (diffs runs by signature, 8 ms slices, H and U, the DECK and TUNNEL pick proxies); see [art direction](art-direction.md#structures-d4-render-2026-09-28). D4 thresholds "M2" (2026-09-28, branch `codex/d4-structures`): a deck the ground comes near takes a cut in `terrain/earthworks` (`cutsUnderDeck`), never a fill, and plugs reach as far as the relief around a portal needs; see the [ADR 0010 M2 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-thresholds-m2). D4 feel-check fixes (2026-09-28): a plug is only the mound over the bore on the drawn ground, fading into it at its edges and kept under other tracks' cut envelopes; wings follow the portal's own section and stop short of other formations; a tunnel run rebuilds when track near it changes ([ADR 0010 feel-check finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-feel-check-fixes)). Look not judged | R2 (D4) |
 | Scenery kit, labels | [src/render/scenery/](../src/render/scenery/), [src/render/labels/](../src/render/labels/) | **D11a**: instanced trees (3 species, 2 LODs), the building grammar (9 kinds) merged per chunk, instanced props, the terrain splat/field/AO textures, and CSS2D place names with a greedy declutter. Look not judged | R3 (D11a) → Look Gate A |
 | Art pipeline | [src/render/art/](../src/render/art/) | **D11a**: `AssetRegistry`, `materials` (six Lambert materials), shader chunks `grain`, `windSway`, `foliageTint`, `edgeFade` and `splat` composed with `lattice`, the CSS `vignette` and the dev `TweakPanel`; [camera/bookmarks.ts](../src/render/camera/bookmarks.ts) holds the Look Gate A views and the pitch A/B. **D3**: three track materials and the `trackStripe` chunk (the far-LOD ballast stripe) | R3 (D11a), R2 (D3) |
-| Tools | [src/tools/](../src/tools/) | **D3**: `types` (events, effects, ctx), `trackTool` (the track tool reducer), `previewMemo` (LRU of 16 keyed by revision + command key), `picks`, `format` (tooltip text); reducer unit tests. **D4 render** (2026-09-28): Bridge and Tunnel as the track tool with a forced structure (`StructureMode`), each ghost piece's resolved structure from the preview's `diff.added`, the tooltip's structure line. Signal, Station, Depot and Demolish planned | R4 (D3); R5 (D4–D7) |
+| Tools | [src/tools/](../src/tools/) | **D3**: `types` (events, effects, ctx), `trackTool` (the track tool reducer), `previewMemo` (LRU of 16 keyed by revision + command key), `picks`, `format` (tooltip text); reducer unit tests. **D4 render** (2026-09-28): Bridge and Tunnel as the track tool with a forced structure (`StructureMode`), each ghost piece's resolved structure from the preview's `diff.added`, the tooltip's structure line. **D4 feel-check fixes** (2026-09-28, owner decision "One 'Straight line' tool"): Bridge and Tunnel replaced by Straight line, the track tool in `TrackMode` "straight" (the planner's "straight" height mode); both modes build with structure "auto" ([ADR 0010 feel-check finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-feel-check-fixes)). Signal, Station, Depot and Demolish planned | R4 (D3); R5 (D4–D7) |
 | Picking | [src/render/picking/](../src/render/picking/) | Terrain node: **D1**, as [heightfieldRay.ts](../src/render/terrain/heightfieldRay.ts). **D3**: `trackPicker` (existing nodes within 14 px, centrelines within 10 px, measured on screen at track height, then the terrain node). **Earthworks-lite** (2026-09-27): the construction pick marches the drawn (conformed) heightfield, so the cursor lands on the visible ground; a node's height stays the sim ground. **D4 render** (2026-09-28): `layers` (the pick-layer channels and the track tools' mask), the proxy `pickScene` with DECK and TUNNEL box proxies (in `StructureView`), stacked levels (`pickTrackStack`) for C, bridges and tunnels filtered by H and U, and the hill plugs in the marched surface. Handles planned | D1 (terrain node), R4 (D3), R5 (handles; DECK and TUNNEL in D4) |
 | Overlays | `src/render/overlays/` | Planned | R5 (D7) |
 | Trains, steam, inspector | `src/render/trains/`, `src/ui/` | Planned | R6 (D8–D10) |
-| HUD | [src/ui/](../src/ui/) | **D3**: `store` (the HUD store) and `Hud` (construction tooltip, toast, aria-live status line, bottom toolbar with Track and undo/redo), mounted at `#hud`. **D4 render** (2026-09-28): Bridge and Tunnel buttons, a chip naming the occlusion aids in effect, the tooltip's structure line. Time controls, counters, inspector, entity list, notifications and overlay toggles planned | R4 (D3); R5–R6, D10 |
+| HUD | [src/ui/](../src/ui/) | **D3**: `store` (the HUD store) and `Hud` (construction tooltip, toast, aria-live status line, bottom toolbar with Track and undo/redo), mounted at `#hud`. **D4 render** (2026-09-28): Bridge and Tunnel buttons, a chip naming the occlusion aids in effect, the tooltip's structure line. Time controls, counters, inspector, entity list, notifications and overlay toggles planned **D4 feel-check fixes** (2026-09-28): the toolbar offers Track (1) and Straight (5); Bridge and Tunnel are gone. | R4 (D3); R5–R6, D10 |
 | Quality presets, hardening, bench | `src/render/core/`, `bench/` | Planned | R7 (D11b, D12) → Look Gate B |
 | Replay harness | `tests/replay/`, `tests/fixtures/` | Planned | D12 |
 | Browser e2e | [tests/e2e/](../tests/e2e/), [playwright.config.ts](../playwright.config.ts) | **D3**: Playwright on its own Vite server (port 5232, system Chrome): drag-build and undo to empty, keyboard construction (precision included), the keyboard cursor keeping its target while the view follows it, the end-height tag and cursor tooltip following the camera, Enter after toolbar use, a closed loop through ordinary drags, camera gestures still reaching the camera first; `*.capture.ts` screenshots for manual checks (`CAPTURE=1`). Agent evidence only | D3 |
@@ -195,7 +195,11 @@ every push.
 [`sim/world.ts`](../src/core/sim/world.ts) implement `createSim({ terrain })`, `tick`
 (always 0 until the step lands), `preview`, `execute` and `network()` for `build-track`,
 `demolish` (pieces only), `undo` and `redo`. **D3** (2026-09-27, PR #82) adds
-`planTrack`. `loadSim`, `step`, `frame`, `inspect` and `save` arrive with their slices.*
+`planTrack`. **D4 feel-check fixes** (2026-09-28) add `ground()` (the revision's settled
+earthwork pieces, which the renderer meshes) and `groundMm(q, r)` (the effective ground at a
+node, which the track tool starts free nodes on), and the "straight" `Drag.heightMode`
+([simulation model §7–§9](simulation-model.md#7-terrain-implemented)). `loadSim`, `step`,
+`frame`, `inspect` and `save` arrive with their slices.*
 
 The names and shapes below come from the design. `Highlight`, `EntityRef` and the ID types
 are indicative; S5 and S12 pin them down. D2 pinned `PieceSpec`, `PieceKey`, `NodeRef`
@@ -218,6 +222,8 @@ interface Sim {
   execute(cmd: Command): Result
   step(ticks?: number): void           // whole 100 ms ticks, default 1
   network(): NetworkView               // cached per network revision
+  ground(): GroundView                 // the revision's earthworks (D4 feel-check fixes)
+  groundMm(q: number, r: number): number | undefined  // the effective ground at a node
   frame(): FrameView                   // produced every tick
   inspect(q: InspectQuery): Inspection // "why is this train waiting?"
   save(): WorldSave                    // canonical, hashable
@@ -500,7 +506,9 @@ this order (D3, 2026-09-27: `trackPicker` implements steps 3 and 4 plus existing
 4. an analytic heightfield ray march against the sim heights. Zoom-to-cursor also uses it.
    Since earthworks-lite (2026-09-27) the construction pick marches the drawn heights
    instead, which are the conformed surface where earthworks moved the ground and the sim
-   heights everywhere else. The picked node keeps its sim height.
+   heights everywhere else. The picked node keeps its sim height. Since the D4 feel-check
+   fixes (2026-09-28) that is the effective ground (`sim.groundMm`), so a free node on a
+   cutting's floor is picked on the floor as drawn.
 
 **Occlusion aids:**
 - H hides bridge decks;
@@ -550,9 +558,10 @@ other tools are planned (R5).*
       resting mouse; a real pointer move takes the target back.
   - Tools never raycast or read the DOM.
 - **`ctx` is read-only:** the current `NetworkView`, `sim.planTrack`, the memoized preview, the
-  ground height at a node (the planner's `groundMmAt`: the terrain, or the water surface over a
-  lower bed), the deck height over water at a node (`waterDeckMm`, D4), and settings (height
-  step, radius cap).
+  ground height at a node (the planner's ground: since the D4 feel-check fixes, 2026-09-28,
+  `sim.groundMm`, the effective ground, the terrain as the track's earthworks shape it, or the
+  water surface over a lower bed; until then `groundMmAt`), the deck height over water at a node
+  (`waterDeckMm`, D4), and settings (height step, radius cap).
 - **Effects are data**, interpreted by the app:
   - execute a command, through the single command gateway (tools never call `execute`);
   - set the ghost: new is white, reused cyan, invalid red and dashed; elevated ghosts get drop
@@ -596,14 +605,27 @@ other tools are planned (R5).*
     4.0 m, with no steps (`ctx.waterDeckZmm`, M2). Anchoring on track starts at its height above
     ground in steps, so continuing elevated track plans in "fixed", and chaining keeps the
     steps. A plan ending on an existing node within half a step of its height takes that height
-    (not in precision). The Bridge and Tunnel tools force the structure and pass it to the
-    planner (`Drag.structure`). The tooltip's grade is the steepest piece's. Until D4 the
+    (not in precision). The Bridge and Tunnel tools forced the structure and passed it to the
+    planner (`Drag.structure`) until the D4 feel-check fixes (2026-09-28), which replaced them
+    with Straight line (below). The tooltip's grade is the steepest piece's. Until D4 the
     planner laid every node on the ground plus an offset it ramped from the start's to the
     end's, so with no steps a drag lay on the ground, hills included
     ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-d3-ground-following)).
   - **Precision** (held): magnetism off, the wheel steps the radius class (from 180 m) and Q/E
     the end heading; the tooltip adds the planner's live label. Each activation starts with
     precision off unless the modifier is held.
+- **Straight line tool** (owner decision 2026-09-28, "One 'Straight line' tool": "Replace Bridge
+  (5) and Tunnel (6) with one tool: the drag builds a steady-grade line from start to end,
+  ignoring the ground; bridges appear over valleys/water and tunnels through hills
+  automatically. Track (1) keeps following the ground."). The track tool reducer in
+  `TrackMode` "straight": every drag plans in the planner's "straight" height mode (one grade,
+  the end on the ground at the end node plus the height steps, moved to the nearest height
+  35‰ reaches from the start), planned once more when the plan ends on another node, and
+  builds with structure "auto", so the core infers each piece's bridge, tunnel or ground. It
+  starts with no height steps even on elevated track. A free start on water begins at the deck
+  height, as Track's does. The tooltip always shows the structure line and the hint
+  "Straight line: bridges and tunnels as needed · [ ] change end height". Chaining, Esc,
+  precision, magnetism, the keyboard cursor and the occlusion aids work as in Track.
 - **Keys** (`src/app/keymap.ts`, tested): Ctrl/Cmd+Z undo; Ctrl/Cmd+Shift+Z or Ctrl+Y redo
   (case-insensitive, by `key`, in every tool); 1 Track; with Track active the arrows move the
   keyboard cursor (WASD still pans) and Enter starts and commits; Q/E rotate the camera unless
@@ -614,9 +636,13 @@ other tools are planned (R5).*
   since it took focus, and toolbar buttons take no focus from a pointer click. Ctrl+Q is a
   browser shortcut on some platforms (quit on Linux): macOS uses ⌥ for precision, and
   elsewhere Q/E with Ctrl may be taken by the browser.
-- **Tool set.** Track, Signal, Station, Depot, Bridge, Tunnel and Demolish (keys 1–7).
-  Select is the default no-tool state (Esc), not a toolbar button.
-  - Bridge and Tunnel are the track tool with the structure forced; Track uses Auto.
+- **Tool set.** Track, Signal, Station, Depot, Bridge, Tunnel and Demolish (keys 1–7), as
+  designed. Select is the default no-tool state (Esc), not a toolbar button.
+  - **Since the D4 feel-check fixes (2026-09-28):** Track (1) and Straight line (5), both
+    building with structure "auto"; Straight line took Bridge's key 5, so the planned 1–7 order
+    keeps (2–4 Signal, Station, Depot; 7 Demolish), and 6 is unbound. The tool set above is the
+    design as written before the owner decision.
+  - Bridge and Tunnel were the track tool with the structure forced; Track used Auto.
   - D4 render (2026-09-28): Track 1, Bridge 5 and Tunnel 6 exist, on the toolbar and the
     keys; 2–4 and 7 stay unbound until their tools exist (no dead buttons). A digit matches by
     character (Shift allowed, for AZERTY) or unshifted by physical key, except where that key
