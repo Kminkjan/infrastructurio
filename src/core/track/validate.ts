@@ -26,7 +26,9 @@ import {
   STRUCTURE_CODES,
   type StructureFault,
   TUNNEL_COVER_MM,
+  TUNNEL_MIN_PEAK_COVER_MM,
   WATER_CLEARANCE_MM,
+  clearances,
   inferStructure,
   isAbutment,
   isPortal,
@@ -50,8 +52,11 @@ import {
  * judges against the effective ground (`ground.ts`, D4 feel-check fixes
  * 2026-09-28): the terrain as the committed track's earthworks shape it. Under
  * structure `auto` each added piece gets the structure inferred from the
- * terrain under it (`structure.ts`) before rule 4 checks it; a forced
- * structure (the Bridge and Tunnel tools) applies to every added piece.
+ * terrain under it (`structure.ts`), and a run inferred as tunnel that never
+ * reaches 10 m of cover becomes a cutting (owner decision 2026-09-28, "Needs
+ * 10 m somewhere"), before rule 4 checks it; a forced structure applies to every
+ * added piece (no tool forces one since the Straight line tool replaced the
+ * Bridge and Tunnel tools).
  *
  * Messages read "<what is wrong>; <how to fix it>." and carry numbers.
  */
@@ -437,6 +442,8 @@ function passes(): Rejection | null {
   return null;
 }
 
+const NO_INDICES: ReadonlySet<number> = new Set();
+
 /** Metres to 0.1 m, rounded half up, trailing zero trimmed ("6.5", "12"). */
 function metres(mm: number): string {
   const tenths = Math.round(mm / 100);
@@ -559,9 +566,82 @@ function structureMessage(fault: StructureFault, noun: string): string {
 }
 
 /**
- * Rule 4: under `auto`, first give every added piece its inferred structure;
- * then check each added piece against its structure's rules
- * (`structure.ts`): codes in catalogue order, pieces in command order.
+ * Under `auto`, after the per-piece inference: the runs of added pieces inferred as tunnel that never reach 10 m of
+ * cover become ground, cuttings up to 10 m deep (owner decision 2026-09-28, "Needs 10 m somewhere"; `structure.ts`).
+ * A run is a maximal set of added tunnel pieces joined node to node, so the outcome does not depend on the command's
+ * order. It stays a tunnel when it joins a committed tunnel (the extension of a tunnel is a tunnel), runs under water
+ * anywhere, or has a piece more than 8 m above the terrain (which the ground rule would reject). Replaces the pieces
+ * in `p.added` and returns the indices made ground, whose ground rule then takes cuttings to 10 m.
+ */
+function shallowTunnelRuns(ctx: TrackContext, p: Prepared, grounds: readonly PieceGround[]): ReadonlySet<number> {
+  const made = new Set<number>();
+  const byNode = new Map<string, number[]>();
+  p.added.forEach((piece, i) => {
+    if (piece.structure !== "tunnel") return;
+    for (const end of piece.ends) {
+      const k = nodeKey(end.node);
+      const list = byNode.get(k);
+      if (list) list.push(i);
+      else byNode.set(k, [i]);
+    }
+  });
+  if (byNode.size === 0) return made;
+  const removed = new Set(p.removed.map((r) => r.key));
+  const seen = new Set<number>();
+  for (let start = 0; start < p.added.length; start++) {
+    if (p.added[start]?.structure !== "tunnel" || seen.has(start)) continue;
+    const run: number[] = [];
+    const nodes = new Set<string>();
+    const stack = [start];
+    seen.add(start);
+    for (let i = stack.pop(); i !== undefined; i = stack.pop()) {
+      run.push(i);
+      for (const end of p.added[i]?.ends ?? []) {
+        const k = nodeKey(end.node);
+        nodes.add(k);
+        for (const j of byNode.get(k) ?? []) {
+          if (seen.has(j)) continue;
+          seen.add(j);
+          stack.push(j);
+        }
+      }
+    }
+    let keep = false;
+    let peakMm = Number.NEGATIVE_INFINITY;
+    for (const i of run) {
+      const piece = p.added[i];
+      const g = grounds[i];
+      if (!piece || !g) {
+        keep = true;
+        break;
+      }
+      const c = clearances(g, piece.ends[0].node.zMm, piece.ends[1].node.zMm);
+      if (c.underWater || c.overWater || c.aboveMm > GROUND_BAND_MM) {
+        keep = true;
+        break;
+      }
+      if (c.belowMm > peakMm) peakMm = c.belowMm;
+    }
+    if (keep || peakMm >= TUNNEL_MIN_PEAK_COVER_MM) continue;
+    const joinsTunnel = [...nodes].some((k) =>
+      (ctx.index.nodes.get(k) ?? []).some((e) => !removed.has(e.key) && ctx.authored.pieces.get(e.key)?.structure === "tunnel"),
+    );
+    if (joinsTunnel) continue;
+    for (const i of run) {
+      const piece = p.added[i];
+      if (!piece) continue;
+      p.added[i] = Object.freeze({ ...piece, structure: "ground" });
+      made.add(i);
+    }
+  }
+  return made;
+}
+
+/**
+ * Rule 4: under `auto`, first give every added piece its inferred structure,
+ * and make the tunnel runs that never reach 10 m of cover ground
+ * (`shallowTunnelRuns`); then check each added piece against its structure's
+ * rules (`structure.ts`): codes in catalogue order, pieces in command order.
  */
 function terrainStructure(ctx: TrackContext, p: Prepared): Rejection | null {
   if (p.added.length === 0) return null;
@@ -588,6 +668,7 @@ function terrainStructure(ctx: TrackContext, p: Prepared): Rejection | null {
       if (structure !== piece.structure) p.added[i] = Object.freeze({ ...piece, structure });
     });
   }
+  const deepCuts = choice === "auto" ? shallowTunnelRuns(ctx, p, grounds) : NO_INDICES;
   const removed = new Set(p.removed.map((r) => r.key));
   // The added pieces by node, built only when a portal or abutment walk first needs them.
   let addedAt: Map<string, Piece[]> | null = null;
@@ -636,8 +717,15 @@ function terrainStructure(ctx: TrackContext, p: Prepared): Rejection | null {
   const faults = p.added.map((piece, i) => {
     const g = grounds[i];
     if (!g) return null;
-    return structureFault(g, piece.ends[0].node.zMm, piece.ends[1].node.zMm, piece.lengthMm, piece.structure, waterMm, (end) =>
-      reachFrom(piece.ends[end].node, piece, 0),
+    return structureFault(
+      g,
+      piece.ends[0].node.zMm,
+      piece.ends[1].node.zMm,
+      piece.lengthMm,
+      piece.structure,
+      waterMm,
+      (end) => reachFrom(piece.ends[end].node, piece, 0),
+      deepCuts.has(i) ? TUNNEL_MIN_PEAK_COVER_MM : GROUND_BAND_MM,
     );
   });
   for (const code of STRUCTURE_CODES) {

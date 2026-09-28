@@ -11,6 +11,8 @@ import {
   GROUND_BAND_MM,
   STRUCTURE_SAMPLE_STEP_M,
   TUNNEL_COVER_MM,
+  TUNNEL_MIN_PEAK_COVER_MM,
+  clearances,
   inferStructure,
   isAbutment,
   isPortal,
@@ -178,10 +180,11 @@ describe("walks along the track to the nearest portal or abutment", () => {
   const build = (pieces: PieceSpec[]): Command => ({ type: "build-track", pieces, structure: "auto" });
 
   it("counts the distance to a portal through the tunnel pieces before it", () => {
-    // Track at 0 m under a 9 m ridge line with 5 m ground beside it: nodes under 9 m of cover (not portals),
+    // Track at 0 m under an 11 m ridge line with 5 m ground beside it: nodes under 11 m of cover (not portals),
     // midpoints under 5 m. The first ridge piece's midpoint lies 4.3 m from the portal on the flat (cover 2.5 m)
-    // and passes; the next one's lies 13 m from it, walking back through the first, and fails.
-    const { terrain, specs } = ridgeRun(90, 50, 0, 8);
+    // and passes; the next one's lies 13 m from it, walking back through the first, and fails. (The ridge was 9 m
+    // until the owner decision 2026-09-28, "Needs 10 m somewhere", which makes such a run a cutting.)
+    const { terrain, specs } = ridgeRun(110, 50, 0, 8);
     const sim = simOn(terrain);
     const three = sim.preview(build(specs(3, 0)));
     expect(three.ok && three.diff.added.map((r) => r.structure).sort()).toEqual(["ground", "ground", "tunnel"]);
@@ -223,5 +226,107 @@ describe("walks along the track to the nearest portal or abutment", () => {
     expect(!deep.ok && deep.reason.message).toBe(
       "Bridge piece 4 dips 2.5 m below the terrain 13 m from an abutment, more than the 2 m a deck may sit in the bank; raise the deck or build on the ground.",
     );
+  });
+});
+
+describe('a tunnel needs 10 m somewhere (owner decision 2026-09-28, "Needs 10 m somewhere")', () => {
+  /** Level straights east along row 20 at `zMm` from q0: `n` of them. */
+  const east = (q0: number, n: number, zMm = 0): PieceSpec[] => Array.from({ length: n }, (_, i) => straight(q0 + i, 20, 0, zMm));
+  const auto = (pieces: PieceSpec[]): Command => ({ type: "build-track", pieces, structure: "auto" });
+  /** A hill by column along row 20 (col = q + 10), dm: flat 0 outside, the given heights from column 21 on. */
+  const hill = (profileDm: readonly number[], waterDm = -100) => makeTerrain(60, 40, (_q, _r, col) => profileDm[col - 21] ?? 0, waterDm);
+  /** Structures in command order, one letter each. */
+  const kinds = (specs: readonly PieceSpec[], result: ReturnType<ReturnType<typeof simOn>["preview"]>): string => {
+    if (!result.ok) return `${result.reason.code}: ${result.reason.message}`;
+    const by = new Map(result.diff.added.map((a) => [a.key, a.structure[0]]));
+    return specs.map((s) => by.get(piece(s).key) ?? "=").join("");
+  };
+
+  it("makes a run that never reaches 10 m of cover a cutting up to 10 m deep, and keeps one that does a tunnel", () => {
+    expect(TUNNEL_MIN_PEAK_COVER_MM).toBe(10_000);
+    // A crest 9.9 m over the track for four nodes: four pieces deeper than the band, 9.9 m at most.
+    const crest = hill([50, 99, 99, 99, 99, 50]);
+    const specs = east(8, 12);
+    const shallow = simOn(crest).preview(auto(specs));
+    expect(kinds(specs, shallow)).toBe("gggggggggggg");
+    // The same crest 10 m up: a tunnel through it, with a portal at each end (cover 5 m ≤ 8 m there).
+    const deep = hill([50, 100, 100, 100, 100, 50]);
+    const through = simOn(deep).preview(auto(specs));
+    expect(kinds(specs, through)).toBe("gggtttttgggg");
+    expect(isPortal(deep, { q: 11, r: 20, zMm: 0 }) && isPortal(deep, { q: 16, r: 20, zMm: 0 })).toBe(true);
+    // Under the rule a 9.9 m cutting is ground; forced ground keeps the ±8 m band (no tool forces a structure).
+    const forced = simOn(crest).preview({ type: "build-track", pieces: specs, structure: "ground" });
+    expect(!forced.ok && forced.reason.code).toBe("needs-tunnel");
+    expect(!forced.ok && forced.reason.message).toContain("runs 9.9 m below the terrain, deeper than the 8 m a cutting takes");
+  });
+
+  it("decides a single piece by its own depth: 9.999 m down is a cutting, 10 m a tunnel, and forced ground fails at 10.2 m", () => {
+    const flat = makeTerrain(60, 40, () => 0, -100);
+    expect(kinds([straight(10, 10, 0, -9999)], simOn(flat).preview(auto([straight(10, 10, 0, -9999)])))).toBe("g");
+    expect(kinds([straight(10, 10, 0, -10_000)], simOn(flat).preview(auto([straight(10, 10, 0, -10_000)])))).toBe("t");
+    const deep = simOn(flat).preview({ type: "build-track", pieces: [straight(10, 10, 0, -10_200)], structure: "ground" });
+    expect(!deep.ok && deep.reason.code).toBe("needs-tunnel");
+    const nine = simOn(flat).preview({ type: "build-track", pieces: [straight(10, 10, 0, -9000)], structure: "ground" });
+    expect(!nine.ok && nine.reason.code).toBe("needs-tunnel");
+  });
+
+  it("leaves a run that joins a committed tunnel a tunnel, whatever its own depth", () => {
+    // 5 m at column 21, 9 m at 22, 12 m over columns 23–26, then 9 m over columns 27–32.
+    const terrain = hill([50, 90, 120, 120, 120, 120, 90, 90, 90, 90, 90, 90]);
+    const sim = simOn(terrain);
+    // Into the hill to (17, 20) (column 27, 9 m of cover): a tunnel under 12 m, ending at a buffer.
+    const first = east(5, 12);
+    const built = sim.execute(auto(first));
+    expect(kinds(first, built)).toBe("ggggggtttttt");
+    // On from the buffer under 9 m only: it joins the tunnel, so it is one.
+    const on = east(17, 5);
+    expect(kinds(on, sim.preview(auto(on)))).toBe("ttttt");
+    // Alone, the same run is a 9 m cutting.
+    expect(kinds(on, simOn(terrain).preview(auto(on)))).toBe("ggggg");
+  });
+
+  it("leaves a run under water and a run with a piece more than 8 m above the terrain a tunnel", () => {
+    // A lake with its bed at −6 m under water at −2 m over columns 21–30: track at −15 m, 9 m under the bed.
+    const lake = hill(Array(10).fill(-60), -20);
+    const under = east(12, 8, -15_000);
+    expect(kinds(under, simOn(lake).preview(auto(under)))).toBe("tttttttt");
+    // A piece from an 8.5 m deep pit (column 21) to a 9 m cliff (column 22): 8.5 m above and 9 m below the terrain.
+    const cliff = hill([-85, 90, 90], -200);
+    const leap = [straight(11, 20, 0)];
+    const result = simOn(cliff).preview(auto(leap));
+    expect(kinds(leap, result)).toBe("t");
+    // Made ground it would need a bridge.
+    const forced = simOn(cliff).preview({ type: "build-track", pieces: leap, structure: "ground" });
+    expect(!forced.ok && forced.reason.code).toBe("needs-bridge");
+  });
+
+  it("rebuilds the diagnosis scene s208 as one continuous cutting: a Straight line under an 8.13 m crest", () => {
+    // (208, 146) → (232, 146) with the Straight line tool on the diorama: until the rule, 15 ground pieces, a 20 m
+    // tunnel whose deepest natural cover was 8.13 m (8.125 m), and 5 ground pieces.
+    const terrain = generateTerrain({ seed: "baltic-diorama", columns: 400, rows: 346 });
+    const sim = simOn(terrain);
+    const from = { q: 208, r: 146, zMm: sim.groundMm(208, 146) ?? 0 };
+    const to = toWorld({ q: 232, r: 146 });
+    const plan = sim.planTrack({ from, to: { xMm: Math.round(to.x * 1000), yMm: Math.round(to.y * 1000) }, dzMm: (sim.groundMm(232, 146) ?? 0) - from.zMm, magnetism: true, heightMode: "straight" });
+    expect(plan.pieces).toHaveLength(24);
+    const preview = sim.preview(auto([...plan.pieces]));
+    expect(kinds(plan.pieces, preview)).toBe("g".repeat(24));
+    // The deepest piece lies 8.125 m under the natural crest.
+    const deepest = Math.max(...plan.pieces.map((s) => { const p = piece(s); return clearances(pieceGround(terrain, p), p.ends[0].node.zMm, p.ends[1].node.zMm).belowMm; }));
+    expect(deepest).toBe(8125);
+    // Preview equals execute, and the cutting builds.
+    expect(sim.execute(auto([...plan.pieces]))).toEqual(preview);
+    expect(sim.network().pieces.every((p) => p.structure === "ground")).toBe(true);
+  });
+
+  it("does not depend on the command's order", () => {
+    const deep = hill([50, 100, 100, 100, 100, 50, 0, 0, 50, 99, 99, 50]);
+    const specs = east(8, 20);
+    const forward = simOn(deep).preview(auto(specs));
+    const backward = simOn(deep).preview(auto([...specs].reverse()));
+    expect(forward.ok && backward.ok).toBe(true);
+    if (!forward.ok || !backward.ok) return;
+    expect(kinds(specs, forward)).toBe("gggtttttgggggggggggg");
+    expect(new Map(backward.diff.added.map((a) => [a.key, a.structure]))).toEqual(new Map(forward.diff.added.map((a) => [a.key, a.structure])));
   });
 });

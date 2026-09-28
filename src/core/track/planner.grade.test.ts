@@ -10,7 +10,7 @@ import { type World, createWorld } from "../sim/world";
 import { type Terrain, groundMmAt, heightDmAt, isWaterAt, nodeOfOffset } from "../terrain";
 import { createPrng } from "../util/prng";
 import type { Drag, TrackPlan } from "./planner";
-import { GROUND_BAND_MM } from "./structure";
+import { TUNNEL_MIN_PEAK_COVER_MM } from "./structure";
 
 /**
  * D4 auto-grade (owner decision 2026-09-28, "Auto-grade": "Track follows the
@@ -277,12 +277,14 @@ describe("auto-grade properties", () => {
 // Open point 4 and the diorama
 
 describe("the diorama under auto-grade (dev measurements, not gates)", () => {
-  it("admits a tunnel through ordinary seeded hills under the ±8 m band: open point 4", async ({ annotate }) => {
+  it("admits a tunnel through ordinary seeded hills under the ±8 m band and the 10 m tunnel rule: open point 4", async ({ annotate }) => {
     // Straight lines of 10–60 pieces over dry diorama land, both ends on the ground, where even the highest 35‰
-    // profile between the ends lies more than 8 m (the band) under the ground: no cutting can take them, a tunnel
+    // profile between the ends lies 10 m or more under the ground at a node: no cutting can take them, a tunnel
     // must. Until the owner decision 2026-09-28 "M2" the band was 4 m: then 300 such lines were found in 20,000
     // tries, the planner built 10 (3.3%) and the deepest profile 5 (1.7%), the rest failing tunnel-too-shallow (4–6 m
-    // of cover more than 10 m from a portal). At 8 m, a node with less than 6 m of cover is itself a portal.
+    // of cover more than 10 m from a portal). At 8 m, a node with less than 6 m of cover is itself a portal. Since the
+    // owner decision 2026-09-28, "Needs 10 m somewhere", a run under less than 10 m is a cutting, so a line needs a
+    // tunnel only where the highest profile lies 10 m under (more than 8 m until then).
     const { terrain } = diorama();
     const w = createWorld(terrain);
     const prng = createPrng("tunnel-admission");
@@ -304,7 +306,7 @@ describe("the diorama under auto-grade (dev measurements, not gates)", () => {
       const zn = g[n] ?? 0;
       if (Math.abs(zn - z0) > n * rise) continue;
       const highest = nodes.map((_, i) => Math.min(z0 + i * rise, zn + (n - i) * rise));
-      if (!highest.some((z, i) => (heightDmAt(terrain, nodes[i] ?? { q: 0, r: 0 }) ?? 0) * 100 - z > GROUND_BAND_MM)) continue;
+      if (!highest.some((z, i) => (heightDmAt(terrain, nodes[i] ?? { q: 0, r: 0 }) ?? 0) * 100 - z >= TUNNEL_MIN_PEAK_COVER_MM)) continue;
       needTunnel += 1;
       // The deepest 35‰ profile has the most cover everywhere.
       const lowest = nodes.map((_, i) => Math.max(z0 - i * rise, zn - (n - i) * rise));

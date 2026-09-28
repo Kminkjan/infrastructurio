@@ -60,12 +60,14 @@ test("a portal beside a neighbour's cutting: the drawn ground stays continuous a
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   await openDiorama(page);
-  await lookAtNode(page, 247, 58, 4);
-  // A Straight line through the hill (ground, eleven tunnel pieces, ground; portals at (248, 58) and (259, 58)) ...
-  const tunnel = await trackDrag(page, "5", [231, 58], [263, 58]);
+  await lookAtNode(page, 278, 129, 3);
+  // A Straight line through the hill (13 ground, 23 tunnel and 12 ground pieces; portals at (267, 129) and (290, 129))
+  // ... (Until the owner decision 2026-09-28, "Needs 10 m somewhere", (231, 58) → (263, 58), a tunnel under 9.07 m
+  // at most that is one cutting since.)
+  const tunnel = await trackDrag(page, "5", [254, 129], [302, 129]);
   expect(tunnel.filter((p) => p.structure === "tunnel").length).toBeGreaterThanOrEqual(8);
   // ... then a Track drag three rows north, 13 m beside it, whose cutting runs through the west portal's plug region.
-  const beside = await trackDrag(page, "1", [236, 55], [256, 55]);
+  const beside = await trackDrag(page, "1", [255, 126], [275, 126]);
   expect(beside.every((p) => p.structure === "ground")).toBe(true);
   expect(await page.evaluate(() => (window.__diorama as unknown as Hook).structureStats())).toMatchObject({ tunnels: 1, portals: 2 });
 
@@ -80,9 +82,9 @@ test("a portal beside a neighbour's cutting: the drawn ground stays continuous a
       // Lines 0.25 m apart in both directions over 60 × 40 m around each portal: the largest step between neighbours.
       let worst = 0;
       let at = { x: 0, y: 0 };
-      for (const q of [248, 259]) {
-        const cx = 5 * (q + 58 / 2);
-        const cy = 58 * 2.5 * Math.sqrt(3);
+      for (const q of [267, 290]) {
+        const cx = 5 * (q + 129 / 2);
+        const cy = 129 * 2.5 * Math.sqrt(3);
         // The portal face and its wings stand in the plane x = cx, 1 m thick, over the plug's front edge: skip that band.
         const inFace = (x: number) => Math.abs(x - cx) <= 1.3;
         for (let y = cy - 20; y <= cy + 20; y += 1) {

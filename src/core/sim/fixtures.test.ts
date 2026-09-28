@@ -189,23 +189,32 @@ describe("D4 positive cases beside each negative fixture", () => {
     expect(sim().execute(build(straight(10, 10, 0, 0, 175))).ok).toBe(true);
     expect(sim().execute(build(straight(10, 10, 0, 8000))).ok).toBe(true);
     expect(sim().execute(build(straight(10, 10, 0, -8000))).ok).toBe(true);
-    // Auto: more than 8 m up is a bridge, more than 8 m down a tunnel (with 6 m of cover or more).
+    // Auto: more than 8 m up is a bridge, more than 8 m down a tunnel (with 6 m of cover or more) when it lies 10 m
+    // down somewhere, else a cutting up to 10 m deep (owner decision 2026-09-28, "Needs 10 m somewhere"; until then
+    // 9 m down was a tunnel).
     const up = sim();
     expectOk(up.execute(buildAs("auto", straight(10, 10, 0, 8001))));
     expect(up.network().pieces.map((p) => p.structure)).toEqual(["bridge"]);
     const down = sim();
-    expectOk(down.execute(buildAs("auto", straight(10, 10, 0, -9000))));
+    expectOk(down.execute(buildAs("auto", straight(10, 10, 0, -10_000))));
     expect(down.network().pieces.map((p) => p.structure)).toEqual(["tunnel"]);
+    const cut = sim();
+    expectOk(cut.execute(buildAs("auto", straight(10, 10, 0, -9999))));
+    expect(cut.network().pieces.map((p) => p.structure)).toEqual(["ground"]);
     // A forced bridge may sit 2 m in the bank at its abutments (M2).
     expect(sim().execute(buildAs("bridge", straight(10, 10, 0, -2000))).ok).toBe(true);
     // Over the lake at the water level + 4.0 m exactly.
     const water = sim();
     expectOk(water.execute(buildAs("auto", ...run(20, HILL_ROW, 4, 2000))));
     expect(water.network().pieces.every((p) => p.structure === "bridge")).toBe(true);
-    // Under the hill with 8.5 m of cover: 3.5 m under the ground (at 6 m of cover it would be a cutting now).
+    // Under the hill with 10.5 m of cover: 5.5 m under the ground (at 8.5 m of cover it is a cutting since the owner
+    // decision 2026-09-28, "Needs 10 m somewhere", and at 6 m since "M2").
     const tunnel = sim();
-    expectOk(tunnel.execute(buildAs("auto", ...run(-12, HILL_ROW, 6, -3500))));
+    expectOk(tunnel.execute(buildAs("auto", ...run(-12, HILL_ROW, 6, -5500))));
     expect(tunnel.network().pieces.every((p) => p.structure === "tunnel")).toBe(true);
+    const cutting = sim();
+    expectOk(cutting.execute(buildAs("auto", ...run(-12, HILL_ROW, 6, -3500))));
+    expect(cutting.network().pieces.every((p) => p.structure === "ground")).toBe(true);
   });
 
   it("passes a grade-separated crossing at 6.5 m, and never joins the two tracks in the network", () => {

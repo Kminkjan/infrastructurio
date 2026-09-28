@@ -11,8 +11,10 @@ import { dragBetween, lookAtNode, nodeScreen, openDiorama, snapshot, undoToEmpty
  * the core infer bridges and tunnels, while Track (1) follows the ground with auto-grade.
  * - The river bridge is a Track drag that starts on the water, where a free drag begins at the deck height (the
  *   water level + 4.0 m, owner decision 2026-09-28 "M2"), and ends on the far bank: a level deck.
- * - The tunnel is one Straight line drag through a hill on the golden diorama, (231, 58) → (263, 58) (found with the
- *   planner in Node, 2026-09-28): ground, eleven tunnel pieces, ground, with a portal at each end.
+ * - The tunnel is one Straight line drag through a hill on the golden diorama, (254, 129) → (302, 129) (found with the
+ *   planner in Node, 2026-09-28): 13 ground pieces, 23 tunnel pieces under up to 11.44 m of cover, 12 ground pieces,
+ *   with a portal at each end. Until the owner decision 2026-09-28, "Needs 10 m somewhere", it was (231, 58) →
+ *   (263, 58), whose tunnel peaked at 9.07 m and is one cutting since.
  * - The lake is one Straight line drag from a hill on its north shore, (65, 200) on heading 3 for 60 pieces: a bridge
  *   over 24 water nodes, then ground.
  */
@@ -66,8 +68,8 @@ async function findRiverCrossing(page: Page): Promise<{ q: number; r: number; wa
   });
 }
 
-/** The hill for the tunnel: 32 pieces east from (231, 58), both ends on the ground (ground, 11 tunnel pieces, ground). */
-const HILL = { q: 231, r: 58, length: 32 } as const;
+/** The hill for the tunnel: 48 pieces east from (254, 129), both ends on the ground (ground, 23 tunnel pieces, ground). */
+const HILL = { q: 254, r: 129, length: 48 } as const;
 
 /** The lake crossing: 60 secondary pieces north (heading 3) from a 34 m hill at (65, 200), over 24 water nodes. */
 const LAKE_LINE = { q: 65, r: 200, dq: -1, dr: 2, length: 60 } as const;
@@ -174,7 +176,7 @@ test("lays a tunnel through a hill with one Straight line drag: portals at both 
   page.on("pageerror", (e) => errors.push(String(e)));
   await openDiorama(page);
   const { q, r, length } = HILL;
-  await lookAtNode(page, q + length / 2, r, 4);
+  await lookAtNode(page, q + length / 2, r, 3);
   await page.keyboard.press("5");
   expect((await page.evaluate(() => (window.__diorama as unknown as Hook).tool())).active).toBe("straight");
   expect((await page.evaluate(() => (window.__diorama as unknown as Hook).tool())).mode).toBe("straight");

@@ -118,11 +118,12 @@ describe("createSim construction commands", () => {
     ok(s.execute(build([straight(5, 5)], "auto")));
     ok(s.execute(build([straight(5, 5), straight(6, 5)], "bridge")));
     expect(s.network().pieces.map((p) => p.structure)).toEqual(["ground", "bridge"]);
-    // Beyond the ±8 m band (owner decision 2026-09-28 "M2"; 4.5 m and −6 m until then).
-    ok(s.execute(build([straight(10, 5, 0, 8500), straight(20, 5, 0, -9000)], "auto")));
+    // Beyond the ±8 m band (owner decision 2026-09-28 "M2"; 4.5 m and −6 m until then), and a tunnel at least 10 m
+    // down somewhere (owner decision 2026-09-28, "Needs 10 m somewhere"; −9 m was a tunnel until then).
+    ok(s.execute(build([straight(10, 5, 0, 8500), straight(20, 5, 0, -10_000)], "auto")));
     expect(s.network().pieces.map((p) => [p.key, p.structure])).toEqual([
       ["S:10,5,8500:0:8500", "bridge"],
-      ["S:20,5,-9000:0:-9000", "tunnel"],
+      ["S:20,5,-10000:0:-10000", "tunnel"],
       ["S:5,5,0:0:0", "ground"],
       ["S:6,5,0:0:0", "bridge"],
     ]);

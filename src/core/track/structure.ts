@@ -61,6 +61,19 @@ import { type GroundQuery, nodeGroundMm } from "./ground";
  * - otherwise ground (−8 m ≤ z − h ≤ 8 m everywhere, and dry): cuttings and
  *   embankments up to 8 m.
  *
+ * **A tunnel needs 10 m somewhere** (owner decision 2026-09-28, "Needs 10 m
+ * somewhere", after the second feel check: a line a few centimetres deeper
+ * than the band became a 20 m tunnel under a flat crest whose deepest cover was
+ * 8.13 m). After the per-piece inference, validation (`validate.ts`) takes each
+ * maximal run of added pieces inferred as tunnel, joined node to node: when the
+ * run's deepest B stays under TUNNEL_MIN_PEAK_COVER_MM (10 m), every piece of it
+ * is ground, a cutting up to 10 m deep, and its ground rule takes cuttings to
+ * 10 m (`structureFault`'s `cutBandMm`). A run that joins a committed tunnel,
+ * runs under water anywhere or has a piece more than 8 m above the terrain is
+ * left a tunnel. The ±8 m band is unchanged otherwise, and so are forced
+ * structures: a forced ground piece is a cutting to 8 m, a forced tunnel needs
+ * only B > 8 m.
+ *
  * **Rules** (each structure's own; the codes in catalogue order):
  * - ground: `needs-bridge` when A > 8 m or in or over water, `needs-tunnel`
  *   when B > 8 m or under water (a cutting under a river would flood);
@@ -97,6 +110,11 @@ import { type GroundQuery, nodeGroundMm } from "./ground";
 
 /** Track within ±8 m of the terrain, and dry, is ground: cuttings and embankments (owner decision 2026-09-28 "M2"; it was ±4 m). */
 export const GROUND_BAND_MM = 8000;
+/**
+ * An inferred tunnel run must lie this deep somewhere (B ≥ 10 m); a shallower one is a cutting up to this deep
+ * (owner decision 2026-09-28, "Needs 10 m somewhere"; see the module comment).
+ */
+export const TUNNEL_MIN_PEAK_COVER_MM = 10_000;
 /** A bridge deck over water must be at least the water level + 4.0 m. */
 export const WATER_CLEARANCE_MM = 4000;
 /** A tunnel needs 6 m of cover (h − z) ... */
@@ -354,7 +372,10 @@ export type StructureFault =
  * catalogue order), or null. `reachMm(end)` is the distance along the track
  * from the piece's end node 0 or 1 to the nearest support beyond it: a portal
  * for a tunnel, an abutment for a bridge (0 when that node is one, Infinity
- * when none lies within the zone); ground pieces never call it.
+ * when none lies within the zone); ground pieces never call it. `cutBandMm` is
+ * how deep a ground piece may cut: the band, or TUNNEL_MIN_PEAK_COVER_MM for a
+ * piece of a run that inference would have made a tunnel under 10 m of cover
+ * (see the module comment).
  */
 export function structureFault(
   g: PieceGround,
@@ -364,11 +385,12 @@ export function structureFault(
   structure: Structure,
   waterLevelMm: number,
   reachMm: (end: 0 | 1) => number,
+  cutBandMm: number = GROUND_BAND_MM,
 ): StructureFault | null {
   const { aboveMm, belowMm, overWater, underWater } = clearances(g, z0Mm, z1Mm);
   if (structure === "ground") {
     if (overWater || aboveMm > GROUND_BAND_MM) return { code: "needs-bridge", aboveMm, overWater };
-    if (underWater || belowMm > GROUND_BAND_MM) return { code: "needs-tunnel", belowMm, underWater };
+    if (underWater || belowMm > cutBandMm) return { code: "needs-tunnel", belowMm, underWater };
     return null;
   }
   if (structure === "bridge") {

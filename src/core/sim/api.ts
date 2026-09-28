@@ -16,7 +16,16 @@ import { type Command, type NetworkView, type Result, createWorld } from "./worl
 export type { Command, NetworkView, Result } from "./world";
 export type { Counts, Reason, ReasonCode, Ref, RuleFamily, StructureChoice } from "../track/validate";
 export { MAX_GRADE_PERMILLE, MAX_PIECES, REASON_CODES, RULE_ORDER } from "../track/validate";
-export { ABUTMENT_DIP_MM, ABUTMENT_ZONE_MM, GROUND_BAND_MM, PORTAL_ZONE_MM, TUNNEL_COVER_MM, WATER_CLEARANCE_MM, waterDeckMm } from "../track/structure";
+export {
+  ABUTMENT_DIP_MM,
+  ABUTMENT_ZONE_MM,
+  GROUND_BAND_MM,
+  PORTAL_ZONE_MM,
+  TUNNEL_COVER_MM,
+  TUNNEL_MIN_PEAK_COVER_MM,
+  WATER_CLEARANCE_MM,
+  waterDeckMm,
+} from "../track/structure";
 export { HISTORY_DEPTH } from "../track/history";
 // The earthworks rule and the effective ground (D4 feel-check fixes, 2026-09-28): the renderer meshes what the core
 // judges against.
