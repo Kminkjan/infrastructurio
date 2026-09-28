@@ -398,6 +398,45 @@ pixel for pixel). The status of this ADR stays **Proposed**; nothing here is a l
 - **Not established:** the owner's reading; Look Gates A and B; how any of this reads on
   other GPUs.
 
+## Findings (2026-09-28, D4 structures)
+
+Recorded on branch `codex/d4-structures-render`, code at `b26dda5` (from `81779af`), the render
+half of D4 ([#68](https://github.com/Kminkjan/infrastructurio/issues/68)). The look side is in
+[art direction](../art-direction.md#structures-d4-render-2026-09-28). The evidence is automated
+tests (Vitest in Node) and an **agent** browser run (headless Chrome through Playwright, 1280 ×
+800 at DPR 1, Apple M5 Pro, ANGLE Metal). The status of this ADR stays **Proposed**; nothing
+here is a look verdict.
+- **Decision 1 held for structures.** Six procedural kinds register with `AssetRegistry`
+  (`bridge-arch`, `bridge-truss`, `bridge-girder`, `bridge-pier`, `bridge-abutment`,
+  `tunnel-portal`), each with walls (masonry), trim (dressed stone) and metal (steel) slots, a
+  plan footprint and a triangle budget (700, 2,600, 1,400, 260, 320, 1,700; tested over parameter
+  sweeps). The variant packs a part's few dimensions in decimetres, so equal parts share one
+  cached template (a viaduct's arches mostly repeat); the view bends span templates along the
+  run and stretches them by the rounding (under 0.5%) so neighbours meet exactly. LOD1 returns
+  LOD0's geometry: no far-band form was measured to be needed.
+  - Winding: every generator's triangles agree with their normals, face away from each part's
+    recorded inside point, and every convex solid faces away from its own vertex centroid (an
+    oracle that never reads the inside point, as D11a's convex check). Bending along an R 60
+    curve, both ways, keeps every solid facing outward (tested): the run frame is right-handed and
+    only stretches along the track.
+- **Decision 3 held: no new material.** Structures draw with D11a's shared `built` material
+  (vertex colours, flat shading, grain, edge fade), one mesh per run. The hill plug draws with
+  the terrain's own material; its earthwork attribute carries the lip weight (no earthwork
+  colour) where the plug departs from the natural ground, so the relief chunk's lattice facets
+  fade there as on earthworks. The x-ray and hidden-deck overlays reuse the ghost's two-pass
+  ribbons (not tone mapped, information colours). Six palette tokens were added (five muted world
+  tokens and `xray`).
+- **Decision 5:** the shadow fit's box now grows to the structures' top (a truss over a valley
+  stands above the terrain's height range), so tall parts stay in the shadow camera.
+- **Cost** (agent development readings, not gate B; the same scene with and without structures,
+  two runs each, mean of 60 back-to-back renders closed by a `readPixels`): within ±0.02 ms per
+  frame at four views, draw calls +2 to +9, triangles +5k to +20k. Rebuilds in Node: a 54-piece
+  viaduct 2.9–3.6 ms median, a 49-piece tunnel 6.8–7.2 ms (its plugs), a 10-piece bridge edit
+  0.5–0.6 ms median. The initial JS is 308.02 kB gzip at `b26dda5` (not measured against its
+  base).
+- **Not established:** the owner's reading; Look Gates A and B; the mid laptop, real DPR 2 and
+  the Low preset; how the truss's thin members read at Region (they alias to faint lines).
+
 ## Revisit when
 
 - Look Gate A scores low on mood, cohesion or originality in a way parameters cannot fix
@@ -425,3 +464,7 @@ pixel for pixel). The status of this ADR stays **Proposed**; nothing here is a l
   where no track is built and pinned by a test; the splat's earthwork option is opt-in; look
   `b` pixel-identical before and after the fixes; one `smoothstep`); status unchanged, still
   Proposed.
+- 2026-09-28: D4 structures findings added (six structure kinds behind `AssetRegistry` with
+  walls, trim and metal slots, bent along each run; no new material; the hill plug in the
+  terrain material; six palette tokens; the shadow box grown to the structures; agent frame and
+  rebuild costs); status unchanged, still Proposed.
