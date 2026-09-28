@@ -1,3 +1,5 @@
+import { SQRT3 } from "../../core/sim/api";
+
 /**
  * Structure dimensions (art direction "Structures", D4), metres. Heights are
  * given as `v` above the track height z (the sim node height the track meshes
@@ -65,16 +67,26 @@ export const VIADUCT_MAX_HEIGHT_M = 20;
 export const ABUTMENT_BACK_M = 3.5;
 export const ABUTMENT_HALF_WIDTH_M = 3.3;
 
-/** Portal face: half width, the bore's half width, its springing and the face top above the track height. */
-export const PORTAL_HALF_WIDTH_M = 4.2;
+/**
+ * The portal's outline is the core's since the D4 second feel-check fixes (2026-09-28): the earthworks rule retains the
+ * hill behind a tunnel portal up to the same skyline (`core/track/portal.ts`, through `sim/api.ts`). The face's half
+ * width, the face top above the track height, the wings' 1 : 1.5 fall and the retained height over the face top.
+ */
+export { PORTAL_HALF_WIDTH_M, PORTAL_RETAIN_ABOVE_TOP_M, PORTAL_TOP_V, PORTAL_WING_RUN, portalRetainV, portalSkylineV } from "../../core/sim/api";
+/** The bore's half width and its springing above the track height. */
 export const BORE_HALF_M = 2.6;
 export const BORE_SPRING_V = 3.6;
-export const PORTAL_TOP_V = 7.4;
 export const PORTAL_PARAPET_M = 0.6;
-/** Face and wing wall thickness into the hill. */
+/** Face wall thickness into the hill. */
 export const PORTAL_WALL_M = 1;
-/** Portal wings fall at the earthworks' side slope (1 : 1.5) from the face top. */
-export const PORTAL_WING_RUN = 1.5;
+/** Wing wall thickness behind its front face. */
+export const WING_T = 0.8;
 export const PORTAL_MAX_WING_M = 25;
+/**
+ * The wings splay 30° toward the approach from the face plane (owner decision 2026-09-28, "Splayed wing walls"; see
+ * `portalOutline.ts`): cos and sin of the angle.
+ */
+export const PORTAL_WING_SPLAY_COS = SQRT3 / 2;
+export const PORTAL_WING_SPLAY_SIN = 0.5;
 /** How far the dark bore is drawn into the hill behind the face (enough to read as dark from any yaw). */
 export const BORE_DEPTH_M = 4.5;

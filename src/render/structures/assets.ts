@@ -24,13 +24,16 @@ import {
   PORTAL_PARAPET_M,
   PORTAL_TOP_V,
   PORTAL_WALL_M,
-  PORTAL_WING_RUN,
   STEEL_END_M,
   STEEL_SEAT_V,
   TRUSS_BOTTOM_V,
+  PORTAL_WING_SPLAY_SIN,
   TRUSS_PLANE_M,
+  WING_T,
+  portalSkylineV,
 } from "./dimensions";
 import { girderDepthM, trussDepthM } from "./layout";
+import { WALL_FOOT_UNDER_SKYLINE_M, WING_PIER_ALONG_M, WING_PIER_PROUD_M, WING_PIER_TOP_V, wallFootV, wingAcross, wingBack, wingCopingV, wingPoint } from "./portalOutline";
 import { BEND_SEGMENT_M, type StructureBuilder as SB, StructureBuilder } from "./structureBuilder";
 
 /**
@@ -101,12 +104,12 @@ export function unpackPier(variant: number): { heightM: number; wet: boolean } {
 export function abutmentVariant(depthM: number): number {
   return Math.min(2047, dm(depthM));
 }
-/** Portal: left and right wing lengths (8 bits each) and the face's depth under the track height (7 bits). */
-export function portalVariant(wingLeftM: number, wingRightM: number, depthM: number): number {
-  return Math.min(255, dm(wingLeftM)) | (Math.min(255, dm(wingRightM)) << 8) | (Math.min(127, dm(depthM)) << 16);
+/** Portal: left and right wing lengths (8 bits each), the face's depth under the track height (7 bits) and whether each wing is steep (bits 23, 24). */
+export function portalVariant(wingLeftM: number, wingRightM: number, depthM: number, steepLeft = false, steepRight = false): number {
+  return Math.min(255, dm(wingLeftM)) | (Math.min(255, dm(wingRightM)) << 8) | (Math.min(127, dm(depthM)) << 16) | (steepLeft ? 1 << 23 : 0) | (steepRight ? 1 << 24 : 0);
 }
-export function unpackPortal(variant: number): { wingLeftM: number; wingRightM: number; depthM: number } {
-  return { wingLeftM: (variant & 255) / 10, wingRightM: ((variant >> 8) & 255) / 10, depthM: ((variant >> 16) & 127) / 10 };
+export function unpackPortal(variant: number): { wingLeftM: number; wingRightM: number; depthM: number; steepLeft: boolean; steepRight: boolean } {
+  return { wingLeftM: (variant & 255) / 10, wingRightM: ((variant >> 8) & 255) / 10, depthM: ((variant >> 16) & 127) / 10, steepLeft: (variant & (1 << 23)) !== 0, steepRight: (variant & (1 << 24)) !== 0 };
 }
 
 /** Splits [a, b] into pieces no longer than BEND_SEGMENT_M: the break points, both ends included. */
@@ -393,17 +396,26 @@ export function buildAbutment(depthM: number): StructureBuilder {
 // ---- Tunnel portal ---------------------------------------------------------------------------------------------
 
 const RING = 0.62;
-const WING_T = 0.8;
 const CORNICE_H = 0.35;
+/** The wing coping's height and its overhang past the wall's faces. */
+const COPING_H = 0.28;
+const COPING_OVER_M = 0.06;
+/** The wing walls start this far along their line inside the face wall, so the corner between them is closed. */
+const WING_ROOT_M = -0.5;
 
-/** The portal skyline above the track height at |z| across: the face top, then falling at 1 : 1.5 along the wings. */
-export function portalSkylineV(across: number): number {
-  const u = Math.abs(across);
-  return u <= PORTAL_HALF_WIDTH_M ? PORTAL_TOP_V : PORTAL_TOP_V - (u - PORTAL_HALF_WIDTH_M) / PORTAL_WING_RUN;
-}
+/** The portal skyline above the track height at |z| across: the face top, then falling at 1 : 1.5 along the wings (the core's). */
+export { portalSkylineV } from "./dimensions";
 
-/** A tunnel portal at the track height: arched face with pilasters, cornice and parapet, wing walls, a dark bore behind. */
-export function buildPortal(wingLeftM: number, wingRightM: number, depthM: number): StructureBuilder {
+/** A point in model space from the portal frame (s along +X into the tunnel, u to the right along +Z) and a height. */
+const fp = (s: number, u: number, y: number): P => v(s, y, u);
+
+/**
+ * A tunnel portal at the track height: arched face with pilasters, cornice and parapet, wing walls splayed 30° toward
+ * the approach (`portalOutline.ts`) with their copings and end piers, and a dark bore behind. The face wall, the
+ * cornice and the wing walls have back faces, so where the ground behind them lies lower (a low hill, a neighbour's
+ * cutting) they read as solid masonry from the hill side too; the wall feet never rise above the copings.
+ */
+export function buildPortal(wingLeftM: number, wingRightM: number, depthM: number, steepLeft = false, steepRight = false): StructureBuilder {
   const sb = new StructureBuilder();
   const bottom = -Math.max(1, depthM);
   const half = PORTAL_HALF_WIDTH_M;
@@ -417,9 +429,13 @@ export function buildPortal(wingLeftM: number, wingRightM: number, depthM: numbe
     inner.push({ z: BORE_HALF_M * Math.cos(t), y: BORE_SPRING_V + BORE_HALF_M * Math.sin(t) });
     outer.push({ z: ringOut * Math.cos(t), y: BORE_SPRING_V + ringOut * Math.sin(t) });
   }
-  // Face (x = 0, facing −X, out of the hill).
+  // Face (x = 0, facing −X, out of the hill), and its back (x = PORTAL_WALL_M, facing +X, into the hill).
   const faceQuad = (a: { z: number; y: number }, b: { z: number; y: number }, c: { z: number; y: number }, d: { z: number; y: number }): void => {
     sb.quad(v(0, a.y, a.z), v(0, b.y, b.z), v(0, c.y, c.z), v(0, d.y, d.z), v(0.5, (a.y + c.y) / 2, (a.z + c.z) / 2));
+  };
+  const backQuad = (a: { z: number; y: number }, b: { z: number; y: number }, c: { z: number; y: number }, d: { z: number; y: number }): void => {
+    const x = PORTAL_WALL_M;
+    sb.quad(v(x, a.y, a.z), v(x, b.y, b.z), v(x, c.y, c.z), v(x, d.y, d.z), v(x - 0.5, (a.y + c.y) / 2, (a.z + c.z) / 2));
   };
   sb.use("walls", palette.masonry);
   for (const side of [1, -1]) {
@@ -439,14 +455,32 @@ export function buildPortal(wingLeftM: number, wingRightM: number, depthM: numbe
     sb.use("walls", palette.masonry);
     faceQuad(d, c, { z: c.z, y: corniceBottom }, { z: d.z, y: corniceBottom });
   }
-  // Pilasters, cornice, parapet and its coping.
+  // The back of the face wall: plain masonry round the bore's opening.
+  shade(sb, "walls", palette.masonry, 0.94);
+  for (const side of [1, -1]) backQuad({ z: side * BORE_HALF_M, y: bottom }, { z: side * half, y: bottom }, { z: side * half, y: corniceBottom }, { z: side * BORE_HALF_M, y: corniceBottom });
+  backQuad({ z: -BORE_HALF_M, y: bottom }, { z: BORE_HALF_M, y: bottom }, { z: BORE_HALF_M, y: DECK_V - 0.05 }, { z: -BORE_HALF_M, y: DECK_V - 0.05 });
+  for (let k = 0; k < n; k++) {
+    const a = inner[k] as { z: number; y: number };
+    const b = inner[k + 1] as { z: number; y: number };
+    backQuad(a, b, { z: b.z, y: corniceBottom }, { z: a.z, y: corniceBottom });
+  }
+  // Where no wing stands, the face wall's end closes it.
+  for (const [side, length] of [
+    [1, wingRightM],
+    [-1, wingLeftM],
+  ] as const) {
+    if (length > 0.05) continue;
+    const z = side * half;
+    sb.quad(v(0, bottom, z), v(PORTAL_WALL_M, bottom, z), v(PORTAL_WALL_M, corniceBottom, z), v(0, corniceBottom, z), v(PORTAL_WALL_M / 2, (bottom + corniceBottom) / 2, z - side * 0.5));
+  }
+  // Pilasters, cornice (its back too), parapet and its coping.
   for (const side of [1, -1]) {
     const z0 = side * (half - 0.8);
     const z1 = side * half;
     shade(sb, "walls", palette.masonry, 1.05);
     sb.bar(-0.14, 0.02, bottom, corniceBottom, Math.min(z0, z1), Math.max(z0, z1), { x1: false, y1: false });
   }
-  sb.use("trim", palette.masonryLight).bar(-0.22, PORTAL_WALL_M, corniceBottom, PORTAL_TOP_V, -half - 0.14, half + 0.14, { y0: true, x1: false });
+  sb.use("trim", palette.masonryLight).bar(-0.22, PORTAL_WALL_M, corniceBottom, PORTAL_TOP_V, -half - 0.14, half + 0.14, { y0: true });
   sb.use("walls", palette.masonry).bar(0.05, 0.65, PORTAL_TOP_V, PORTAL_TOP_V + PORTAL_PARAPET_M, -half, half, { y1: false });
   sb.use("trim", palette.masonryLight).bar(-0.01, 0.71, PORTAL_TOP_V + PORTAL_PARAPET_M, PORTAL_TOP_V + PORTAL_PARAPET_M + COPING_M, -half - 0.05, half + 0.05, {});
   // The reveal through the face wall, then the dark bore, darker with depth.
@@ -483,36 +517,66 @@ export function buildPortal(wingLeftM: number, wingRightM: number, depthM: numbe
   // The rails running into the dark.
   shade(sb, "metal", palette.railSide, 0.55);
   for (const z of [-0.817, 0.817]) sb.bar(0, BORE_DEPTH_M * 0.75, 0.29, 0.45, z - 0.055, z + 0.055, { x0: false, x1: false });
-  // Wing walls, their coping falling with the skyline, and a pier closing each.
-  for (const [side, length] of [
-    [1, wingRightM],
-    [-1, wingLeftM],
+  for (const [side, length, steep] of [
+    [1, wingRightM, steepRight],
+    [-1, wingLeftM, steepLeft],
   ] as const) {
-    if (length <= 0.05) continue;
-    const us = breaks(half, half + length, 1.25);
-    for (let i = 0; i + 1 < us.length; i++) {
-      const u0 = us[i] ?? 0;
-      const u1 = us[i + 1] ?? 0;
-      const y0 = portalSkylineV(u0);
-      const y1 = portalSkylineV(u1);
-      sb.use("walls", palette.masonry);
-      sb.quad(v(0, bottom, side * u0), v(0, bottom, side * u1), v(0, y1, side * u1), v(0, y0, side * u0), v(0.4, (y0 + y1) / 2 - 0.5, side * (u0 + u1) / 2));
-      sb.use("trim", palette.masonryLight);
-      const xa = -0.06;
-      const xb = WING_T + 0.06;
-      sb.hexa(
-        [v(xa, y0, side * u0), v(xb, y0, side * u0), v(xb, y1, side * u1), v(xa, y1, side * u1), v(xa, y0 + 0.28, side * u0), v(xb, y0 + 0.28, side * u0), v(xb, y1 + 0.28, side * u1), v(xa, y1 + 0.28, side * u1)],
-        { sides: [false, true, i === us.length - 2, true] },
-      );
-    }
-    const end = half + length;
-    const e0 = side * (end - 0.1);
-    const e1 = side * (end + 0.6);
-    const yEnd = portalSkylineV(end);
-    sb.use("walls", palette.masonry).bar(-0.15, WING_T + 0.15, bottom, yEnd + 0.5, Math.min(e0, e1), Math.max(e0, e1), { y1: false });
-    sb.use("trim", palette.masonryLight).bar(-0.21, WING_T + 0.21, yEnd + 0.5, yEnd + 0.66, Math.min(e0, e1) - 0.06, Math.max(e0, e1) + 0.06, {});
+    if (length > 0.05) buildWing(sb, side, length, depthM, steep);
   }
   return sb;
+}
+
+/**
+ * One splayed wing wall on `side` (+1 right, −1 left) of `lengthM` from the face's edge: front and back faces from the
+ * foot (`wallFootV`) to its coping (the skyline, or falling 45° when `steep`: `wingCopingV`), the coping, and the end
+ * pier with its cap.
+ */
+function buildWing(sb: SB, side: 1 | -1, lengthM: number, depthM: number, steep: boolean): void {
+  const n = wingBack(side);
+  const at = (t: number, behind: number, y: number): P => {
+    const w = wingPoint(side, t);
+    return fp(w.s + n.s * behind, w.u + n.u * behind, y);
+  };
+  const ts = breaks(WING_ROOT_M, lengthM, 1.25);
+  for (let i = 0; i + 1 < ts.length; i++) {
+    const t0 = ts[i] ?? 0;
+    const t1 = ts[i + 1] ?? 0;
+    const y0 = wingCopingV(t0, steep);
+    const y1 = wingCopingV(t1, steep);
+    const f0 = wallFootV(y0, depthM);
+    const f1 = wallFootV(y1, depthM);
+    const tm = (t0 + t1) / 2;
+    const ym = (y0 + y1 + f0 + f1) / 4;
+    sb.use("walls", palette.masonry);
+    sb.quad(at(t0, 0, f0), at(t1, 0, f1), at(t1, 0, y1), at(t0, 0, y0), at(tm, 0.4, ym));
+    shade(sb, "walls", palette.masonry, 0.94);
+    sb.quad(at(t0, WING_T, f0), at(t1, WING_T, f1), at(t1, WING_T, y1), at(t0, WING_T, y0), at(tm, WING_T - 0.4, ym));
+  }
+  // The coping along the wall from the face's edge (inside the face wall it would stand in the cornice).
+  sb.use("trim", palette.masonryLight);
+  const cs = breaks(0, lengthM, 1.25);
+  const a = -COPING_OVER_M;
+  const b = WING_T + COPING_OVER_M;
+  for (let i = 0; i + 1 < cs.length; i++) {
+    const t0 = cs[i] ?? 0;
+    const t1 = cs[i + 1] ?? 0;
+    const y0 = wingCopingV(t0, steep);
+    const y1 = wingCopingV(t1, steep);
+    sb.hexa([at(t0, a, y0), at(t0, b, y0), at(t1, b, y1), at(t1, a, y1), at(t0, a, y0 + COPING_H), at(t0, b, y0 + COPING_H), at(t1, b, y1 + COPING_H), at(t1, a, y1 + COPING_H)], {
+      sides: [i === 0, true, i === cs.length - 2, true],
+    });
+  }
+  // The end pier and its cap, square to the wall.
+  const yEnd = wingCopingV(lengthM, steep);
+  const foot = Math.min(wallFootV(yEnd, depthM), yEnd - WALL_FOOT_UNDER_SKYLINE_M);
+  const [p0, p1] = WING_PIER_ALONG_M;
+  const box = (ta: number, tb: number, ca: number, cb: number, ya: number, yb: number, top: boolean): void => {
+    sb.hexa([at(ta, ca, ya), at(tb, ca, ya), at(tb, cb, ya), at(ta, cb, ya), at(ta, ca, yb), at(tb, ca, yb), at(tb, cb, yb), at(ta, cb, yb)], { top });
+  };
+  sb.use("walls", palette.masonry);
+  box(lengthM + p0, lengthM + p1, -WING_PIER_PROUD_M, WING_T + WING_PIER_PROUD_M, foot, yEnd + WING_PIER_TOP_V, false);
+  sb.use("trim", palette.masonryLight);
+  box(lengthM + p0 - COPING_OVER_M, lengthM + p1 + COPING_OVER_M, -WING_PIER_PROUD_M - COPING_OVER_M, WING_T + WING_PIER_PROUD_M + COPING_OVER_M, yEnd + WING_PIER_TOP_V, yEnd + WING_PIER_TOP_V + 0.16, true);
 }
 
 // ---- Registry --------------------------------------------------------------------------------------------------
@@ -560,7 +624,11 @@ export function registerStructureAssets(registry: AssetRegistry): void {
     return asset(buildAbutment(depthM), rect(-ABUTMENT_BACK_M, PIER_THICKNESS_M / 2, -ABUTMENT_HALF_WIDTH_M, ABUTMENT_HALF_WIDTH_M), STRUCTURE_BUDGETS[ABUTMENT_KIND]);
   });
   registry.register(PORTAL_KIND, (variant) => {
-    const { wingLeftM, wingRightM, depthM } = unpackPortal(variant);
-    return asset(buildPortal(wingLeftM, wingRightM, depthM), rect(-0.3, BORE_DEPTH_M, -(PORTAL_HALF_WIDTH_M + wingLeftM + 0.7), PORTAL_HALF_WIDTH_M + wingRightM + 0.7), STRUCTURE_BUDGETS[PORTAL_KIND]);
+    const { wingLeftM, wingRightM, depthM, steepLeft, steepRight } = unpackPortal(variant);
+    // The splayed wings reach forward of the face and out to their end piers (`portalOutline.ts`).
+    const reach = (m: number) => (m > 0.05 ? m + (WING_PIER_ALONG_M[1] ?? 0) + COPING_OVER_M : 0);
+    const front = Math.max(0.3, PORTAL_WING_SPLAY_SIN * Math.max(reach(wingLeftM), reach(wingRightM)) + WING_PIER_PROUD_M + COPING_OVER_M);
+    const across = (m: number) => wingAcross(reach(m)) + PORTAL_WING_SPLAY_SIN * (WING_T + WING_PIER_PROUD_M + COPING_OVER_M);
+    return asset(buildPortal(wingLeftM, wingRightM, depthM, steepLeft, steepRight), rect(-front, BORE_DEPTH_M, -across(wingLeftM), across(wingRightM)), STRUCTURE_BUDGETS[PORTAL_KIND]);
   });
 }
