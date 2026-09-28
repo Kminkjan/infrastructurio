@@ -1537,8 +1537,8 @@ are automated (Vitest 4.1.10, Node 26.7.0, macOS 26.6.2, Apple M5 Pro) unless la
 ## Findings (2026-09-28, D4 thresholds M2)
 
 Recorded on branch `codex/d4-structures` (`main` at `81779af` with the core half `11d627e` and the
-render half `9138731` merged at `c21e941`), code at `9693116` (core and tool), `dd1e8fc` (render)
-and `b897159` (e2e), [#68](https://github.com/Kminkjan/infrastructurio/issues/68). Measurements are
+render half `9138731` merged at `c21e941`), code at `9693116` (core and tool), `dd1e8fc` and
+`a1469ba` (render) and `b897159` (e2e), [#68](https://github.com/Kminkjan/infrastructurio/issues/68). Measurements are
 automated (Vitest 4.1.10, Node 26.7.0, macOS 26.6.2, Apple M5 Pro) unless labelled agent
 (Playwright 1.63.0, headless system Chrome, same machine). The status of this ADR stays Proposed:
 the owner decision below sets D4's thresholds and accepts no ADR. The #68 body still states ±4 m;
@@ -1643,7 +1643,7 @@ amending it is the owner's.
     cutting (the render half's faint ragged line, clearer now);
   - a lighter wedge at the top inside the bore at a front view;
   - the truss's members read as faint lines at Region.
-- **Tests** (automated at `b897159`): 745 in 89 files, all passing; 13 of 13 Playwright e2e. Changed
+- **Tests** (automated at `a1469ba`): 745 in 89 files, all passing; 13 of 13 Playwright e2e. Changed
   expectations are listed in the commits; each follows a threshold (4.5 m, 6 m and 7 m cases now lie
   inside the band, 5.5 m plateaus are cuttings, 0.5 m dips at abutments pass) or a sim that judged
   a seeded map other than the view's terrain.
