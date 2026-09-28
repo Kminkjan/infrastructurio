@@ -20,39 +20,35 @@ import { smoothstep } from "../math";
  * plug, so the hill reads as closed over the bore"), drawn with the terrain's
  * own material and shading so it reads as the hillside itself.
  *
- * The approach's earthworks (`earthworks.ts`) cut a cutting whose end rounds
- * off around the portal node, so without a plug the hill would show a bowl
- * behind the portal face; and where the tunnel runs shallow the bore would
- * stand in the open. The plug is a patch of ground behind the face (s ≥
- * PLUG_START_M, just behind the parapet) whose height is
+ * Since the D4 feel-check fixes (2026-09-28) the approach's earthworks stop
+ * at the portal plane (a 2 : 1 headwall past it; `core/track/earthworks.ts`),
+ * so there is no cut bowl behind the face to fill, and the plug is only a
+ * mound over the bore where the drawn ground behind the face is lower than
+ * the face top:
  *
- *   H = max(min(N, T), M) + PLUG_LIFT_M, with
- *   P(u) = z + skyline(u) + PLUG_UNDER_COPING_M      (the face top, then the wings' 1 : 1.5 fall),
- *   T = P(u) + max(0, s − wall) / 1.5                 (the hillside rising behind the face),
- *   M = P₀ − max(0, |u| − face) / run(s) − max(0, s − MOUND_FLAT_M) / MOUND_END_RUN
- *                                                      (a mound over the bore where the hill is low),
+ *   H = D + w · (max(D, M) − D) + PLUG_LIFT_M, with
+ *   M = P₀ − max(0, |u| − crown(s)) / run(s) − max(0, s − MOUND_FLAT_M) / MOUND_END_RUN,
  *
- * and the plug never lies below the drawn ground (the earthworks' conformed
- * surface, when given): where the approach cutting's rounded end would rise
- * through it, it takes that height, so the plug covers its whole region and
- * no seam zigzags where two nearly equal surfaces cross. The min and the maxes
- * are the earthworks' polynomial smooth minimum over DAYLIGHT_ROUND_M (0.6 m),
- * so the mound's foot eases into the ground instead of meeting it at a crease
- * that the 1.25 m triangles would draw as a sawtooth. Here N is the natural
- * ground, s metres into the tunnel, u across it, P₀ the
- * face-top level and `face` the face's half width. Where the hill is high the
- * plug fills the bowl up to a 1 : 1.5 slope rising from the face top, and it
- * meets the natural hill where that slope does; where the hill is low it raises
- * a mound over the bore, flat over its drawn depth (so the dark bore never
- * shows through), whose sides fall at 1 : 1.5 at the face, like the wings that
- * retain its front, easing to 1 : 3 behind it (`run`), and whose far end falls
- * at 1 : 3, so it reads as a hillock rather than a berm. It lies on the terrain's own
- * 1.25 m sub-lattice (as refined earthworks do), clipped at s = PLUG_START_M,
- * so where it follows the natural ground its triangles lie exactly in the
- * lattice triangles' planes, PLUG_LIFT_M above. Its normals are the terrain's
- * smooth normals tilted by the departure's gradient and its colours the
- * terrain's baked ones, so the shader (splat, relief, grain) treats it as
- * natural ground. Presentation only: the sim's terrain never changes.
+ * where D is the drawn ground (the earthworks' conformed surface; the natural
+ * terrain where none is given), P₀ the face-top level, s metres into the
+ * tunnel and u across it. The mound is flat over its drawn depth (so the dark
+ * bore never shows through) and its sides fall at the wings' 1 : 1.5 at the
+ * face, easing to 1 : 2 behind it, and its far end at 1 : 3, so it reads as a
+ * hillock rather than a berm. The maximum is the earthworks' polynomial
+ * smooth maximum over DAYLIGHT_ROUND_M (0.6 m). The weight w is 1 inside the
+ * plug and falls to 0 over PLUG_FADE_M at the edges of its region (and in
+ * front beyond the wings), so the plug meets the drawn ground everywhere on
+ * its outline, within PLUG_LIFT_M: no tear. It never reads the natural ground:
+ * the plug of the D4 render filled the approach cutting's bowl from the
+ * natural hill, and so refilled a neighbour's cutting inside its region too,
+ * a raised block with open, sawtoothed edges over the neighbour's track (the
+ * owner's feel check, 2026-09-28). Triangles are drawn only where the mound
+ * rises over the drawn ground, so on a deep portal, whose hill already stands
+ * over the face, the plug draws nothing. It lies on the terrain's 1.25 m
+ * sub-lattice (as refined earthworks do), clipped at s = PLUG_START_M. Its
+ * normals are the terrain's smooth normals tilted by the departure's gradient
+ * and its colours the terrain's baked ones, so the shader (splat, relief,
+ * grain) treats it as natural ground. Presentation only.
  */
 
 export const PLUG_START_M = 0.6;
@@ -68,6 +64,12 @@ export const MOUND_END_RUN = 3;
 export const MOUND_SIDE_RUN = 2;
 export const MOUND_EASE_M: readonly [number, number] = [1.5, 5];
 export const MOUND_CROWN_HALF_M = 2.5;
+/** The plug's weight falls to 0 over this band at the edges of its region, so it meets the drawn ground there. */
+export const PLUG_FADE_M = 2;
+/** The weight is 0 this far inside the region's edge: one 1.25 m sub-triangle and a margin. */
+export const PLUG_EDGE_M = 1.5;
+/** A plug triangle is drawn only where the mound stands this far over the drawn ground at one of its corners. */
+const PLUG_MIN_RISE_M = 0.01;
 /** The plug's sub-lattice step: the refined earthworks' 1.25 m. */
 const SUB = 4;
 
@@ -79,6 +81,9 @@ export interface PortalFrame {
   readonly tx: number;
   readonly ty: number;
 }
+
+/** The wings read the drawn ground this far in front of the face plane. */
+const WING_FRONT_M = 0.3;
 
 /** What the portal's face and wings see in front of them. */
 export type PortalApproach = "ground" | "bridge" | "buffer";
@@ -95,7 +100,7 @@ function cutRise(d: number): number {
  * Each wing's length: it runs out from the face until the skyline meets the ground in front of it (a ground
  * approach's cutting, or the natural ground), capped at PORTAL_MAX_WING_M.
  */
-export function portalWings(terrain: Terrain, f: PortalFrame, approach: PortalApproach): { left: number; right: number } {
+export function portalWings(terrain: Terrain, f: PortalFrame, approach: PortalApproach, drawnM?: (x: number, y: number) => number): { left: number; right: number } {
   const lat = lodLattice(terrain, 0);
   const out = { left: 0, right: 0 };
   for (const side of [1, -1] as const) {
@@ -104,8 +109,11 @@ export function portalWings(terrain: Terrain, f: PortalFrame, approach: PortalAp
       // Right of the direction into the tunnel is (ty, −tx); the wing on side +1 stands there.
       const x = f.x + f.ty * side * u;
       const y = f.y - f.tx * side * u;
+      // The drawn ground just in front of the face (the approach's cutting, or a neighbour's, as drawn), when known;
+      // else the natural ground, cut by a ground approach's side slope.
+      const drawn = drawnM ? drawnM(x - WING_FRONT_M * f.tx, y - WING_FRONT_M * f.ty) : Number.NaN;
       const n = naturalHeightM(terrain, lat, x, y);
-      const ground = Number.isNaN(n) ? f.z : approach === "ground" ? Math.min(n, f.z + cutRise(u)) : n;
+      const ground = !Number.isNaN(drawn) ? drawn : Number.isNaN(n) ? f.z : approach === "ground" ? Math.min(n, f.z + cutRise(u)) : n;
       if (f.z + portalSkylineV(u) <= ground + 0.05) {
         length = u - PORTAL_HALF_WIDTH_M;
         break;
@@ -182,19 +190,42 @@ export class HillPlug {
     return this.surface(x, y, s, u);
   }
 
-  private surface(x: number, y: number, s: number, u: number): number {
-    const n = naturalHeightM(this.terrain, this.lat, x, y);
-    const p = this.frame.z + portalSkylineV(u) + PLUG_UNDER_COPING_M;
-    const t = p + Math.max(0, s - PORTAL_WALL_M) / PORTAL_WING_RUN;
+  /** The mound over the bore at (s, u), before the smooth maximum with the ground. */
+  mound(s: number, u: number): number {
     const ease = smoothstep(MOUND_EASE_M[0], MOUND_EASE_M[1], s);
     const run = PORTAL_WING_RUN + (MOUND_SIDE_RUN - PORTAL_WING_RUN) * ease;
     const crown = PORTAL_HALF_WIDTH_M + (MOUND_CROWN_HALF_M - PORTAL_HALF_WIDTH_M) * ease;
-    const m = this.skyAt0 - Math.max(0, Math.abs(u) - crown) / run - Math.max(0, s - MOUND_FLAT_M) / MOUND_END_RUN;
-    const natural = Number.isNaN(n) ? this.frame.z : n;
+    return this.skyAt0 - Math.max(0, Math.abs(u) - crown) / run - Math.max(0, s - MOUND_FLAT_M) / MOUND_END_RUN;
+  }
+
+  /** The drawn ground under (x, y): the earthworks' surface, else the natural terrain (else the track height). */
+  private ground(x: number, y: number): number {
     const drawn = this.drawnM(x, y);
+    if (!Number.isNaN(drawn)) return drawn;
+    const n = naturalHeightM(this.terrain, this.lat, x, y);
+    return Number.isNaN(n) ? this.frame.z : n;
+  }
+
+  /** The plug's weight at (s, u): 1 inside, falling to 0 over PLUG_FADE_M at its region's back and sides, and in front beyond the wings. */
+  private weight(s: number, u: number): number {
+    // Zero a sub-triangle and a margin inside the region's edge: a triangle whose centroid is inside can reach that far.
+    const edge = PLUG_EDGE_M;
+    const back = 1 - smoothstep(this.depthM - edge - PLUG_FADE_M, this.depthM - edge, s);
+    const side = 1 - smoothstep(this.halfWidthM - edge - PLUG_FADE_M, this.halfWidthM - edge, Math.abs(u));
+    const wing = u >= 0 ? this.wings.right : this.wings.left;
+    const front = Math.abs(u) <= PORTAL_HALF_WIDTH_M + wing ? 1 : smoothstep(PLUG_START_M, PLUG_START_M + PLUG_FADE_M, s);
+    return Math.min(back, side, front);
+  }
+
+  /** How far the plug's mound stands over the drawn ground at (x, y), m (0 where it does not). */
+  private riseAt(x: number, y: number, s: number, u: number): number {
+    const d = this.ground(x, y);
     const k = DAYLIGHT_ROUND_M;
-    const own = -smoothMin(-smoothMin(natural, t, k), -m, k);
-    return (Number.isNaN(drawn) ? own : -smoothMin(-own, -drawn, k)) + PLUG_LIFT_M;
+    return this.weight(s, u) * (-smoothMin(-d, -this.mound(s, u), k) - d);
+  }
+
+  private surface(x: number, y: number, s: number, u: number): number {
+    return this.ground(x, y) + this.riseAt(x, y, s, u) + PLUG_LIFT_M;
   }
 
   /** The drawn ground at a 5 × 5 grid over the plug's region: the view rebuilds the plug when it changes. */
@@ -207,6 +238,11 @@ export class HillPlug {
         const h = this.drawnM(this.frame.x + this.frame.tx * s + this.frame.ty * u, this.frame.y + this.frame.ty * s - this.frame.tx * u);
         out.push(Number.isNaN(h) ? "-" : h.toFixed(2));
       }
+    }
+    // The line in front of the face that the wings are sized against.
+    for (let u = -this.halfWidthM; u <= this.halfWidthM; u += this.halfWidthM / 4) {
+      const h = this.drawnM(this.frame.x + this.frame.ty * u - WING_FRONT_M * this.frame.tx, this.frame.y - this.frame.tx * u - WING_FRONT_M * this.frame.ty);
+      out.push(Number.isNaN(h) ? "-" : h.toFixed(2));
     }
     return out.join(",");
   }
@@ -266,6 +302,11 @@ export class HillPlug {
           const cx = ((tri[0]?.[0] ?? 0) + (tri[1]?.[0] ?? 0) + (tri[2]?.[0] ?? 0)) / 3;
           const cy = ((tri[0]?.[1] ?? 0) + (tri[1]?.[1] ?? 0) + (tri[2]?.[1] ?? 0)) / 3;
           if (!inRegion(cx, cy)) continue;
+          // Only where the mound stands over the drawn ground: elsewhere the terrain below is the surface.
+          if (!tri.some(([x, y]) => {
+            const l = this.local(x, y);
+            return this.riseAt(x, y, Math.max(l.s, PLUG_START_M), l.u) > PLUG_MIN_RISE_M;
+          })) continue;
           for (const poly of clipFront(tri, (x, y) => this.local(x, y).s - PLUG_START_M)) {
             for (const [x, y] of poly) push(x, y);
           }

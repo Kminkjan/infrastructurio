@@ -5,7 +5,7 @@ import type { AssetRegistry } from "../art/AssetRegistry";
 import { EARTHWORK_ATTRIBUTE, EARTHWORK_ITEM_SIZE } from "../art/shaderChunks/earthwork";
 import { palette } from "../art/palette";
 import { PICK_LAYER } from "../picking/layers";
-import { lodLattice, naturalHeightM, pointCutReachM } from "../terrain/earthworks";
+import { lodLattice, naturalHeightM } from "../terrain/earthworks";
 import type { WaterPlane } from "../terrain/heightfieldRay";
 import type { TerrainShading } from "../terrain/terrainShading";
 import { OverlayRibbons } from "../track/GhostView";
@@ -28,7 +28,7 @@ import {
 import { BORE_HALF_M, BORE_SPRING_V, DECK_HALF_M, FOOT_SINK_M, PARAPET_TOP_V, PORTAL_HALF_WIDTH_M } from "./dimensions";
 import { type BridgeLayout, type LayoutEnv, layoutBridge } from "./layout";
 import { GeometrySink, bend, place } from "./place";
-import { HillPlug, MOUND_CROWN_HALF_M, MOUND_END_RUN, MOUND_FLAT_M, MOUND_SIDE_RUN, type PortalApproach, type PortalFrame, PLUG_UNDER_COPING_M, portalWings } from "./plug";
+import { HillPlug, MOUND_CROWN_HALF_M, MOUND_END_RUN, MOUND_FLAT_M, MOUND_SIDE_RUN, PLUG_EDGE_M, PLUG_FADE_M, type PortalApproach, type PortalFrame, PLUG_UNDER_COPING_M, portalWings } from "./plug";
 import { type PathPoint, RunPath } from "./runPath";
 import { type StructureRun, isPortalEnd, structureRuns } from "./runs";
 
@@ -536,25 +536,24 @@ export class StructureView {
       const frame: PortalFrame = { x: P.x, y: P.y, z: P.z, tx: dir * P.tx, ty: dir * P.ty };
       const kind = run.ends[end];
       const approach: PortalApproach = kind === "ground" ? "ground" : kind === "bridge" ? "bridge" : "buffer";
-      const wings = portalWings(this.options.terrain, frame, approach);
-      const natural = naturalHeightM(this.options.terrain, this.lat, P.x, P.y);
-      const cover = Number.isNaN(natural) ? 0 : natural - P.z;
+      const drawn = this.options.groundM;
+      // The wings run to the ground drawn in front of the face (the approach's cutting ends at the portal plane since
+      // the D4 feel-check fixes), so they fit the local cutting.
+      const wings = portalWings(this.options.terrain, frame, approach, drawn ? (x, y) => drawn(x, y) : undefined);
       // The face reaches under the ground in front: a bridge or a low approach needs it deeper.
       const front = naturalHeightM(this.options.terrain, this.lat, P.x - frame.tx * 3, P.y - frame.ty * 3);
       const depth = approach === "ground" ? 1.5 : Math.min(12.7, Math.max(1.5, P.z - (Number.isNaN(front) ? P.z : front) + 1.2));
       const asset = this.registry.get(PORTAL_KIND, portalVariant(wings.left, wings.right, depth), 0);
       for (const g of Object.values(asset.slots)) if (g) place(sink, g, frame);
       counts.portals += 1;
-      // The plug covers the approach cutting's rounded end (its radius grows with the cut) and the mound over a low bore.
-      // The rounded end reaches as far as the relief around the portal needs (`pointCutReachM`), which on a hill rising
-      // behind the face passes the cover at the node: portals sit under up to 8 m since the owner decision 2026-09-28
-      // "M2", and a plug sized by the node's cover alone left a ring of the cut bowl open behind it.
+      // The plug is the mound over the bore where the ground behind the face is lower than the face top (plug.ts): its
+      // region is the mound's footprint over the lowest ground a few metres behind the face, plus the fade band. Since
+      // the D4 feel-check fixes there is no approach bowl to fill (the cutting stops at the portal plane).
       const skyTop = P.z + portalSkylineV(0) + PLUG_UNDER_COPING_M;
-      const bowl = Math.max(3 + 1 + 1.5 * Math.max(0, cover) + 3, pointCutReachM(this.options.terrain, P.x, P.y, P.z) + 1);
-      const rise = Math.max(0, skyTop - (Number.isNaN(natural) ? P.z : natural));
-      const depthM = Math.min(45, plugCapM, Math.max(10, bowl, MOUND_FLAT_M + MOUND_END_RUN * rise + 1));
-      const halfWidthM = Math.min(45, Math.max(8, bowl, PORTAL_HALF_WIDTH_M + Math.max(wings.left, wings.right) + 1.5, MOUND_CROWN_HALF_M + MOUND_SIDE_RUN * rise + 1));
-      const drawn = this.options.groundM;
+      const behind = this.groundM(P.x + frame.tx * (MOUND_FLAT_M - 1), P.y + frame.ty * (MOUND_FLAT_M - 1));
+      const rise = Math.max(0, skyTop - (Number.isNaN(behind) ? P.z : Math.min(behind, skyTop)));
+      const depthM = Math.min(45, plugCapM, Math.max(10, MOUND_FLAT_M + MOUND_END_RUN * rise + PLUG_FADE_M + PLUG_EDGE_M));
+      const halfWidthM = Math.min(45, Math.max(8, PORTAL_HALF_WIDTH_M + Math.max(wings.left, wings.right) + PLUG_FADE_M + PLUG_EDGE_M, MOUND_CROWN_HALF_M + MOUND_SIDE_RUN * rise + PLUG_FADE_M + PLUG_EDGE_M));
       const plug = new HillPlug(this.options.terrain, this.shading, frame, wings, depthM, halfWidthM, drawn ? (x, y) => drawn(x, y) : undefined);
       plugs.push(plug);
       const pm = this.plugMesh(plug);

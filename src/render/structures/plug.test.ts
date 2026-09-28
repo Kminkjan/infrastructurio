@@ -43,16 +43,71 @@ describe("hill plug", () => {
     expect(Number.isNaN(plug.heightAt(100 - 2, 90))).toBe(true);
   });
 
-  it("fills a deep cutting's end up to a 1 : 1.5 slope from the face top, meeting the hill where it does", () => {
+  it("draws nothing on a deep portal, whose drawn hill already stands over the face (no bowl to fill since the cutting stops at the portal plane)", () => {
     const { terrain, shading, frame } = site(400);
     const plug = new HillPlug(terrain, shading, frame, { left: 12, right: 12 }, 40, 30);
-    const face = frame.z + PORTAL_TOP_V + PLUG_UNDER_COPING_M;
-    // At the face the rising hillside and the mound meet, and the smooth maximum rounds them by at most k/4 = 0.15 m.
-    const atFace = plug.heightAt(100 + 1, 90);
-    expect(atFace).toBeGreaterThanOrEqual(face + PLUG_LIFT_M - 1e-9);
-    expect(atFace).toBeLessThanOrEqual(face + PLUG_LIFT_M + 0.15 + 1e-9);
-    expect(plug.heightAt(100 + 10, 90)).toBeCloseTo(face + 9 / 1.5 + PLUG_LIFT_M, 9);
-    expect(plug.heightAt(100 + 35, 90)).toBeCloseTo(40 + PLUG_LIFT_M, 9);
+    expect(plug.data.triangleCount).toBe(0);
+    expect(plug.heightAt(100 + 10, 90)).toBeCloseTo(40 + PLUG_LIFT_M, 9);
+  });
+
+  it("meets the drawn ground along its whole outline, within the lift: no tear (D4 feel-check fixes)", () => {
+    const { terrain, shading, frame } = site(200);
+    // The drawn ground: the natural 20 m, cut by a neighbour's 6 m-deep cutting across the plug (8–14 m right of the bore).
+    const drawn = (x: number, y: number) => {
+      const u = 90 - y;
+      return u > 8 && u < 14 ? 14 : 20;
+    };
+    for (const [depth, half] of [
+      [30, 20],
+      [12, 9],
+    ] as const) {
+      const plug = new HillPlug(terrain, shading, frame, { left: 6, right: 6 }, depth, half, drawn);
+      const d = plug.data;
+      expect(d.triangleCount).toBeGreaterThan(50);
+      // Edges used once are the plug's outline: every vertex there lies at the drawn ground plus the lift.
+      const key = (v: number) => `${(d.positions[3 * v] ?? 0).toFixed(4)},${(d.positions[3 * v + 2] ?? 0).toFixed(4)}`;
+      const uses = new Map<string, number>();
+      const edge = (a: number, b: number) => [key(a), key(b)].sort().join("|");
+      for (let t = 0; t < d.triangleCount; t++) for (const [a, b] of [[0, 1], [1, 2], [2, 0]] as const) uses.set(edge(3 * t + a, 3 * t + b), (uses.get(edge(3 * t + a, 3 * t + b)) ?? 0) + 1);
+      let outline = 0;
+      let worst = 0;
+      for (let t = 0; t < d.triangleCount; t++) {
+        for (const [a, b] of [[0, 1], [1, 2], [2, 0]] as const) {
+          if (uses.get(edge(3 * t + a, 3 * t + b)) !== 1) continue;
+          for (const v of [3 * t + a, 3 * t + b]) {
+            const x = d.positions[3 * v] ?? 0;
+            const y = -(d.positions[3 * v + 2] ?? 0);
+            // In front of the face the plug is closed by the face and the wings; elsewhere it must meet the ground.
+            if (x - frame.x <= PLUG_START_M + 1e-3 && Math.abs(y - frame.y) <= PORTAL_HALF_WIDTH_M + 6 + 1e-3) continue;
+            outline += 1;
+            worst = Math.max(worst, Math.abs((d.positions[3 * v + 1] ?? 0) - PLUG_LIFT_M - drawn(x, y)));
+          }
+        }
+      }
+      expect(outline).toBeGreaterThan(20);
+      expect(worst, `plug ${depth} × ${half}`).toBeLessThan(0.01 + 1e-6);
+    }
+  });
+
+  it("never refills a neighbour's cutting: over it the plug is the drawn ground or the mound, never the natural hill", () => {
+    const { terrain, shading, frame } = site(200);
+    const drawn = (x: number, y: number) => (90 - y > 8 && 90 - y < 14 ? 14 : 20);
+    const plug = new HillPlug(terrain, shading, frame, { left: 6, right: 6 }, 30, 20, drawn);
+    let checked = 0;
+    for (let s = 1; s < 29; s += 0.5) {
+      for (let u = 8.5; u < 13.5; u += 0.5) {
+        const h = plug.heightAt(100 + s, 90 - u) - PLUG_LIFT_M;
+        // At most the higher of the cutting's floor and the mound (plus the smooth maximum's k/4), so wherever the
+        // mound is lower than the natural 20 m the cutting stays cut; the D4 render's plug put the natural hill back.
+        const m = plug.mound(s, u);
+        expect(h).toBeLessThanOrEqual(Math.max(14, m) + 0.15 + 1e-9);
+        if (m < 18) {
+          checked += 1;
+          expect(h).toBeLessThan(19);
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(40);
   });
 
   it("faces every triangle up, starts at the face line, and marks made ground for the terrain shader", () => {
