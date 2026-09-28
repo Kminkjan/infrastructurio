@@ -525,6 +525,10 @@ export class StructureView {
     const plugMeshes: Mesh[] = [];
     const counts = { arch: 0, solid: 0, truss: 0, girder: 0, piers: 0, abutments: 0, portals: 0 };
     let topZ = -Infinity;
+    const open = [0, 1].filter((end) => isPortalEnd(this.options.terrain, run, end as 0 | 1)).length;
+    // A plug reaches at most half-way to the other portal, whose own plug covers the rest (the whole run at a dead
+    // end), so a larger plug never spills over the other portal's face and wings.
+    const plugCapM = open === 2 ? path.lengthM / 2 : path.lengthM;
     for (const end of [0, 1] as const) {
       if (!isPortalEnd(this.options.terrain, run, end)) continue;
       path.at(end === 0 ? 0 : path.lengthM, P);
@@ -548,7 +552,7 @@ export class StructureView {
       const skyTop = P.z + portalSkylineV(0) + PLUG_UNDER_COPING_M;
       const bowl = Math.max(3 + 1 + 1.5 * Math.max(0, cover) + 3, pointCutReachM(this.options.terrain, P.x, P.y, P.z) + 1);
       const rise = Math.max(0, skyTop - (Number.isNaN(natural) ? P.z : natural));
-      const depthM = Math.min(45, Math.max(10, bowl, MOUND_FLAT_M + MOUND_END_RUN * rise + 1));
+      const depthM = Math.min(45, plugCapM, Math.max(10, bowl, MOUND_FLAT_M + MOUND_END_RUN * rise + 1));
       const halfWidthM = Math.min(45, Math.max(8, bowl, PORTAL_HALF_WIDTH_M + Math.max(wings.left, wings.right) + 1.5, MOUND_CROWN_HALF_M + MOUND_SIDE_RUN * rise + 1));
       const drawn = this.options.groundM;
       const plug = new HillPlug(this.options.terrain, this.shading, frame, wings, depthM, halfWidthM, drawn ? (x, y) => drawn(x, y) : undefined);
