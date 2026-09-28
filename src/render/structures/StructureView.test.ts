@@ -282,6 +282,96 @@ describe("structure view", () => {
   });
 });
 
+describe("structure view: a tunnel dead end's portal after a later cutting (verification fix, 2026-09-29)", () => {
+  // Flat 0 m west of column 30, an 11 m plateau for columns 30–50, 8.8 m for columns 51–90.
+  const plateau = makeTerrain(120, 60, (_q, _r, col) => (col < 30 ? 0 : col <= 50 ? 110 : 88), -100);
+  const plateauShading = computeTerrainShading(plateau);
+  const row = (r: number, col0: number, count: number, zMm: number): PieceSpec[] => straights(col0 - Math.floor(r / 2), r, count, zMm);
+
+  /** An EarthworksView and a StructureView over the world, wired as `src/app/main.ts` wires them. */
+  function views() {
+    const registry = new AssetRegistry();
+    registerStructureAssets(registry);
+    const earthworks = new EarthworksView({ terrain: plateau, target: { shading: plateauShading, replaceChunk: () => true }, requestFrame: () => {}, now: () => 0, budgetMs: Infinity });
+    const view = new StructureView({
+      terrain: plateau,
+      registry,
+      material,
+      plugMaterial: material,
+      shading: plateauShading,
+      water: waterPlane(plateau, plateauShading.waterDistance),
+      requestFrame: () => {},
+      now: () => 0,
+      groundM: (x: number, y: number) => earthworks.heightfield.heightAtM(x, y),
+      effectiveIn: (box: { minX: number; minY: number; maxX: number; maxY: number }) => earthworks.effectiveIn(box),
+      cutEnvelopeIn: (box: { minX: number; minY: number; maxX: number; maxY: number }, except: readonly string[]) => earthworks.cutEnvelopeIn(box, except),
+      notchBox: (key: string) => earthworks.notchBox(key),
+      ground: earthworks.ground,
+    });
+    return { earthworks, view };
+  }
+
+  it("draws the portal a fresh view draws once a cutting 13 m away lowers the ground at the dead end, and after undo", () => {
+    const world = createWorld(plateau);
+    const run = (cmd: Command) => expect(world.run(cmd, true).ok).toBe(true);
+    // The frame order of main.ts: the earthworks, then the structures; refreshGround once the surface lands.
+    const settle = (v: ReturnType<typeof views>) => {
+      const network = world.network() as NetworkView;
+      for (let i = 0; i < 200 && (v.earthworks.sync(network, world.ground()) || v.earthworks.busy); i++);
+      for (let i = 0; i < 200 && (v.view.sync(network) || v.view.busy); i++);
+      v.view.refreshGround();
+      for (let i = 0; i < 200 && (v.view.sync(network) || v.view.busy); i++);
+    };
+    const fresh = () => {
+      const v = views();
+      settle(v);
+      const portals = v.view.stats.portals;
+      v.view.dispose();
+      return portals;
+    };
+    const live = views();
+    // Row 20: ground from column 10, then a tunnel into the plateau to a dead end at column 60 under 8.8 m (no portal).
+    run({ type: "build-track", pieces: [...row(20, 10, 19, 0), ...row(20, 29, 31, 0)], structure: "auto" });
+    settle(live);
+    expect(world.network().pieces.filter((p) => p.structure === "tunnel")).toHaveLength(31);
+    expect(live.view.stats.portals).toBe(1);
+    // Row 23 (13 m north, beyond the 12 m neighbour margin): a cutting at 1.0 m lowers the ground at the dead end
+    // under 8 m, so the core counts it a portal. Before, the incremental view kept 1 portal where a fresh one drew 2.
+    run({ type: "build-track", pieces: row(23, 52, 28, 1000), structure: "auto" });
+    settle(live);
+    expect(fresh()).toBe(2);
+    expect(live.view.stats.portals).toBe(2);
+    run({ type: "undo" });
+    settle(live);
+    expect(fresh()).toBe(1);
+    expect(live.view.stats.portals).toBe(1);
+  });
+
+  it("rebuilds from refreshGround when the portal decision moves without a new revision", () => {
+    const world = createWorld(plateau);
+    const run = (cmd: Command) => expect(world.run(cmd, true).ok).toBe(true);
+    const v = views();
+    run({ type: "build-track", pieces: [...row(20, 10, 19, 0), ...row(20, 29, 31, 0)], structure: "auto" });
+    const tunnel = world.network() as NetworkView;
+    for (let i = 0; i < 200 && (v.earthworks.sync(tunnel, world.ground()) || v.earthworks.busy); i++);
+    for (let i = 0; i < 200 && (v.view.sync(tunnel) || v.view.busy); i++);
+    expect(v.view.refreshGround()).toBe(false);
+    run({ type: "build-track", pieces: row(23, 52, 28, 1000), structure: "auto" });
+    // The structures sign the revision before the earthworks have landed it (their ground has no cutting yet)...
+    const network = world.network() as NetworkView;
+    for (let i = 0; i < 200 && (v.view.sync(network) || v.view.busy); i++);
+    expect(v.view.stats.portals).toBe(1);
+    expect(v.view.refreshGround()).toBe(false);
+    // ...then the earthworks land it, and refreshGround finds the dead end now opens to daylight.
+    for (let i = 0; i < 200 && (v.earthworks.sync(network, world.ground()) || v.earthworks.busy); i++);
+    expect(v.view.refreshGround()).toBe(true);
+    for (let i = 0; i < 200 && (v.view.sync(network) || v.view.busy); i++);
+    expect(v.view.stats.portals).toBe(2);
+    expect(v.view.refreshGround()).toBe(false);
+    v.view.dispose();
+  });
+});
+
 describe("structure rebuild cost on the diorama (a dev measurement, not a gate)", () => {
   it("times the capture sites' runs and 10-piece bridge edits", async ({ annotate }) => {
     const { generateTerrain, DEFAULT_TERRAIN_SIZE } = await import("../../core/sim/api");

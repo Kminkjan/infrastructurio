@@ -117,6 +117,11 @@ interface QueuedRun {
   readonly signature: string;
   /** Keys of the other pieces near a bridge run (its layout reads their centrelines). */
   readonly neighbours: readonly string[];
+  /**
+   * A tunnel run's ends that open to daylight (`isPortalEnd`, over the core's effective ground when it was signed):
+   * part of the signature, since a later cutting can move a buffer end's ground without touching the run.
+   */
+  readonly portalEnds: readonly (0 | 1)[];
 }
 
 interface BuiltRun extends QueuedRun {
@@ -132,6 +137,10 @@ interface BuiltRun extends QueuedRun {
   readonly counts: { arch: number; solid: number; truss: number; girder: number; piers: number; abutments: number; portals: number };
   readonly triangles: number;
   readonly topZ: number;
+}
+
+function samePortalEnds(a: readonly (0 | 1)[], b: readonly (0 | 1)[]): boolean {
+  return a.length === b.length && a.every((end, i) => end === b[i]);
 }
 
 /** What a pick proxy carries: its piece and its chord on the sim plan with the track heights at both ends. */
@@ -300,16 +309,26 @@ export class StructureView {
   }
 
   /**
-   * Re-checks every pier and abutment foot, and every hill plug, against the ground as drawn now; a run whose
-   * feet would show (a cutting beside it landed after it was built), or whose plug's ground changed (the
-   * approach's cutting landed), is rebuilt. The app calls it when the earthworks finish a revision. Returns
+   * Re-checks every pier and abutment foot, and every hill plug, against the ground as drawn now, and every tunnel
+   * buffer end's portal decision against the core's effective ground; a run whose feet would show (a cutting beside
+   * it landed after it was built), whose plug's ground changed (the approach's cutting landed), or whose dead end now
+   * opens or closes, is rebuilt. The app calls it when the earthworks finish a revision. Returns
    * true when anything was queued.
    */
   refreshGround(): boolean {
     const groundM = this.options.groundM;
-    if (!groundM || !this.network) return false;
+    const network = this.network;
+    if (!network) return false;
     let queued = false;
     for (const b of this.built.values()) {
+      // A buffer end's portal decision reads the effective ground there, which a cutting beyond the neighbour margin
+      // can move (verification fix, 2026-09-29): re-signed, so the next revision's diff agrees with what is built.
+      if (b.run.ends.includes("buffer") && !samePortalEnds(this.portalEndsOf(b.run), b.portalEnds)) {
+        this.queue.push(this.signatureOf(b.run, network));
+        queued = true;
+        continue;
+      }
+      if (!groundM) continue;
       if (b.plugs.some((p, i) => p.groundSignature() !== b.plugGround[i])) {
         this.queue.push(b);
         queued = true;
@@ -468,7 +487,14 @@ export class StructureView {
       near.push(p.key);
     }
     near.sort();
-    return { run, signature: `${run.key}|${ends}|${near.join(";")}`, neighbours: near };
+    const portalEnds = this.portalEndsOf(run);
+    return { run, signature: `${run.key}|${ends}|${portalEnds.join("")}|${near.join(";")}`, neighbours: near, portalEnds };
+  }
+
+  /** A tunnel run's ends that open to daylight now (the core's portal definition, over its effective ground). */
+  private portalEndsOf(run: StructureRun): (0 | 1)[] {
+    if (run.structure !== "tunnel") return [];
+    return ([0, 1] as const).filter((end) => isPortalEnd(this.options.terrain, run, end, this.options.ground ?? null));
   }
 
   private buildRun(q: QueuedRun): void {
@@ -566,9 +592,9 @@ export class StructureView {
     let topZ = -Infinity;
     const terrain = this.options.terrain;
     const drawn = this.options.groundM;
-    // The ends that open to daylight (the core's portal definition, over its effective ground), each with its frame.
-    const ends = ([0, 1] as const).filter((end) => isPortalEnd(terrain, run, end, this.options.ground ?? null));
-    const portals = ends.map((end) => {
+    // The ends that open to daylight, as signed (the core's portal definition, over its effective ground), each with
+    // its frame.
+    const portals = q.portalEnds.map((end) => {
       path.at(end === 0 ? 0 : path.lengthM, P);
       const dir = end === 0 ? 1 : -1;
       const frame: PortalFrame = { x: P.x, y: P.y, z: P.z, tx: dir * P.tx, ty: dir * P.ty };
