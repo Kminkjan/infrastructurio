@@ -333,7 +333,12 @@ export function clearances(g: PieceGround, z0Mm: number, z1Mm: number): Clearanc
 
 /** The structure `auto` gives a piece with node heights z0 → z1 (see the module comment). */
 export function inferStructure(g: PieceGround, z0Mm: number, z1Mm: number): Structure {
-  const { aboveMm, belowMm, overWater, underWater } = clearances(g, z0Mm, z1Mm);
+  return structureFor(clearances(g, z0Mm, z1Mm));
+}
+
+/** The structure `auto` gives a piece with clearances `c` (`inferStructure`, for a caller that has them already). */
+export function structureFor(c: Clearances): Structure {
+  const { aboveMm, belowMm, overWater, underWater } = c;
   if (overWater) return "bridge";
   if (underWater) return "tunnel";
   const up = aboveMm > GROUND_BAND_MM;

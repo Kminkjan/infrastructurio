@@ -28,12 +28,13 @@ import {
   TUNNEL_COVER_MM,
   TUNNEL_MIN_PEAK_COVER_MM,
   WATER_CLEARANCE_MM,
+  type Clearances,
   clearances,
-  inferStructure,
   isAbutment,
   isPortal,
   pieceGround,
   structureFault,
+  structureFor,
 } from "./structure";
 
 /**
@@ -573,7 +574,7 @@ function structureMessage(fault: StructureFault, noun: string): string {
  * anywhere, or has a piece more than 8 m above the terrain (which the ground rule would reject). Replaces the pieces
  * in `p.added` and returns the indices made ground, whose ground rule then takes cuttings to 10 m.
  */
-function shallowTunnelRuns(ctx: TrackContext, p: Prepared, grounds: readonly PieceGround[]): ReadonlySet<number> {
+function shallowTunnelRuns(ctx: TrackContext, p: Prepared, extents: readonly (Clearances | undefined)[]): ReadonlySet<number> {
   const made = new Set<number>();
   const byNode = new Map<string, number[]>();
   p.added.forEach((piece, i) => {
@@ -609,13 +610,11 @@ function shallowTunnelRuns(ctx: TrackContext, p: Prepared, grounds: readonly Pie
     let keep = false;
     let peakMm = Number.NEGATIVE_INFINITY;
     for (const i of run) {
-      const piece = p.added[i];
-      const g = grounds[i];
-      if (!piece || !g) {
+      const c = extents[i];
+      if (!c) {
         keep = true;
         break;
       }
-      const c = clearances(g, piece.ends[0].node.zMm, piece.ends[1].node.zMm);
       if (c.underWater || c.overWater || c.aboveMm > GROUND_BAND_MM) {
         keep = true;
         break;
@@ -661,14 +660,22 @@ function terrainStructure(ctx: TrackContext, p: Prepared): Rejection | null {
   }
   const grounds: PieceGround[] = p.added.map((piece) => pieceGround(terrain, piece, ground, clip));
   const choice = p.choice;
+  // Under auto, each added piece's clearances, which inference and the 10 m rule both read.
+  const extents: (Clearances | undefined)[] = [];
   if (choice !== null) {
     p.added.forEach((piece, i) => {
       const g = grounds[i];
-      const structure = choice !== "auto" ? choice : g ? inferStructure(g, piece.ends[0].node.zMm, piece.ends[1].node.zMm) : piece.structure;
+      let structure: Structure = piece.structure;
+      if (choice !== "auto") structure = choice;
+      else if (g) {
+        const c = clearances(g, piece.ends[0].node.zMm, piece.ends[1].node.zMm);
+        extents[i] = c;
+        structure = structureFor(c);
+      }
       if (structure !== piece.structure) p.added[i] = Object.freeze({ ...piece, structure });
     });
   }
-  const deepCuts = choice === "auto" ? shallowTunnelRuns(ctx, p, grounds) : NO_INDICES;
+  const deepCuts = choice === "auto" ? shallowTunnelRuns(ctx, p, extents) : NO_INDICES;
   const removed = new Set(p.removed.map((r) => r.key));
   // The added pieces by node, built only when a portal or abutment walk first needs them.
   let addedAt: Map<string, Piece[]> | null = null;
