@@ -55,7 +55,7 @@ Module paths are relative to `src/core/`. Tracking keys D1–D13 come from
 | Terrain | `terrain.ts` | S3 | D1 | **Implemented** in D1, 20 test cases, golden hash (§7); generator version 2 in D11a, 23 test cases |
 | Static diorama scenery | `scenarios/` | — | D11a | **Implemented** in D11a: seeded, integer-only layout for the lookdev spike (no sim behaviour), 21 test cases with a golden hash |
 | Pieces and templates | `geometry/templates.ts`, `piece.ts`, `sample.ts` | S2 | D2 | **Implemented** in D2: 12 straights, 720 oriented curves, 24 shifts; closure and reachability tested ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d2-track-model)) |
-| Authored state, validation, clearance, history | `track/`, `geometry/clearance.ts` | S3 | D2, D4 | **Implemented** in D2 for the 11 D2-owned codes; D4's core half (2026-09-28, branch `codex/d4-structures-core`) adds the grade, terrain/structure (`track/structure.ts`) and vertical-clearance rules: 18 codes; the D4 thresholds of the owner decision "M2" (2026-09-28, branch `codex/d4-structures`): a ±8 m band, decks 2 m into the bank near abutments |
+| Authored state, validation, clearance, history | `track/`, `geometry/clearance.ts` | S3 | D2, D4 | **Implemented** in D2 for the 11 D2-owned codes; D4's core half (2026-09-28, branch `codex/d4-structures-core`) adds the grade, terrain/structure (`track/structure.ts`) and vertical-clearance rules: 18 codes; the D4 thresholds of the owner decision "M2" (2026-09-28, branch `codex/d4-structures`): a ±8 m band, decks 2 m into the bank near abutments; the D4 tunnel and portal iteration (2026-09-28): a tunnel needs 10 m of cover somewhere, and portals retain the hill in the effective ground (`track/portal.ts`) |
 | Planner | `track/planner.ts` | S4 | D3, D4 | **Implemented** in D3 (2026-09-27, PR #82): one-bend, shift and two-bend fits (into ports, and as the fallback for free drags), magnetism, precision, elevation (pinned to existing node heights); 80 test cases in three files (§8). D4 (2026-09-28, same branch): heights within 35‰ and auto-grade (`Drag.heightMode`) |
 | Derived network, entity commands | `network/derive.ts`, `graph.ts` | S5 | D2, D5–D7 | **Partial**: D2's `derive` (through and buffer nodes, sections split at buffers); junctions and entities planned |
 | Pathfinding | `network/pathfind.ts` | S6 | D8 | Planned |
@@ -331,6 +331,16 @@ and its [version 2 note](decisions/0010-triangular-lattice-track-geometry.md#fin
   cutting is judged against the cutting as drawn
   ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-feel-check-fixes)).
   Water stays the natural terrain's.
+- **Portals retain the hill (2026-09-28, the D4 tunnel and portal iteration).** Behind a
+  tunnel end the approach cutting's 45° headwall used to start at the track bed, so the
+  effective ground behind every portal face lay 3–5 m under the hill the player saw. Past a
+  tunnel end's clip plane the cut envelope now starts at the portal's retained skyline, the
+  face top + 0.25 m = 7.65 m above the track over the 8.4 m face, falling 1 : 1.5 beyond
+  ([`track/portal.ts`](../src/core/track/portal.ts)), then rises at 45°. So behind a face the
+  effective ground is the natural hill, trimmed at 45° above the parapet where the hill stands
+  higher; bridge, buffer and fill envelopes are unchanged. The renderer's terrain mesh keeps
+  the earlier headwall as an underlay and draws the retained hill as the portal's plug
+  ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-tunnel-and-portal-iteration)).
 
 ## 8. Planner
 
@@ -555,7 +565,7 @@ tracks.
 | | `no-fit` | no straights + template (or two-bend) combination closes on the lattice | move the end or change the end heading |
 | 3 Grade | `grade-too-steep` | a piece above 35‰ | the length needed at 35‰ (e.g. a 6.5 m climb needs ≥ 186 m) |
 | 4 Terrain and structure | `needs-bridge` | a ground piece more than 8 m above terrain (4 m until M2), or over water | use a bridge or lower the track |
-| | `needs-tunnel` | a ground piece more than 8 m below terrain (h − z > 8 m; 4 m until M2) | use a tunnel or raise the track |
+| | `needs-tunnel` | a ground piece more than 8 m below terrain (h − z > 8 m; 4 m until M2; 10 m for a run the 10 m tunnel rule made ground, 2026-09-28) | use a tunnel or raise the track |
 | | `bridge-below-ground` | a bridge deck below terrain: more than 2 m, or at all farther than 15 m along the track from an abutment (M2; any dip until then) | raise the deck or build on ground |
 | | `bridge-too-low-over-water` | a deck below water level + 4.0 m | raise the deck |
 | | `tunnel-too-shallow` | cover h − z < 6 m, except within 10 m of a portal | go deeper or build a cutting |
@@ -590,6 +600,16 @@ tracks.
 
   Then that structure's own rule applies. `needs-bridge` and `needs-tunnel` arise when
   ground is forced.
+- **A tunnel needs 10 m somewhere** (owner decision 2026-09-28, "Needs 10 m somewhere (Recommended)":
+  "A tunnel must lie ≥10 m under the ground somewhere; shallower runs stay cuttings (up to 10 m
+  deep)"). After the per-piece inference, rule 4 takes each maximal run of added pieces
+  inferred as tunnel, joined node to node, so command order does not matter. A run whose
+  deepest cover stays under 10 m (`TUNNEL_MIN_PEAK_COVER_MM`) becomes ground, a cutting whose
+  ground rule allows 10 m. A run stays a tunnel when it joins a committed tunnel, runs under or
+  over water, or has a piece more than 8 m above the terrain. Forced structures and the band
+  are otherwise unchanged: a forced ground piece is a cutting to 8 m, a forced tunnel needs
+  only more than 8 m somewhere. No reason code changed
+  ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-tunnel-and-portal-iteration)).
 - **As built (D4, 2026-09-28; defaults to test,
   [ADR 0010 D4 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-grades-and-structures)):**
   - **Grade:** an added piece fails when |num| > 35 · den on its exact rational grade. The
@@ -628,7 +648,12 @@ tracks.
     35‰), `out-of-bounds` 32, `bridge-below-ground` 29, `tunnel-too-shallow` 18. **With the
     effective ground** (2026-09-28, the same drags): unchanged, 88.7% and 95.3%. The same
     drags as straight lines: 82.8% accepted, 89.2% of the free drags, with
-    `bridge-too-low-over-water` 177 (lines leaving low banks) the main cause.
+    `bridge-too-low-over-water` 177 (lines leaving low banks) the main cause. **With portals
+    retaining the hill and the 10 m tunnel rule** (2026-09-28, the same drags): Track 1,503
+    of 1,690 accepted (88.9%), Straight line 1,406 (83.2%); `tunnel-too-shallow` 18 → 14 and
+    22 → 13; tunnel runs 77 → 54 and 84 → 52, none shorter than 20 m, and no through-tunnel
+    under 40 m is left; 27 Track and 41 Straight drags now have cuttings 8–9.9 m deep. The
+    retain rule alone moved no number.
 - **Rule 6 details.**
   - Exemptions: shared nodes, turnout fans and diamond arms.
   - Broadphase: an incremental spatial hash with 20 m cells.
@@ -1073,6 +1098,12 @@ decide them.
      than 6 m is a portal itself, so the cover rule binds only between nodes
      ([ADR 0010 M2 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-thresholds-m2)).
      #68's body still states ±4 m.
+   - **Status 2026-09-28, after the owner decision "Needs 10 m somewhere" (automated, the D4
+     tunnel and portal iteration):** the fixture now counts a line as needing a tunnel when its
+     highest 35‰ profile has a node at least 10 m under the ground (8–10 m is a cutting). The committed
+     fixture finds 250 such lines in 40,000 tries, and the planner and the deepest profile
+     build all of them
+     ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-tunnel-and-portal-iteration)).
 5. **Command gaps.**
    - `place-platform` carries no side, yet `no-room-for-platform` and island platforms
      imply one. Recommend adding `side: left | right | island`.

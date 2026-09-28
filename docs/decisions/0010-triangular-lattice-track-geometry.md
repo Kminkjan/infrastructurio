@@ -1800,6 +1800,196 @@ accepts no ADR.
   curve samples and the effective ground decide identically across JavaScript engines; timings on the gate
   hardware.
 
+## Findings (2026-09-28, D4 tunnel and portal iteration)
+
+Recorded 2026-09-29 on branch `codex/d4-structures` (draft PR [#84](https://github.com/Kminkjan/infrastructurio/pull/84)),
+from `41f6a4b`, code at `b3431bd`, `17bfb27`, `ee85ffd` and `ec9d225` (core, 2026-09-28), `6e969e4`, `a858f67`,
+`3ad29aa` and `31917c8` (render) and `5b04d6a` and `a67a290` (tools),
+[#68](https://github.com/Kminkjan/infrastructurio/issues/68). Measurements are automated (Vitest 4.1.10, Node 26.7.0,
+macOS 26.6.2, Apple M5 Pro) unless labelled agent (Playwright 1.63.0, headless system Chrome, same machine). The
+status of this ADR stays Proposed: the owner's answers below change D4's tunnel rule, the portal's shape and the
+Straight line's feedback, and accept no ADR. Nothing here is human evidence.
+- **Owner feedback (2026-09-28, as relayed to the implementing agents), the second feel check of D4: "Not
+  yet".** The owner picked "Earthworks/terrain look off" and "Straight line tool odd", typed "Still some terrain
+  friction wa" (cut off: the rest never arrived, so part of the complaint may not be covered here), and sent two
+  screenshots (not committed). The diagnosis read them as a thin portal wall with no bore, a dark rectangular
+  smudge and a dark block at the wall's end; and two portals facing each other under flat ground with wedges above
+  it (the agents' reading, not the owner's words).
+- **Owner answers (2026-09-28, in conversation via the question tool, after the diagnosis; option labels and
+  descriptions verbatim):**
+  1. Tunnel rule. Question: "Short tunnels under a flat crest (your 2nd screenshot): with your ±8 m band, a line a
+     few cm deeper than 8 m becomes a tunnel (yours peaked at 8.13 m). Should a tunnel have to be clearly deeper
+     before it gets portals?"
+     Answer: "Needs 10 m somewhere (Recommended)": "A tunnel must lie ≥10 m under the ground somewhere; shallower
+     runs stay cuttings (up to 10 m deep). Estimated: short through-tunnels under 40 m go to 0 for both tools;
+     tunnel runs 84→52 (Straight), 77→54 (Track). Your 20 m tunnel becomes one continuous cutting."
+  2. Low portals. Question: "Where the hill behind a portal is lower than the 7.4 m portal face (about 38% of
+     portals), what should back the face?"
+     Answer: "Compact backfill (Recommended)": "Fill reaches the face top only across the 8.4 m-wide bore, then
+     slopes 1:1.5 down to the real hill; beyond the bore it never stands above its wing wall. Raised ground ≥1 m
+     above the hill shrinks e.g. 168→40 m² in your first scene. A 1.9–2.6 m bank stays at the downhill corner."
+  3. Edge-on view. Question: "Every portal on an east–west line is exactly edge-on at the rest view (all main
+     headings are edge-on at 2 of the 6 camera angles), so it shows as a thin line with no bore, like your first
+     screenshot. The camera itself is Accepted (ADR 0009). Should the portal's shape change?"
+     Answer: "Splayed wing walls (Recommended)": "Turn the wing walls ~30° toward the approach, so some masonry
+     shows at 4 of 6 camera angles instead of 2. Short (~4–6 m), not the huge diagonal wings you disliked before
+     (those were a 23–25 m sizing bug)."
+  4. Straight end. Question: "Straight line: when the 3.5% limit can't reach the ground under the pointer, the end
+     silently moves to the limit (36% of drags; median 3.9 m, up to 22.7 m). What should the tool do?"
+     Answer: "Keep the limit, show it (Recommended)": "Same lines, made visible: a drop line from the held end to
+     the ground, the tooltip says e.g. 'End held 11.2 m below the ground by the 3.5% limit', and [ ] announce the
+     limit. Very deep ends still become dead-end tunnels or bridges ending in the air."
+- **Root causes** (the diagnosis at `41f6a4b`: agent browser runs on their own Vite ports and automated Node
+  probes; the owner's exact drags were not found). Reproductions: facing portals s208, Straight (208, 146) →
+  (232, 146); thin wall s231, Straight (231, 137) → (255, 137); a clamped dead end, scene B, Straight (220, 140) →
+  (236, 140).
+  - **Facing portals.** (1) A threshold tunnel: s208's 20 m tunnel had 8.13 m of natural cover at its deepest,
+    under a crest varying by 0.6 m; every through-tunnel under 40 m in the committed population had 8.0–8.7 m of
+    cover, and 22% of Straight through-tunnels peaked at 8.5 m or less. (2) A pit behind every portal: the 45°
+    headwall that ends an approach cutting started at the track bed at the portal plane, so behind each face both
+    the core's effective ground and the drawn ground lay 3–5 m under the hill (s208: 4.83 and 5.18 m of cover where
+    the hill gave 8.10 and 8.05 m), and later drags, the tool's start height and rule 4 were judged against it.
+    (3) The plug was a ridge in that pit: crown fixed at the face top, faded out 1.5–3.5 m inside a rectangle and
+    capped at half the run, up to 7.09 m over the pit floor with V-troughs up to 2.7 m under the natural ground;
+    its chevron edges caught the sun on one portal (sun term 0.88) and not the other (0.07); on tunnels of 10 m or
+    less up to 2.4 m of bore lining showed through.
+  - **Thin wall.** (1) Edge-on: the six yaws look along odd headings, so a portal on a primary heading is edge-on
+    at yaws 0 and 3 and seen from behind at 1 and 2, where the single-sided face, wings and bore are not drawn;
+    only the coping tops showed (about 0.7 m, 8 px at Close). Geometry plus the Accepted ADR 0009, not a code bug.
+    (2) A runaway downhill wing: on side slopes falling 0.42–0.59 m per metre the 1 : 1.5 wing ran 23–24.25 m (cap
+    25 m); with the foot fixed at −1.5 m, past |u| ≈ 17.55 m the panel stood over its own coping, and the end pier
+    became a 6.4–6.8 m post (the dark block). (3) A slab: the plug's 1 : 2 flank never met the steeper hillside and
+    its region grew with the wing (half width 30.7–31.95 m), so it stood 2.57–2.7 m over the natural ground, cut off
+    square, shaded smooth and dark by tilted normals with the relief facets off (the smudge). (4) A buried
+    buffer-end portal: render opened one under up to 12 m of cover, the core counts a portal only within the 8 m
+    band; 28 of the 30 render buffer portals lay in that gap. The tan patches are the terrain's own colouring
+    (bare-terrain captures).
+  - **Straight line odd.** The planner moved the end silently to the 35‰ limit in 603 of 1,688 drags (35.7%),
+    median 3.89 m, up to 22.69 m; the tooltip's end height was the only cue. While held, `[` and `]` changed nothing
+    visible (`present()` returned early on an unchanged view), and the hidden step count drifted (+3 → −10 over 16
+    presses) and carried into the next chained drag.
+- **As built, core** ([`track/portal.ts`](../../src/core/track/portal.ts),
+  [`track/earthworks.ts`](../../src/core/track/earthworks.ts), [`track/ground.ts`](../../src/core/track/ground.ts),
+  [`track/structure.ts`](../../src/core/track/structure.ts), [`track/validate.ts`](../../src/core/track/validate.ts)):
+  - **Portals retain the hill.** The portal outline moved into the core (face half width 4.2 m, face top 7.4 m,
+    wings at 1 : 1.5, the hill retained 0.25 m over the face top: `portalSkylineV`, `portalRetainV`), exported
+    through `sim/api.ts`. Past a tunnel end's fixed clip plane (`ClipPlane.tunnel`, with the track height `zM`) the
+    cut envelope is U = max(bed + section, z + R(u)) + 45° · t, with R(u) = 7.65 m over |u| ≤ 4.2 m, falling 1 : 1.5
+    beyond. Where the section is higher it is bit-identical to before; fill, bridge and buffer planes are unchanged.
+    The effective ground (`sim.ground()`, `sim.groundMm`, rule 4, auto-grade) uses this "ground" mode; the
+    envelope's default "underlay" mode keeps the earlier 45° headwall from the bed, which the terrain mesh still
+    draws. The earthworks byte pin held through every core commit.
+  - **A tunnel needs 10 m somewhere** (answer 1). `TUNNEL_MIN_PEAK_COVER_MM` = 10,000. A post-pass in rule 4 takes
+    each maximal run of added pieces inferred as tunnel, joined node to node (so command order does not matter);
+    a run whose deepest cover stays under 10 m becomes ground, a cutting whose ground rule allows 10 m. A run stays
+    a tunnel if it joins a committed tunnel, runs under or over water, or has a piece more than 8 m above the
+    terrain. Forced structures and the ±8 m band are otherwise unchanged, and no reason code changed.
+  - **The core's portal definition is exported:** `isPortal` (a tunnel node within the 8 m band of cover over the
+    effective ground, or the natural terrain without a ground query), which render's buffer-end portals now use.
+- **As built, render** ([`structures/plug.ts`](../../src/render/structures/plug.ts),
+  [`structures/portalOutline.ts`](../../src/render/structures/portalOutline.ts),
+  [`structures/assets.ts`](../../src/render/structures/assets.ts), [art direction](../art-direction.md#portals-plugs-and-approaches-second-feel-check-fixes-2026-09-28)):
+  - **Underlay and shown ground.** The terrain mesh keeps the underlay heights behind portals (a 1.25 m mesh cannot
+    draw a 7.65 m step at the face without grass wedges in front of it); the heightfield hashes did not move. Its
+    shading reads the shown ground, so the byte pin's normal and attribute hashes were re-recorded deliberately
+    (LOD0 `ef2655d1` → `17c1cc93` and `778ca5e3` → `e8933918`; LOD1 `e2453d1e` → `0f96eea6` and `4ed5d1ee` →
+    `8dbbfbbb`).
+  - **The plug draws the difference:** V = max(D, min(max(E, min(B, C)), G + o)), with D the drawn underlay, E the
+    core's effective ground, B the compact backfill, C the other tracks' cut envelopes and G + o a 45° bank from the
+    open front beyond the wings' end piers. It is drawn only where it rises, with no fade band and no rectangle,
+    clipped exactly to the face and wing fronts; a two-portal run splits at mid-run with an exact seam; where it
+    lies on the terrain it takes the terrain's normal and attribute.
+  - **Compact backfill** (answer 2): the retained skyline across the face, flat 1 m behind it; a ridge 0.7 m wide
+    over the bore to its depth (the arch keeps at least 0.5 m of cover, tested); a berm behind each wing at its own
+    coping, then falls of 1 : 1.5; never above its own wing's coping.
+  - **Splayed wings** (answer 3): 30° toward the approach. A wing stops where the hill it retains stands less than
+    0.3 m over the ground in front (the 25 m cap and the neighbour stop kept); its foot is min(−max(1, depth),
+    coping − 2.5 m); the end pier runs from that foot to the coping + 0.5 m. Where a 1 : 1.5 wing could not back a
+    low face, the wing is steep: its coping falls at 45° until it meets the ground (the render agent's choice, not
+    asked for by the owner). The face, cornice and wings have back faces (FrontSide, winding-tested).
+  - **Buffer-end portals** use the core's `isPortal`; render's 12 m rule is gone. Scenery clearing compares the
+    visible surface, so trees on the retained hill stay.
+- **As built, tools** (answer 4; [`src/tools/trackTool.ts`](../../src/tools/trackTool.ts),
+  [`format.ts`](../../src/tools/format.ts), [`GhostView.ts`](../../src/render/track/GhostView.ts)):
+  - **Held end.** In Straight line mode a free end (not snapped, not the track end the pointer is on) that the
+    planner moved more than half a height step off the ground at the end node plus the steps is held. The tooltip
+    adds a line under the metrics, which the aria-live announcement reads too: "End held 11.2 m below the ground by
+    the 3.5 % limit" (above or below; "the water" on a water node), rounded as the end height is. Track never shows
+    it: auto-grade chooses its end, and steps fix it.
+  - **Drop line.** The ghost draws a line from the held end straight up or down to the drawn ground, with a bar
+    across the track there, in `signalAmber` (the grade band's amber), see-through at 0.85 and depth-tested at 0.95,
+    so a buried end reads through the hill (0.5 did not read on the terrain; agent capture).
+  - **Height keys.** A key pressed further into the limit keeps the step count and announces "Height unchanged: end
+    held 11.2 m below the ground by the 3.5 % limit." A key pressed away from it steps from the held end (scene B:
+    `[` puts the end 12 m below the ground at once), where before the first press changed nothing.
+  - **Found on the way** (agent capture, then a unit test): a piece on heading 3, 6 or 7 resolves in its canonical
+    direction, from its travel end back to its `from`, so on a drag west or south the ghost's end-height tags stood
+    at the inner ends of the first and last pieces (a tag read +10.5 m 5 m in from an end the tooltip put at
+    +11.2 m). The ghost's end marks and drop-line stations now read the pieces in travel order; ribbons and track
+    meshes are unchanged.
+- **Re-measured** (the committed generator [`tests/support/autoGrade.ts`](../../tests/support/autoGrade.ts), seed
+  "auto-grade-probe", 1,000 free drags and 150 chains per tool, uncommitted probes; before is `41f6a4b`, after
+  `ec9d225` for the core and the render code at `31917c8`):
+  - The retain rule alone left the whole population report byte-identical.
+  - Accepted, Track: 1,499 → 1,503 of 1,690 (88.7% → 88.9%); free 953 → 954, chain first drags 140 → 140,
+    chained 406 → 409. Straight line: 1,399 → 1,406 (82.8% → 83.2%); free 892 → 896, first 130 → 131, chained
+    377 → 379.
+  - `tunnel-too-shallow` 18 → 14 (Track) and 22 → 13 (Straight). Straight also `bridge-too-low-over-water` 177 →
+    179, `vertical-clearance` 10 → 11, `kinked-join` 7 → 6; every other count unchanged.
+  - Tunnel pieces of accepted drags 766 → 649 (2.9% → 2.5%, Track) and 780 → 614 (3.2% → 2.5%, Straight). Tunnel
+    runs 77 → 54 and 84 → 52 (the answer's estimate: 54 and 52). Through-tunnels under 40 m 4 → 0 and 7 → 0; runs
+    under 40 m 13 → 4 and 16 → 4. Run length p50 79.9 → 100.0 m and 77.9 → 103.9 m, shortest 5.0 → 20.0 m; every
+    tunnel reaches at least 10.1 m of cover.
+  - New cuttings deeper than 8 m: 27 accepted Track drags (p50 8.9 m, max 9.9 m) and 41 Straight ones (p50 8.7 m,
+    max 9.9 m).
+  - s208 and s231 now build as 24 ground pieces each (deepest 8.125 m and 8.68 m natural). With the retain rule alone,
+    the cover 5 m behind s208's faces went 4.82 / 5.18 m → 8.10 / 8.05 m, and s231's 4.83 / 5.18 → 8.30 / 8.05 m.
+    Scene B keeps 9 ground and 7 tunnel pieces (11.2 m at its dead end), and the node behind its portal went from
+    4.82 m to 8.05 m of cover, the natural ground.
+  - Behind every tunnel plane of the populations (69 Track, 66 Straight), effective − min(natural, z + 7.65 + t) ≥
+    −0.148 m for t in (0, 10] m. The predeclared target was −0.01 m: 12 planes per tool miss it, all within the
+    smooth daylight clamp's 0.15 m. Not retuned.
+  - Open point 4 under the 10 m rule (committed test, premise now "a node at least 10 m under"): 250 such lines in
+    40,000 tries; the planner and the deepest profile build all of them.
+  - Portals 90 → 70 (Track) and 86 → 67 (Straight); buffer-end portals 21 → 1 and 20 → 1, the one left under 7.8 m
+    of cover. Wing length p10/p50/p90/max 0.0/5.5/5.7/21.5 → 5.0/6.5/6.5/9.3 m in both tools. The face top stands
+    at least 0.12 m under the visible ground 1.2 m behind it at u = −4, 0 and +4 m (its back does not show there).
+  - Ground more than 1 m above the natural: 1,345 → 859 m² (Track) and 1,312 → 828 m² (Straight); more than 2 m
+    577 → 355 and 576 → 353 m²; per plug p90 61 → 50 m², max 160 → 90 m². The largest fill per portal: p50 0.75 →
+    1.31 m (the fill now reaches the face top at every low portal), max 5.97 → 5.96 m.
+  - Render-only fill (the core does not see the backfill or the fill behind a splayed wing): 43 lattice nodes
+    behind faces (22 portals) and 19 in front of them (18 portals) lie under more than 0.5 m of drawn fill over
+    `sim.groundMm`, 4.07 m at most (Track; Straight 43, 18 and 4.05 m).
+  - Splay: a projection test over the six camera bases finds front masonry at 4 of 6 yaws for a primary-heading
+    portal (the face alone 2); the agent captures of the east–west portal at (267, 129) show masonry at yaws 0, 3,
+    4 and 5.
+  - The held end, at `a67a290`: of the 1,150 Straight line drags planned on an empty network (the free drags and the
+    chains' first drags; chained ones skipped, their ground depends on the chain), 391 (34.0%) show the cue, 196
+    below the ground and 195 above, 353 of them accepted and 34 ending on water; held p50 4.26 m, p90 13.68 m,
+    max 22.69 m.
+- **Performance** (dev readings on a loaded shared machine, interleaved, three rounds; not gates): fixed-list
+  `planTrack` p95 0.61–0.69 → 0.72–0.75 ms, preview p95 0.14–0.16 → 0.16–0.21 ms, all candidates rejected median
+  3.21–3.56 → 3.65–3.88 ms. Structure sync over the population 122 → 226 ms (Track, 2.26 → 4.18 ms per network)
+  and 89 → 164 ms (Straight), earthworks 242 → 307 and 209 → 264 ms; plug triangles 15,449 → 31,857 and 14,841 →
+  30,464; the shipped 43-piece tunnel timing test median about 1.9 → 3.9 ms. Gates are authoritative only in the
+  [acceptance gates](../evidence/m4/2026-09-26-acceptance-gates.md).
+- **Tests** (automated at `a67a290`, 2026-09-29): 795 in 91 files, all passing; Playwright 17 of 17 (agent). Changed
+  expectations, each for a legitimate behaviour change: fixtures and tests whose tunnels peaked under 10 m moved
+  deeper (the auto single-piece tunnel −9 → −10 m, the hill tunnel −3.5 → −5.5 m, a structure-test ridge 9 → 11 m),
+  with the old cases added as cuttings; open point 4's premise; the tunnel e2e scene moved to (254, 129) →
+  (302, 129) and the feel-check e2e with it; the plug tests rewritten for the new model; a 10 m buffer end is no
+  longer a portal; the byte pin's normal and attribute hashes; the feel-check e2e skips only the masonry outline;
+  the Straight line lake test reaches its level deck with three presses of `]`, not four.
+- **Not established:** how any of it reads or feels to the owner (the next feel check), the Look Gates, and the
+  cut-off rest of the owner's message; the −0.01 m retain target at 12 planes per tool; the render-only fill a drag
+  can start under; the steep wings and the 45° bank beyond the end piers (the owner's words were "slopes 1:1.5
+  down to the real hill"), and wings longer than "~4–6 m" (p90 6.5 m, max 9.3 m), which are agent choices to
+  confirm; a short two-portal tunnel in the browser (none left under 40 m in the populations; unit tests only);
+  the diagnosis' pixel check and plug-area targets (their scenes have no tunnels now); whether the aria-live line
+  repeats an identical announcement (the HUD store publishes only a changed status, so a run of equal limit
+  presses may be read once); a cue for Track's auto-graded end, which the limit can hold too; a dead-end cutting
+  8–10 m deep continued later as a tunnel (not probed); timings on the gate hardware.
+
 ## Revisit when
 
 - The D3 feel check finds construction unsatisfying for reasons that planner tuning, chained
@@ -1885,3 +2075,8 @@ accepts no ADR.
   decision "One 'Straight line' tool" verbatim, the reproduced root cause, the effective ground moved into
   the core, chains clipped at structures, the plug, wings and headwall, the Straight line tool, the
   re-measured acceptance, performance, tests, the unchanged colours); status unchanged, still Proposed.
+- 2026-09-29: D4 tunnel and portal iteration findings (the 2026-09-28 section) added (the relayed owner
+  feedback "Not yet" and the owner's four answers verbatim, the diagnosis' root causes, portals retaining the hill
+  and the 10 m tunnel rule in the core, the underlay and shown ground, the compact backfill and splayed wings in
+  render, the Straight line's held end, the ghost's end marks in travel order, re-measured numbers, changed tests);
+  status unchanged, still Proposed.

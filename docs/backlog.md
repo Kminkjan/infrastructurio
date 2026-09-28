@@ -446,6 +446,17 @@ stacked track readable and pickable.
 **Notes.**
 - The toolbar wiring presumes D3 has landed, while the core rules do not.
 - Grade effects on speed (balancing speed on 35‰) are verified in D8.
+- *2026-09-28, the D4 tunnel and portal iteration (branch `codex/d4-structures`, draft PR
+  [#84](https://github.com/Kminkjan/infrastructurio/pull/84)): after the owner's second D4 feel
+  check ("Not yet"), the owner answered four questions: "Needs 10 m somewhere" (an inferred
+  tunnel run must lie at least 10 m under the ground somewhere, else it is a cutting up to
+  10 m deep), "Compact backfill" (behind low portal faces), "Splayed wing walls" (30° toward
+  the approach) and "Keep the limit, show it" (the Straight line's held end is shown, and the
+  height keys keep their steps at the limit). All four are built, and portals now retain the
+  hill in the core's effective ground. The 10 m rule changes the inference criterion above;
+  the issue body, its amendment and every checkbox stay the owner's, and nothing here is a
+  feel-check or Look Gate result
+  ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-tunnel-and-portal-iteration)).*
 
 ## D5 — Turnouts and diamond crossings
 

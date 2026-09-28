@@ -108,7 +108,9 @@ above it; signal green and red are the outer bands), so the table now has 71 tok
 `forestFloor`). Chosen in-house, not yet judged at a look gate. The ghost, snap ring, drop
 lines, end-height tags, rejection highlight and undo flash use the existing build-state and
 UI tokens; the HUD reads them as CSS custom properties that `src/app` sets from `palette.ts`
-at start-up (`src/ui` never imports render).
+at start-up (`src/ui` never imports render). **2026-09-28 (the D4 tunnel and portal
+iteration):** `signalAmber` also colours the ghost's held-end drop line and the tooltip's
+held-end marker (the end the 3.5 % limit holds, the grade band's amber); no token was added.
 
 **Earthworks-lite (2026-09-27):** two in-house tokens join the ground group:
 **earthwork face `#9E8A6C`** (`earthworkFace`, cut and fill slopes) and **earthwork bed
@@ -472,6 +474,14 @@ true bogies.
   plan under the natural ground show only through the 0.2 see-through pass until the plan
   is built, and then the terrain is cut under them. On the diorama that is 25% of
   zero-step curve ribbon samples, and 0.3% of straight ones.
+- **Held end (2026-09-28, owner decision "Keep the limit, show it"; look not judged):** when
+  the 3.5 % limit holds a Straight line's end off the ground, the ghost draws a 1 px line in
+  `signalAmber` from the end straight up or down to the drawn ground, with a bar across the
+  track there, see-through at 0.85 and depth-tested at 0.95, so a buried end reads through the
+  hill; the tooltip's held-end line carries a small amber bar, and its text says the same
+  (colour is not the only signal). Since then the ghost's end-height tags and drop-line
+  stations also read each piece in travel order: on a drag west or south they stood at the
+  inner ends of the end pieces ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-tunnel-and-portal-iteration)).
 - Recommended: give ribbons a minimum screen width so blocks still read at Region and Far.
   D7 sets the value.
 
@@ -1063,6 +1073,12 @@ answer is the core lane's (auto structures keep tunnel ends near 4 m of cover).
 
 ## Portals, plugs and approaches: feel-check fixes (2026-09-28)
 
+> Scope note (2026-09-28, the D4 tunnel and portal iteration): the plug and wing descriptions
+> below are superseded by
+> [the second feel-check fixes](#portals-plugs-and-approaches-second-feel-check-fixes-2026-09-28):
+> the plug now shows the hill the core retains behind the face plus a compact backfill, and the
+> wings are splayed. The approach cuttings' 45° end at the structure stands.
+
 **Status (2026-09-28, agent):** built on branch `codex/d4-structures` (draft PR
 [#84](https://github.com/Kminkjan/infrastructurio/pull/84)). **Not judged:** the owner reads it,
 and nothing here is a Look Gate result. The [Structures (D4 render)](#structures-d4-render-2026-09-28)
@@ -1115,3 +1131,75 @@ the gitignored `test-results/d4-fix/after/`, the owner's scene before the fix in
 **Open (not established here):** how the owner reads any of it; Look Gates A and B; whether
 cut faces should show earth at all (open since the render pass iteration); a headwall that
 rounds its crest at any steepness.
+
+## Portals, plugs and approaches: second feel-check fixes (2026-09-28)
+
+**Status (2026-09-29, agent):** built on branch `codex/d4-structures` (draft PR
+[#84](https://github.com/Kminkjan/infrastructurio/pull/84)), render code at `31917c8`, core at
+`ec9d225`. **Not judged:** the owner reads it, and nothing here is a Look Gate result. The
+trigger was the owner's second feel check of D4 ("Not yet": "Earthworks/terrain look off",
+"Straight line tool odd", and two screenshots, a thin portal wall seen edge-on and two portals
+facing each other under flat ground). The owner's four answers are quoted verbatim, and the
+diagnosis and numbers are recorded, in the [ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-tunnel-and-portal-iteration). The principle, the diagnosis': behind a portal
+the ground is the real hill, masonry holds it back, and nothing stands above the hill except
+what keeps the arch covered.
+
+- **Fewer, deeper tunnels** (answer "Needs 10 m somewhere"). A tunnel run must lie at least
+  10 m under the ground somewhere; shallower runs stay cuttings, up to 10 m deep. The two
+  screenshot scenes are one continuous cutting each now: no facing portals under a flat crest.
+- **The hill stays behind the face.** The core's effective ground keeps the natural hill behind
+  a portal (retained 0.25 m over the 7.4 m face top, falling 1 : 1.5 at the wings), where the
+  approach cutting's 45° headwall used to carve a 3–5 m pit. The terrain mesh keeps that
+  headwall as an underlay (a 1.25 m mesh cannot draw a 7.65 m step at the face without grass
+  wedges in front of it), but is shaded as the ground shown over it.
+- **The plug is the shown ground.** It draws the retained hill and the compact backfill over
+  the underlay, only where it rises, with no fade band and no rectangle, clipped to the face and
+  wing fronts; where it lies on the terrain it takes the terrain's own normals, colours and
+  facets, so it reads as the hillside. That removed the smooth dark slab (the "smudge"), the
+  crown ridge with its lit and dark wedges, and the bore lining showing on short tunnels.
+- **Compact backfill** (answer "Compact backfill"). Where the hill is lower than the face, the
+  fill reaches the face top across the face and 1 m behind it, keeps a 0.7 m ridge over the
+  bore so the arch stays covered, stands behind each wing at that wing's own coping, and falls
+  1 : 1.5 to the real hill; it never stands above its own wing's coping. Beyond a wing's end
+  pier, where no masonry holds it, it meets the ground as a 45° bank (an agent choice: at
+  1 : 1.5 the bank chased the falling ground on side slopes and needed a 15 m wing).
+- **Splayed wing walls** (answer "Splayed wing walls"). Each wing turns 30° toward the
+  approach, so a portal on an east–west line shows masonry at 4 of the 6 yaws instead of 2.
+  A wing stops where the hill it retains stands less than 0.3 m over the ground in front
+  (wings p50 6.5 m, p90 6.5 m, longest 9.3 m; before, up to 21.5 m); its foot never
+  rises within 2.5 m of its coping, so no panel is drawn inside out and the end pier is never
+  a post. Where a 1 : 1.5 wing could not back a low face on a downhill side, the wing is steep:
+  its coping falls at 45° until it meets the ground (an agent choice, not asked for). The face,
+  cornice and wings have back faces, so a wall standing proud of the ground behind reads solid.
+- **No buried buffer portals.** A dead end gets a portal only within the core's 8 m band of
+  cover; the renderer's 12 m rule, which opened portals under up to 12 m of hill, is gone.
+  Trees on the retained hill stay (scenery clearing reads the shown ground).
+- **Palette.** No token changed.
+
+**Agent observations** (headless Chrome through Playwright, 1280 × 800, Apple M5 Pro, ANGLE
+Metal; `CAPTURE=1 npx playwright test --project=capture tests/e2e/d4portals.capture.ts`,
+images in the gitignored `test-results/d4-iter3/`, `before/` from `41f6a4b`, `after6/` final,
+taken by the render lane on 2026-09-29; notes, not a look verdict):
+- **s208 and s231** (the screenshot scenes): one continuous cutting each, from the 10 m rule.
+- **The east–west portal at (267, 129):** at the edge-on yaws 0 and 3 a masonry panel shows
+  where there was a line or a post; the wings are 6.5 and 5.3 m; the hill behind is continuous
+  grass, with no brown patch or corner gap.
+- **A side-slope portal at (245, 132):** short splayed wings instead of a thin wall with a long
+  wing and a smudge.
+- **A low portal at (184, 149):** a steep 8 m downhill wing following its bank and a 6.5 m
+  uphill wing; no sawtooth at Detail, but a raised grassy bank remains at the downhill corner
+  (the bank the answer foresaw).
+- **A low portal at (203, 145):** a textured bank behind the face where there was a dark
+  smooth rectangle.
+- **The dead end (220, 140) → (236, 140):** one portal. **The Track curve (208, 146) →
+  (228, 152):** all ground now.
+- **The held end** (a scratch Playwright run, 2026-09-29, images in the gitignored
+  `test-results/d4-tools/`): on scene B the amber line runs from the buried end up to the snap
+  ring on the ground, and on the reverse drag down from the raised end, with the end tag
+  reading the tooltip's +11.2 m.
+
+**Open (not established here):** how the owner reads any of it; Look Gates A and B; the
+render-only fill (behind low faces and splayed wings) that the core does not see, so a drag
+can start up to about 4 m under it; the steep wings and the 45° bank beyond the end piers;
+wings longer than the answer's "~4–6 m"; a short two-portal tunnel in the browser (none is
+left under 40 m in the populations); the cut-off rest of the owner's message.
