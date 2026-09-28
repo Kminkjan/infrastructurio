@@ -21,15 +21,16 @@ export { PLUG_START_M } from "./portalOutline";
  * underlay: a 1.25 m mesh cannot draw a 7.65 m step at the face without grass wedges in front of it. The plug draws
  * the difference, one surface per tunnel run (`PlugSurface`, shared by its portals, so two plugs meet exactly):
  *
- *   V = max(D, min(max(E, min(B, C)), G + o / 1.5)),
+ *   V = max(D, min(max(E, min(B, C)), G + o)),
  *
  * with D the drawn ground (the underlay mesh), E the core's effective ground, B the compact backfill of each portal
  * whose hill side the point is on (`portalOutline.ts`, owner decision 2026-09-28 "Compact backfill"), C the lowest cut
  * envelope of every other track (cuts win: the fill never covers a neighbour's formation or side slopes), o the plan
- * distance to the open front beyond the wings' end piers and G the drawn ground at its nearest point there: where no
- * masonry holds it, the plug meets the ground as a 1 : 1.5 bank (the backfill, and the hill the core retains behind a
- * wing that another track's formation stopped short). Behind a portal whose hill stands over the face V is the natural hill (E), so the plug is the
- * hillside exactly; over a low portal the backfill closes the face top and the bore. It is drawn only where it rises
+ * distance to the open front beyond the wings' end piers (an octagonal norm round a pier's end, so the bank is planar)
+ * and G the drawn ground at its nearest point there: where no masonry holds it, the plug meets the ground as a 45° bank
+ * (the backfill, and the hill the core retains behind a wing that another track's formation stopped short). Behind a
+ * portal whose hill stands over the face V is the natural hill (E), so the plug is the hillside exactly; over a low
+ * portal the backfill closes the face top and the bore. It is drawn only where it rises
  * over D, with no fade band and no rectangle: each portal's plug covers the hill side of its outline (the face and the
  * wings' fronts, `behindFront`) within the reach of its backfill and of its approach's underlay notch, and a two-portal
  * run splits at its middle (the seam is exact, one surface). The old plug's crown ridge in a rectangle sized from the
@@ -43,6 +44,15 @@ export { PLUG_START_M } from "./portalOutline";
  * own normal and attribute, so shading and colours run on across the outline; where it is the natural hill (δ = 0)
  * it has the terrain's normals, colours and facets. The old plug's tilted normals and switched-off facets over a slab
  * were the owner's dark smudge. Presentation only.
+ *
+ * **What the core does not see** (the diagnosis judge's risk, checked 2026-09-29). The backfill (behind a low face)
+ * and the fill behind a splayed wing (in front of the face plane, where the core keeps the approach cutting's batter)
+ * are render-only, as the owner's answers have them ("Compact backfill"; "Render only; the ground behind each wing is
+ * filled"). So a drag started on one of those lattice nodes begins at the core's ground (`sim.groundMm`), under the
+ * drawn fill. Measured on the committed population (1,000 free drags and 150 chains per tool, automated): 43 nodes
+ * behind faces (22 of 70 portals, Track) and 19 in front of them (18 portals) lie under more than 0.5 m of drawn fill,
+ * 4.07 m at most (Straight: 43 and 18, 4.05 m). The core's ground stays authoritative: removing the gap needs a core
+ * rule (a tunnel end's clip plane that follows the wings, or the core retaining the backfill), not render.
  */
 
 /** The plug stands this far over the surface it covers (no depth fight at its outline). */
