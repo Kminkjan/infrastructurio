@@ -9,14 +9,16 @@ highlight, undo flash, snap ring), `picking/trackPicker.ts`, three track materia
 `trackStripe` chunk (R2, R4 presentation); `CameraController` attaches no listeners, since
 `src/app/InputRouter.ts` owns input and offers gestures to the camera first. `src/app/main.ts`
 wires them. Status 2026-09-27, render pass: `terrain/earthworks.ts` and `EarthworksView`
-(render-only cut and fill under ground track on refined 1.25 m triangles, so track never
-hides in a hill; sim terrain unchanged) and the terrain look variants (`terrain/terrainLook.ts`,
+(cut and fill under ground track on refined 1.25 m triangles, so track never hides in a
+hill; since D4 the rule lives in core `track/earthworks.ts` as the effective ground, and
+render meshes `sim.ground()`) and the terrain look variants (`terrain/terrainLook.ts`,
 the `relief` and `groundDetail` chunks; default `b`, faceted, the owner's choice). Status 2026-09-28,
-D4 render (branch `codex/d4-structures-render`): `structures/` (bridge and tunnel runs, the
+D4 (PR #84): `structures/` (bridge and tunnel runs, the
 structure-choice rule in `layout.ts`, six `AssetRegistry` kinds bent along each run, portals
 with hill plugs in the terrain material, `StructureView` with H/U and the DECK/TUNNEL pick
 proxies), `picking/layers.ts` and stacked picks for C, bridge track in its own batches, tunnel
-track not drawn, ballast skirts; look not judged. ADR 0009 (**Accepted**, owner, 2026-09-26)
+track not drawn, ballast skirts, plugs as mounds on the drawn ground; tools: Track (1) and
+Straight line (5), no forced Bridge/Tunnel tools; look not judged. ADR 0009 (**Accepted**, owner, 2026-09-26)
 fixes the renderer, camera, coordinate convention, render-on-demand and React outside the
 frame loop; ADR 0013 (art pipeline) is Proposed. `three` is pinned at 0.185.1 (r185).
 Targets: [art direction](../../docs/art-direction.md), [architecture](../../docs/architecture.md).

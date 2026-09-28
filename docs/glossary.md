@@ -507,7 +507,7 @@ See [piece](#piece-straight-curve-shift).
 
 ### Structure (ground, bridge, tunnel)
 
-A per-piece property, inferred (`auto`) or forced by the Bridge and Tunnel tools. With
+A per-piece property, inferred (`auto`) or forced by the Bridge and Tunnel tools *(2026-09-28: the owner replaced the Bridge and Tunnel tools with one Straight line tool, key 5, which lays a steady grade; structures are always inferred.)* With
 terrain height h (the bed under water), judged along the whole piece (D4: straights exactly,
 curves and shifts every 0.5 m; the band ±8 m since the owner decision 2026-09-28 "M2",
 ±4 m before):

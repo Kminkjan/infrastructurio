@@ -21,7 +21,7 @@ inspect why → redesign → watch again.
    white, reused pieces in cyan and an invalid plan dashed red; the tooltip reads
    "Pieces: 8 new, 2 reused" with length, grade, minimum radius and end height. Height
    keys raise or lower the end one step at a time; bridges and tunnels are inferred from
-   the terrain or forced with the Bridge and Tunnel tools. Platforms are dragged along a
+   the terrain or forced with the Bridge and Tunnel tools *(2026-09-28: the owner replaced the Bridge and Tunnel tools with one Straight line tool, key 5, which lays a steady grade; structures are always inferred.)*. Platforms are dragged along a
    straight (platforms 40–200 m, "Platform 120 m · fits N coaches"); depots go at a track
    end with a stub of at least 50 m. Turnouts appear wherever a new track leaves an
    existing one.

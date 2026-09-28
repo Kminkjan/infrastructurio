@@ -55,6 +55,7 @@ Terms are defined in the [glossary](glossary.md). Exact rules are in the
   [ADR 0010 D2 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d2-track-model)).
   Structure is inferred as ground, bridge or tunnel, or forced by the Bridge and Tunnel
   tools. A track crossing over another on a bridge never connects to it.
+  *(2026-09-28: the owner replaced the Bridge and Tunnel tools with one Straight line tool, key 5, which lays a steady grade; structures are always inferred.)*
 - Turnouts and diamonds are derived from geometry, never placed as entities. Stations form
   from straight platforms (40–200 m). Depots sit on stubs of ≥ 50 m. Signals are stop (block)
   or chain.

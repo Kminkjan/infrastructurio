@@ -399,6 +399,7 @@ stacked track readable and pickable.
   - tunnel when h − z > 4 m.
 
   The Bridge and Tunnel tools force the structure.
+  *(2026-09-28: the owner replaced the Bridge and Tunnel tools with one Straight line tool, key 5, which lays a steady grade; structures are always inferred.)*
   *Thresholds changed by the owner decision 2026-09-28, "M2" (as relayed): the band is ±8 m,
   a bridge deck may sit up to 2 m into the bank within 15 m of an abutment, and a drag
   starting on water begins at the deck height; 6 m of cover, the 10 m portal zone and the
@@ -438,6 +439,7 @@ stacked track readable and pickable.
 - [ ] Occlusion aids: H hides decks, U shows an underground x-ray and C cycles stacked hits.
   Proxy picking uses the DECK and TUNNEL layer bits.
 - [ ] The Bridge and Tunnel toolbar modes reuse the D3 track tool with a forced structure.
+  *(2026-09-28: the owner replaced the Bridge and Tunnel tools with one Straight line tool, key 5, which lays a steady grade; structures are always inferred.)*
 
 **Dependencies.** D2.
 
