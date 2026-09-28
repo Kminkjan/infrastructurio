@@ -278,20 +278,22 @@ test("a chained ghost set before the earthworks land measures its tags again onc
   // PR #83 re-review: the commit sets the chained ghost before the time-sliced conform lands, and its tags and drop
   // lines were never measured again, so a continuation off a new embankment read "+6 m" at its start (the ground
   // from before the build) until the snapped node changed. Frames are held so the commit and the continuation's
-  // ghost both land before the earthworks sync, as on a slow frame; the keyboard lays the track.
+  // ghost both land before the earthworks sync, as on a slow frame; the keyboard lays the track (height steps
+  // pressed: D4's fixed height mode).
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   await openDiorama(page);
-  const { q, r } = await findDryRun(page, 32, 0.3);
-  await lookAtNode(page, q + 15, r, 4);
+  const { q, r } = await findDryRun(page, 40, 0.3);
+  await lookAtNode(page, q + 17, r, 4);
   const start = await nodeScreen(page, q, r);
   await page.mouse.move(start.x, start.y);
   await page.keyboard.press("1");
   await page.mouse.move(start.x + 1, start.y);
   await page.keyboard.press("Enter");
-  // A 20-piece plan east whose end stands 6 m above the ground: an embankment once built.
-  for (let i = 0; i < 20; i++) await page.keyboard.press("ArrowRight");
-  for (let i = 0; i < 6; i++) await page.keyboard.press("PageUp");
+  // A 24-piece plan east whose end stands 3 m above the ground: an embankment once built. Until D4 it was 20 pieces
+  // and 6 m; D4 rejects that climb (60‰) and makes more than 4 m of fill a bridge, which is not conformed.
+  for (let i = 0; i < 24; i++) await page.keyboard.press("ArrowRight");
+  for (let i = 0; i < 3; i++) await page.keyboard.press("PageUp");
   await page.waitForFunction(() => window.__diorama?.ready === true);
 
   await holdFrames(page);
@@ -309,14 +311,14 @@ test("a chained ghost set before the earthworks land measures its tags again onc
   const after = await tags.allTextContents();
   const dropsAfter = await ghostDropVertices(page);
   console.log(`[earthworks e2e] chained ghost: tags ${JSON.stringify(before)} → ${JSON.stringify(after)}, drop-line vertices ${dropsBefore} → ${dropsAfter}; earthworks while held ${JSON.stringify(pending)}`);
-  expect((await snapshot(page)).pieces).toBe(20);
-  // While held, the embankment was not drawn yet: the start stood 6 m over the natural ground.
+  expect((await snapshot(page)).pieces).toBe(24);
+  // While held, the embankment was not drawn yet: the start stood 3 m over the natural ground.
   expect(pending.appliedRev).toBeLessThan(pending.rev);
   expect(pending.pieces).toBe(0);
-  expect(before[0]).toBe("+6 m");
+  expect(before[0]).toBe("+3 m");
   // Drawn, the start stands on the embankment's crest, and its drop line through the bank is gone.
   await expect(tags.first()).toHaveText("0 m");
-  expect(after[1]).toBe("+6 m");
+  expect(after[1]).toBe("+3 m");
   expect(dropsAfter).toBeLessThan(dropsBefore);
 
   await page.keyboard.press("Escape");

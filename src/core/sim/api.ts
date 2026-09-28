@@ -7,15 +7,17 @@ import { type Command, type NetworkView, type Result, createWorld } from "./worl
  * render and ui import only this module and `geometry/sample.ts`. D2:
  * construction commands, preview/execute and the network view. D3:
  * `planTrack` (the full planner: one-bend and shift fits, two-bend fits into
- * ports, magnetism, precision). `step`, `frame`, `inspect`, `save` and `loadSim` arrive with
- * their slices.
+ * ports, magnetism, precision). D4 (additive): the grade and structure rules
+ * and their constants, and `Drag.heightMode` / `Drag.structure`. `step`,
+ * `frame`, `inspect`, `save` and `loadSim` arrive with their slices.
  */
 
 export type { Command, NetworkView, Result } from "./world";
 export type { Counts, Reason, ReasonCode, Ref, RuleFamily, StructureChoice } from "../track/validate";
-export { MAX_PIECES, REASON_CODES, RULE_ORDER } from "../track/validate";
+export { MAX_GRADE_PERMILLE, MAX_PIECES, REASON_CODES, RULE_ORDER } from "../track/validate";
+export { GROUND_BAND_MM, PORTAL_ZONE_MM, TUNNEL_COVER_MM, WATER_CLEARANCE_MM } from "../track/structure";
 export { HISTORY_DEPTH } from "../track/history";
-export type { Drag, PlanFit, PlanPointMm, TrackPlan } from "../track/planner";
+export type { Drag, HeightMode, PlanFit, PlanPointMm, TrackPlan } from "../track/planner";
 export { DEFAULT_RADIUS_CAP_M, MAGNET_RANGE_NODES } from "../track/planner";
 export type { Diff, PieceRecord } from "../track/authored";
 export type { Network, NetworkNode, NetworkPiece, Port, Section } from "../network/derive";

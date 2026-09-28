@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { makeTerrain } from "../../tests/support/makeTerrain";
 import { type Drag, type Sim, type Terrain, generateTerrain, groundMmAt } from "../core/sim/api";
 import { createWorld } from "../core/sim/world";
-import { HINT_LINE } from "./format";
+import { HINT_LINE, formatHeight } from "./format";
 import { pickAtNode } from "./picks";
 import { createPreviewMemo } from "./previewMemo";
 import { DRAG_THRESHOLD_PX, type TrackToolState, initialTrackState, reduceTrackTool } from "./trackTool";
@@ -430,6 +430,30 @@ describe("track tool: height, precision and keyboard", () => {
     expect(t.state.plan?.end?.node.zMm).toBe(0);
   });
 
+  it("plans with auto-grade while no height steps are pressed, and with fixed heights once they are (D4)", () => {
+    // The seeded map is steep: from (25, 14) the ground falls 1.4 m over 20 m, more than 35‰ reaches, so auto ends
+    // off the ground.
+    const t = session();
+    t.down(25, 14);
+    let fx = t.move(29, 14);
+    expect(t.drags.at(-1)?.heightMode).toBe("auto");
+    const plan = t.state.plan;
+    const end = plan?.end?.node;
+    if (!plan || !end) throw new Error("no plan");
+    expect(plan.pieces.every((p) => Math.abs(p.z1Mm - p.from.zMm) * 1000 <= 35 * 5000)).toBe(true);
+    const aboveMm = end.zMm - (t.groundZmm(end.q, end.r) ?? 0);
+    expect(aboveMm).not.toBe(0);
+    // One plan, no re-plan to the ground: the tooltip shows where the end actually sits.
+    expect(tooltipOf(fx)?.metrics?.endHeight).toBe(`End height ${formatHeight(aboveMm)}`);
+    fx = t.send({ type: "height", delta: 1 });
+    expect(t.drags.at(-1)?.heightMode).toBe("fixed");
+    expect(t.state.plan?.end?.node.zMm).toBe((t.groundZmm(29, 14) ?? 0) + STEP_MM);
+    expect(tooltipOf(fx)?.metrics?.endHeight).toBe("End height +1 m");
+    t.send({ type: "height", delta: -1 });
+    expect(t.drags.at(-1)?.heightMode).toBe("auto");
+    expect(t.state.plan?.end?.node).toEqual(end);
+  });
+
   it("ignores height keys until a track is started", () => {
     const t = session();
     const fx = t.send({ type: "height", delta: 1 });
@@ -438,14 +462,16 @@ describe("track tool: height, precision and keyboard", () => {
   });
 
   it("keeps the height above ground when chaining", () => {
-    const t = session();
+    // On flat ground, and 35 m long so one 1 m step stays within 35‰ (until D4: 20 m on the seeded map, which the
+    // grade rule now rejects).
+    const t = session({ flat: true });
     t.down(10, 10);
-    t.move(14, 10);
+    t.move(17, 10);
     t.send({ type: "height", delta: 1 });
-    t.up(14, 10);
+    t.up(17, 10);
     expect(t.state.heightSteps).toBe(1);
-    const end = t.sim.network().nodes.find((n) => n.q === 14 && n.r === 10);
-    expect(end?.zMm).toBe((t.groundZmm(14, 10) ?? 0) + STEP_MM);
+    const end = t.sim.network().nodes.find((n) => n.q === 17 && n.r === 10);
+    expect(end?.zMm).toBe((t.groundZmm(17, 10) ?? 0) + STEP_MM);
   });
 
   it("maps precision mode, the radius wheel and Q/E onto the drag", () => {

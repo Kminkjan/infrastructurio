@@ -402,11 +402,14 @@ function planFor(s: TrackToolState, anchor: Anchor, target: ToolPick, ctx: ToolC
   const lift = s.heightSteps * stepMm;
   const from = anchor.node;
   const groundOr = (q: number, r: number): number => ctx.groundZmm(q, r) ?? from.zMm;
+  // D4 auto-grade: with no height steps the planner chooses the end height too (within 35‰), so no re-plan.
+  const heightMode = s.heightSteps === 0 ? "auto" : "fixed";
   const drag = (dzMm: number): Drag => ({
     from,
     ...(anchor.heading === undefined ? {} : { fromHeading: anchor.heading }),
     to: target.pointMm,
     dzMm,
+    heightMode,
     magnetism: !s.precision,
     ...(ctx.settings.radiusCapM === undefined ? {} : { radiusCapM: ctx.settings.radiusCapM }),
     ...(s.precision ? { precision: { radiusM: s.radiusM, ...(s.endHeading === undefined ? {} : { endHeading: s.endHeading }) } } : {}),
@@ -424,7 +427,7 @@ function planFor(s: TrackToolState, anchor: Anchor, target: ToolPick, ctx: ToolC
   };
   const first = wanted(target.node, null);
   const plan = ctx.planTrack(drag(first - from.zMm));
-  if (!plan.end) return plan;
+  if (!plan.end || heightMode === "auto") return plan;
   const want = wanted(plan.end.node, plan.snapped);
   return want === plan.end.node.zMm ? plan : ctx.planTrack(drag(want - from.zMm));
 }

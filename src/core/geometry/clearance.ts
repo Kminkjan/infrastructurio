@@ -2,9 +2,12 @@ import { type Piece, type PieceKey, nodeKey } from "./piece";
 import { samplePiece } from "./sample";
 
 /**
- * Track clearance, rule 6 (simulation model §9): `tracks-too-close` when two
- * centrelines come closer than 4.0 m in plan while less than 6.5 m apart in
- * height. Pieces sharing a node (same q, r and z) are exempt.
+ * Track clearance, rule 6 (simulation model §9): two centrelines clash when
+ * they come closer than 4.0 m in plan while less than 6.5 m apart in height.
+ * Pieces sharing a node (same q, r and z) are exempt. Validation reports a
+ * clash as `vertical-clearance` where the centrelines cross in plan (D4: a
+ * grade-separated crossing or stacked track without the height), else as
+ * `tracks-too-close`.
  *
  * This is one of the two float decisions in the core. It is taken when a
  * command runs and the outcome is kept as authored state; loads never
@@ -44,7 +47,17 @@ export interface ClearanceHit {
   /** Where on the first piece the pieces come closest, in world metres. */
   readonly x: number;
   readonly y: number;
+  /**
+   * Whether the centrelines cross (or touch) in plan: the closest chords lie
+   * within the two pieces' arc pads of each other, so the true curves may meet.
+   */
+  readonly crossing: boolean;
+  /** The smallest height gap (mm) between chords that come too close in plan: what the 6.5 m test saw. */
+  readonly heightGapMm: number;
 }
+
+/** Slack on "the chords touch" for float round-off, metres. */
+const CROSSING_EPS_M = 1e-6;
 
 export interface ClearanceConflict extends ClearanceHit {
   /** The new piece. */
@@ -168,6 +181,7 @@ export function shapesTooClose(a: ClearanceShape, b: ClearanceShape): ClearanceH
   const sb = b.segs;
   const probe: Closest = { d2: 0, x: 0, y: 0 };
   let best: Closest | null = null;
+  let gapMm = Number.POSITIVE_INFINITY;
   for (let i = 0; i < sa.length; i += 6) {
     const ax0 = sa[i] as number;
     const ay0 = sa[i + 1] as number;
@@ -193,10 +207,14 @@ export function shapesTooClose(a: ClearanceShape, b: ClearanceShape): ClearanceH
       const zGap = Math.max(0, Math.min(bz0, bz1) - aMaxZ, aMinZ - Math.max(bz0, bz1));
       if (zGap >= MIN_HEIGHT_SEPARATION_MM) continue;
       segmentDistance(ax0, ay0, ax1, ay1, bx0, by0, bx1, by1, probe);
-      if (probe.d2 < limit2 && (best === null || probe.d2 < best.d2)) best = { ...probe };
+      if (probe.d2 >= limit2) continue;
+      if (zGap < gapMm) gapMm = zGap;
+      if (best === null || probe.d2 < best.d2) best = { ...probe };
     }
   }
-  return best === null ? null : { distanceM: Math.sqrt(best.d2), x: best.x, y: best.y };
+  if (best === null) return null;
+  const distanceM = Math.sqrt(best.d2);
+  return { distanceM, x: best.x, y: best.y, crossing: distanceM <= a.padM + b.padM + CROSSING_EPS_M, heightGapMm: gapMm };
 }
 
 /** Read-only side of the index, as validation sees it. */

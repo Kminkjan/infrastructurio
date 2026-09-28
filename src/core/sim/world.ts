@@ -23,7 +23,7 @@ import {
   createTrackIndex,
   indexAdd,
   indexRemove,
-  resolveStructure,
+  structureChoice,
   validate,
 } from "../track/validate";
 import { deepFreeze } from "../util/freeze";
@@ -48,6 +48,11 @@ import { deepFreeze } from "../util/freeze";
  * Only the contents are player-reachable (the specs a drag resolved to, the
  * keys a pick named: off the map, malformed or stale), and those are always
  * rejected with a reason, never thrown.
+ *
+ * A build's `structure` applies to the pieces it adds (a reused piece keeps
+ * its own): `auto` infers each one's from the terrain under it (D4, rule 4 in
+ * `track/validate.ts`), and ground, bridge or tunnel forces it (the Bridge and
+ * Tunnel tools). The inferred structures are in the result's `diff.added`.
  */
 export type Command =
   | { readonly type: "build-track"; readonly pieces: readonly PieceSpec[]; readonly structure: StructureChoice }
@@ -112,7 +117,7 @@ export function createWorld(terrain: Terrain, init?: WorldInit): World {
       case "demolish": {
         const verdict =
           cmd.type === "build-track"
-            ? validate(ctx, { kind: "build", specs: cmd.pieces, structure: resolveStructure(cmd.structure) })
+            ? validate(ctx, { kind: "build", specs: cmd.pieces, structure: structureChoice(cmd.structure) })
             : validate(ctx, { kind: "demolish", keys: cmd.pieces });
         if (!verdict.ok) return rejected(verdict);
         accepted = verdict;
@@ -159,7 +164,7 @@ function assertCommandShape(cmd: Command): void {
   switch (cmd.type) {
     case "build-track":
       if (!Array.isArray(cmd.pieces)) throw new TypeError(`build-track needs a pieces array, not ${String(cmd.pieces)}`);
-      resolveStructure(cmd.structure);
+      structureChoice(cmd.structure);
       return;
     case "demolish":
       if (!Array.isArray(cmd.pieces)) throw new TypeError(`demolish needs a pieces array of keys, not ${String(cmd.pieces)}`);

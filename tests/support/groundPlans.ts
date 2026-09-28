@@ -17,13 +17,17 @@ import {
 import { createPrng } from "../../src/core/util/prng";
 
 /**
- * Ground-level plans on the diorama map, made as the track tool makes them
- * (zero height steps, the end re-planned onto the ground at the plan's actual
- * end): half straight drags of 10–40 steps on all 12 headings, half free
- * drags within ±150 m, a quarter of all drags without a start heading. The
- * one copy of the generator: `render/track/trackLift.test.ts` (ADR 0010, D3
- * ground following) and the earthworks tests both call it, so they measure the
- * same population.
+ * Zero-step plans on the diorama map, made as the track tool makes them: half
+ * straight drags of 10–40 steps on all 12 headings, half free drags within
+ * ±150 m, a quarter of all drags without a start heading. The one copy of the
+ * generator: `render/track/trackLift.test.ts` (ADR 0010, D3 ground following)
+ * and the earthworks tests both call it, so they measure the same population.
+ *
+ * Since D4 (2026-09-28) the tool plans a zero-step drag in "auto" height mode
+ * (35‰ auto-grade: the planner chooses the end height and the nodes leave the
+ * ground where the ground is steeper than 35‰), so these plans do too. Until
+ * D4 they lay on the ground at every node, the end re-planned onto the ground
+ * at the plan's actual end.
  */
 
 export const DIORAMA_PARAMS = { seed: "baltic-diorama", ...DEFAULT_TERRAIN_SIZE } as const;
@@ -64,15 +68,16 @@ export function groundPlans(count: number, seed = "render-lift-probe", setup: Di
       if (prng.nextInt(2) === 0) fromHeading = undefined;
     }
     const from = { q: s.q, r: s.r, zMm: ground(s) };
-    const drag = (end: { q: number; r: number }): Drag => ({
+    const end = nearestNode({ x: to.xMm / 1000, y: to.yMm / 1000 });
+    const drag: Drag = {
       from,
       ...(fromHeading === undefined ? {} : { fromHeading }),
       to,
-      dzMm: ground(end) - from.zMm,
+      dzMm: (groundMmAt(terrain, end) ?? from.zMm) - from.zMm,
       magnetism: true,
-    });
-    let plan = sim.planTrack(drag(nearestNode({ x: to.xMm / 1000, y: to.yMm / 1000 })));
-    if (plan.end && plan.end.node.zMm !== ground(plan.end.node)) plan = sim.planTrack(drag(plan.end.node));
+      heightMode: "auto",
+    };
+    const plan = sim.planTrack(drag);
     if (plan.fit !== "none") plans.push(plan);
   }
   return plans;

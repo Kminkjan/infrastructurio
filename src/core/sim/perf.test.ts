@@ -1,13 +1,28 @@
 import { describe, expect, it } from "vitest";
 import type { PieceSpec } from "../geometry/piece";
-import { DEFAULT_TERRAIN_SIZE } from "../terrain";
+import { DEFAULT_TERRAIN_SIZE, generateTerrain, groundMmAt, nearestNode } from "./api";
 import { type Drag, MAX_PIECES, type Sim, SQRT3, createSim } from "./api";
 
 /**
  * Soft performance smoke, not a gate: the real bench with committed budgets
  * is D12 (acceptance gates B3/B4). A failure here means "look", on any
  * machine, and says nothing about the gate hardware.
+ *
+ * Since D4 the terrain decides structures: the 4,900 existing straights at
+ * z = 0 lie 10–40 m under the diorama, so they are built as `auto` (tunnels
+ * under at least 6 m of cover; until D4, ground), and the planner workloads
+ * start on the ground in "auto" height mode, as the tool drags with no height
+ * steps (until D4 they started at z = 0 in the one height mode).
  */
+
+const DIORAMA = generateTerrain({ seed: "baltic-diorama", ...DEFAULT_TERRAIN_SIZE });
+
+/** A drag from the ground at (q, r) to `to`, as the tool makes it with no height steps (D4 auto-grade). */
+function groundDrag(q: number, r: number, to: { xMm: number; yMm: number }, rest: Omit<Drag, "from" | "to" | "dzMm">): Drag {
+  const z = groundMmAt(DIORAMA, { q, r }) ?? 0;
+  const end = nearestNode({ x: to.xMm / 1000, y: to.yMm / 1000 });
+  return { from: { q, r, zMm: z }, to, dzMm: (groundMmAt(DIORAMA, end) ?? z) - z, heightMode: "auto", ...rest };
+}
 
 function row(r: number, from: number, count: number): PieceSpec[] {
   const q0 = 0 - Math.floor(r / 2) + from;
@@ -20,7 +35,7 @@ function filledSim(existing: number): Sim {
   let built = 0;
   for (let r = 0; built < existing; r++) {
     const count = Math.min(DEFAULT_TERRAIN_SIZE.columns - 1, existing - built);
-    const result = sim.execute({ type: "build-track", pieces: row(r, 0, count), structure: "ground" });
+    const result = sim.execute({ type: "build-track", pieces: row(r, 0, count), structure: "auto" });
     expect(result.ok).toBe(true);
     built += count;
   }
@@ -45,7 +60,7 @@ describe("preview performance smoke", () => {
     // Row 12 holds 112 pieces; the new 100 continue it 4.33 m beside the full
     // row 11 and join it at a through node, so topology and the clearance
     // broadphase both see real neighbours.
-    const cmd = { type: "build-track", pieces: row(12, 112, 100), structure: "ground" } as const;
+    const cmd = { type: "build-track", pieces: row(12, 112, 100), structure: "auto" } as const;
     const first = sim.preview(cmd);
     expect(first).toMatchObject({ ok: true, counts: { new: 100, reused: 0 } });
     const times: number[] = [];
@@ -81,19 +96,19 @@ function plannerWorkload(): Drag[] {
       for (let deg = -60; deg <= 60; deg += 20) {
         for (let distM = 50; distM <= 200; distM += 50) {
           const a = ((base + deg) * Math.PI) / 180;
-          drags.push({
-            from: { q, r, zMm: 0 },
-            ...(heading === undefined ? {} : { fromHeading: heading }),
-            to: at(q, r, Math.round(distM * 1000 * Math.cos(a)), Math.round(distM * 1000 * Math.sin(a))),
-            dzMm: 0,
-            magnetism: true,
-          });
+          drags.push(
+            groundDrag(q, r, at(q, r, Math.round(distM * 1000 * Math.cos(a)), Math.round(distM * 1000 * Math.sin(a))), {
+              ...(heading === undefined ? {} : { fromHeading: heading }),
+              magnetism: true,
+            }),
+          );
         }
       }
     }
   }
+  // Magnetism joins the port at its own height (z = 0), so these start at z = 0 too, in "fixed" mode as before.
   for (let i = 0; i < 8; i++) drags.push({ from: { q: 130 + 10 * i, r: 40, zMm: 0 }, fromHeading: 8, to: at(106, 13), dzMm: 0, magnetism: true });
-  for (let i = 0; i < 8; i++) drags.push({ from: { q: 150, r: 150, zMm: 0 }, fromHeading: 0, to: at(150, 150, -60_000 - 5000 * i, 3000 * i), dzMm: 0, magnetism: true });
+  for (let i = 0; i < 8; i++) drags.push(groundDrag(150, 150, at(150, 150, -60_000 - 5000 * i, 3000 * i), { fromHeading: 0, magnetism: true }));
   return drags;
 }
 
@@ -149,7 +164,7 @@ describe("planner performance (dev measurement, not a gate)", () => {
       for (const heading of [0, 1, 5] as const) {
         for (const [deg, distM] of cases) {
           const a = ((heading * 30 + deg) * Math.PI) / 180;
-          drags.push({ from: { q, r, zMm: 0 }, fromHeading: heading, to: at(q, r, Math.round(distM * 1000 * Math.cos(a)), Math.round(distM * 1000 * Math.sin(a))), dzMm: 0, magnetism: true });
+          drags.push(groundDrag(q, r, at(q, r, Math.round(distM * 1000 * Math.cos(a)), Math.round(distM * 1000 * Math.sin(a))), { fromHeading: heading, magnetism: true }));
         }
       }
     }
@@ -184,7 +199,7 @@ describe("planner performance (dev measurement, not a gate)", () => {
     // up to 8 candidates validated (plans of about 110 pieces) fails clearance at its far end.
     const sim = createSim({ terrain: { seed: "baltic-diorama", ...DEFAULT_TERRAIN_SIZE } });
     const line: PieceSpec[] = Array.from({ length: 40 }, (_, i) => ({ kind: "straight", from: { q: 150 + i, r: 20 + i, zMm: 0 }, heading: 1, z1Mm: 0 }));
-    expect(sim.execute({ type: "build-track", pieces: line, structure: "ground" }).ok).toBe(true);
+    expect(sim.execute({ type: "build-track", pieces: line, structure: "auto" }).ok).toBe(true);
     const drags: Drag[] = [
       [171, 39],
       [172, 39],
@@ -200,7 +215,9 @@ describe("planner performance (dev measurement, not a gate)", () => {
         if (pass > 0) times.push(t1 - t0);
         if (pass === 0) {
           expect(plan.pieces.length).toBeGreaterThan(100);
-          expect(sim.preview({ type: "build-track", pieces: plan.pieces, structure: "auto" })).toMatchObject({ ok: false, reason: { code: "tracks-too-close" } });
+          // Rule 6 either way: since D4 a far end that crosses the line in plan is `vertical-clearance`.
+          const verdict = sim.preview({ type: "build-track", pieces: plan.pieces, structure: "auto" });
+          expect(!verdict.ok && ["tracks-too-close", "vertical-clearance"].includes(verdict.reason.code)).toBe(true);
         }
       }
     }
