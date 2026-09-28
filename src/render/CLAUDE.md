@@ -17,8 +17,12 @@ D4 (PR #84): `structures/` (bridge and tunnel runs, the
 structure-choice rule in `layout.ts`, six `AssetRegistry` kinds bent along each run, portals
 with hill plugs in the terrain material, `StructureView` with H/U and the DECK/TUNNEL pick
 proxies), `picking/layers.ts` and stacked picks for C, bridge track in its own batches, tunnel
-track not drawn, ballast skirts, plugs as mounds on the drawn ground; tools: Track (1) and
-Straight line (5), no forced Bridge/Tunnel tools; look not judged. ADR 0009 (**Accepted**, owner, 2026-09-26)
+track not drawn, ballast skirts; tools: Track (1) and Straight line (5), no forced Bridge/Tunnel
+tools. Status 2026-09-28, the D4 tunnel and portal iteration: the terrain mesh keeps the core's
+"underlay" envelope behind portals and is shaded by the shown ground; plugs draw the core's
+retained hill plus a compact backfill (`structures/portalOutline.ts`), wings are splayed 30°
+with back faces, buffer-end portals use the core's `isPortal`; the ghost draws a Straight line's
+held end and reads its end marks in travel order; look not judged. ADR 0009 (**Accepted**, owner, 2026-09-26)
 fixes the renderer, camera, coordinate convention, render-on-demand and React outside the
 frame loop; ADR 0013 (art pipeline) is Proposed. `three` is pinned at 0.185.1 (r185).
 Targets: [art direction](../../docs/art-direction.md), [architecture](../../docs/architecture.md).

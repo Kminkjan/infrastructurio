@@ -12,7 +12,10 @@ the rule-4 checks: the ±8 m ground band, portals, abutments; owner decision 202
 with the grade and vertical-clearance rules in `track/validate.ts`, auto-grade and the
 Straight line mode in the planner, and the effective ground (`track/earthworks.ts`, the
 earthworks rule; `track/ground.ts`, settled per revision; `sim.ground()`/`sim.groundMm`)
-that inference, auto-grade and render share, exists (D4, 2026-09-28, PR #84); later slices add the rest
+that inference, auto-grade and render share, exists (D4, 2026-09-28, PR #84); the D4 tunnel and portal
+iteration (2026-09-28) adds `track/portal.ts` (the portal outline, exported via `sim/api.ts` with `isPortal`),
+portals retaining the hill in the effective ground ("ground" vs render's "underlay" envelope mode) and the 10 m
+tunnel rule (owner decision "Needs 10 m somewhere"); later slices add the rest
 ([simulation model](../../docs/simulation-model.md), [architecture](../../docs/architecture.md)).
 ADRs 0010 (lattice geometry), 0011 (signalling), 0012 (tick and determinism) and 0014
 (operator) are **Proposed**: their numbers are defaults to test, not owner decisions. The

@@ -81,8 +81,8 @@ Node `^20.19 || >=22.12`. There is no CI, linter, formatter config or Stop hook.
 | `npm run dev` | Plain `vite`, so the port can move: open the exact URL it prints and confirm it is yours |
 | `npx playwright test` | Browser e2e (`tests/e2e/*.e2e.ts`, agent evidence) on its own Vite server at port 5232 (`--strictPort`) with system Chrome; `CAPTURE=1 npx playwright test --project=capture` saves manual-check screenshots to the gitignored `test-results/` |
 
-Recorded 2026-09-28 (automated, D4 with the feel-check fixes at `408258a`): 761 tests in 90
-files, all passing, plus 16 Playwright e2e, all passing. Counts change with every slice;
+Recorded 2026-09-29 (automated, D4 with the tunnel and portal iteration at `a67a290`): 795 tests
+in 91 files, all passing, plus 17 Playwright e2e, all passing. Counts change with every slice;
 report fresh ones.
 
 ## Definition of done by change type
