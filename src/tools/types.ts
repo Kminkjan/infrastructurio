@@ -108,6 +108,12 @@ export interface GhostPiece {
 export interface GhostModel {
   readonly pieces: readonly GhostPiece[];
   readonly valid: boolean;
+  /**
+   * True when the 3.5 % limit holds a Straight line's free end more than half a height step off the height the
+   * tool asked for (the ground there plus the height steps): the ghost draws a drop line from that end to the
+   * ground (owner decision 2026-09-28, "Keep the limit, show it").
+   */
+  readonly endHeld: boolean;
 }
 
 /** The hover snap ring: filled on an endpoint, hollow on a free node, a turnout icon on track. */
@@ -131,13 +137,16 @@ export interface TooltipMetrics {
 /**
  * The construction tooltip (issue #67 "Presentation"): line 1 the counts,
  * line 2 the metrics, line 3 the controls hint; an invalid plan adds "Can't
- * build: <reason>" and the fix hint; precision mode adds the live label.
+ * build: <reason>" and the fix hint; precision mode adds the live label; a
+ * Straight line whose end the 3.5 % limit holds adds the held-end line.
  */
 export interface TooltipModel {
   readonly counts: string;
   /** What the plan builds when it is not all ground: "Structure: bridge", "Structure: 2 bridge, 3 ground"; else null. */
   readonly structure: string | null;
   readonly metrics: TooltipMetrics | null;
+  /** "End held 11.2 m below the ground by the 3.5 % limit" (owner decision 2026-09-28, "Keep the limit, show it"); else null. */
+  readonly held: string | null;
   /** The planner's note when nothing fits (for example "Drag farther to lay track"). */
   readonly note: string | null;
   readonly invalid: { readonly reason: string; readonly fix: string | null } | null;

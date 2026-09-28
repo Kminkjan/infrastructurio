@@ -83,4 +83,11 @@ describe("HUD markup", () => {
     expect(html).toContain('<div class="line counts">Pieces: 8 new, 2 reused</div><div class="line structure">Structure: bridge</div>');
     expect(renderToStaticMarkup(<TooltipPanel tip={tip} />)).not.toContain("line structure");
   });
+
+  it("adds the held-end line under the metrics when the 3.5 % limit holds a Straight line's end", () => {
+    const held = "End held 11.2 m below the ground by the 3.5 % limit";
+    const html = renderToStaticMarkup(<TooltipPanel tip={{ ...tip, held }} />);
+    expect(html).toMatch(new RegExp(`End height \\+6 m</div><div class="line held">${held}</div>`));
+    expect(renderToStaticMarkup(<TooltipPanel tip={tip} />)).not.toContain("line held");
+  });
 });

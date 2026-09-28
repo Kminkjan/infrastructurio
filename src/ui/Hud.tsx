@@ -51,6 +51,16 @@ const CSS = /* css */ `
 .hud-tooltip .counts { font-weight: 600; }
 .hud-tooltip .hint { opacity: 0.72; font-size: 12px; }
 .hud-tooltip .precision { font-weight: 600; }
+.hud-tooltip .held { font-weight: 600; }
+.hud-tooltip .held::before {
+  content: "";
+  display: inline-block;
+  width: 3px;
+  height: 11px;
+  margin-right: 7px;
+  background: var(--hud-amber);
+  vertical-align: -1px;
+}
 .hud-tooltip .invalid { font-weight: 600; margin-top: 2px; }
 .hud-tooltip .invalid::before {
   content: "";
@@ -165,6 +175,7 @@ export function TooltipPanel({ tip }: { readonly tip: HudTooltip }) {
           · {m.minRadius} · {m.endHeight}
         </div>
       )}
+      {tip.held && <div className="line held">{tip.held}</div>}
       {tip.note && <div className="line note">{tip.note}</div>}
       {tip.invalid && <div className="line invalid">Can't build: {tip.invalid.reason}</div>}
       {tip.invalid?.fix && <div className="line fix">{tip.invalid.fix}</div>}

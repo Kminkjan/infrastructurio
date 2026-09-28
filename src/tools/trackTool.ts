@@ -15,7 +15,7 @@ import {
   rotateHeading,
   stepOf,
 } from "../core/sim/api";
-import { buildTooltip, formatCounts, formatHeight, formatStructures, splitReason } from "./format";
+import { buildTooltip, formatCounts, formatHeight, formatHeld, formatStructures, heightLimitText, splitReason } from "./format";
 import { nodesAt, pickAtNode } from "./picks";
 import { commandKey } from "./previewMemo";
 import type { GhostModel, Reduced, ScreenPoint, ToolCtx, ToolEffect, ToolEvent, ToolPick, TrackMode } from "./types";
@@ -61,6 +61,15 @@ import type { GhostModel, Reduced, ScreenPoint, ToolCtx, ToolEffect, ToolEvent, 
  * reaches from the start, and the core infers each piece's structure (bridges
  * over valleys and water, tunnels through hills). Both modes build with
  * structure "auto".
+ *
+ * A held end is shown, not hidden (owner decision 2026-09-28, "Keep the limit,
+ * show it"): when the limit holds a straight line's free end more than half a
+ * step off the ground plus the steps, the tooltip and the announcement add
+ * "End held 11.2 m below the ground by the 3.5 % limit" and the ghost draws a
+ * drop line from the end to the ground. A height key pressed further into the
+ * limit keeps the steps (nothing could move, so no hidden count drifts into
+ * the chained drags) and announces the limit; one pressed the other way steps
+ * from the held end, so it moves the end at once.
  *
  * After a commit the app executes and sends `refresh`; that re-plan's
  * announcement leads with the build result, so a screen reader hears both.
@@ -236,7 +245,20 @@ function step(s: TrackToolState, e: ToolEvent, ctx: ToolCtx, out: ToolEffect[]):
         out.push({ type: "announce", text: "Start a track first; the height keys raise or lower its end." });
         return s;
       }
-      const n = present({ ...s, heightSteps: s.heightSteps + e.delta }, ctx, out);
+      const held = s.plan && s.target ? heldEnd(s, s.plan, s.target, ctx) : undefined;
+      if (held && e.delta * held.offsetMm < 0) {
+        // Further into the limit that holds the end: nothing can move, so the steps stay as they are.
+        out.push({ type: "announce", text: heightLimitText(held.text) });
+        return s;
+      }
+      // Away from the limit, a held end steps from where it is held, not from the height the limit keeps it off.
+      const stepMm = ctx.settings.heightStepMm;
+      const heightSteps = !held
+        ? s.heightSteps + e.delta
+        : e.delta < 0
+          ? Math.ceil(held.endHeightMm / stepMm) - 1
+          : Math.floor(held.endHeightMm / stepMm) + 1;
+      const n = present({ ...s, heightSteps }, ctx, out);
       if (!n.plan || n.plan.fit === "none") out.push({ type: "announce", text: `End height ${formatHeight(n.heightSteps * ctx.settings.heightStepMm)} above the ground.` });
       return n;
     }
@@ -390,21 +412,23 @@ function present(s: TrackToolState, ctx: ToolCtx, out: ToolEffect[], lead: strin
   const ground = end ? ctx.groundZmm(end.node.q, end.node.r) : undefined;
   const endHeightMm = end ? end.node.zMm - (ground ?? end.node.zMm) : 0;
   const command: Command | null = plan.fit === "none" ? null : { type: "build-track", pieces: plan.pieces, structure: "auto" };
+  const held = heldEnd(s, plan, target, ctx)?.text ?? null;
   const tipAnchor = s.cursor ? target.node : null;
   const viewKey = [
     ctx.network.rev,
     command ? commandKey(command) : `none:${plan.note ?? ""}`,
     s.precision ? plan.label : "",
     endHeightMm,
+    held ?? "",
     tipAnchor ? `${tipAnchor.q},${tipAnchor.r}` : "",
   ].join("|");
   if (viewKey === s.viewKey) return { ...s, snapKey, plan, command };
 
   const verdict = command ? ctx.preview(command) : null;
   const rejection = verdict && !verdict.ok ? verdict.reason : null;
-  const ghost = command ? ghostOf(plan, verdict, ctx.network) : null;
+  const ghost = command ? ghostOf(plan, verdict, ctx.network, held !== null) : null;
   const structure = ghost ? formatStructures(s.mode, ghost.pieces.map((p) => p.structure)) : null;
-  const tooltip = buildTooltip({ plan, endHeightMm, rejection, precision: s.precision, anchor: tipAnchor, structure, mode: s.mode });
+  const tooltip = buildTooltip({ plan, endHeightMm, rejection, precision: s.precision, anchor: tipAnchor, structure, mode: s.mode, held });
   out.push(
     { type: "ghost", ghost },
     { type: "tooltip", tooltip },
@@ -412,6 +436,38 @@ function present(s: TrackToolState, ctx: ToolCtx, out: ToolEffect[], lead: strin
     { type: "announce", text: lead === null ? tooltip.lines.join(". ") : `${lead} ${tooltip.lines.join(". ")}` },
   );
   return { ...s, snapKey, plan, command, verdict, viewKey };
+}
+
+/** A Straight line end the 3.5 % limit holds: how far off the asked height, where it stands, and the tooltip line. */
+interface HeldEnd {
+  /** The end minus the height the tool asked for (the ground plus the steps), integer mm: negative when held below it. */
+  readonly offsetMm: number;
+  /** The end above the ground there, integer mm (the tooltip's end height). */
+  readonly endHeightMm: number;
+  /** "End held 11.2 m below the ground by the 3.5 % limit". */
+  readonly text: string;
+}
+
+/**
+ * Whether the 3.5 % limit holds the plan's end (owner decision 2026-09-28, "Keep the limit, show it"): in Straight
+ * line mode, a free end (not snapped by magnetism, not on the track end the pointer is on) that the planner moved
+ * more than half a height step off the ground at the end node plus the height steps, the height the tool asked
+ * for. Magnetism joins the track the player aimed at, and vertical magnetism moves an end by at most half a step,
+ * so neither alone counts as held. Undefined otherwise, and always for Track: its "fixed" ends never move, and
+ * auto-grade chooses its end.
+ */
+function heldEnd(s: TrackToolState, plan: TrackPlan, target: ToolPick, ctx: ToolCtx): HeldEnd | undefined {
+  const end = plan.end?.node;
+  if (s.mode !== "straight" || !end || plan.snapped) return undefined;
+  if (target.kind === "endpoint" && end.q === target.node.q && end.r === target.node.r && end.zMm === target.node.zMm) return undefined;
+  const ground = ctx.groundZmm(end.q, end.r);
+  if (ground === undefined) return undefined;
+  const stepMm = ctx.settings.heightStepMm;
+  const offsetMm = end.zMm - (ground + s.heightSteps * stepMm);
+  if (Math.abs(offsetMm) * 2 <= stepMm) return undefined;
+  const endHeightMm = end.zMm - ground;
+  const surface = ctx.waterDeckZmm(end.q, end.r) === undefined ? "ground" : "water";
+  return { offsetMm, endHeightMm, text: formatHeld(endHeightMm, surface) };
 }
 
 /**
@@ -473,9 +529,9 @@ function pieceKeys(network: NetworkView): ReadonlyMap<PieceKey, Structure> {
 
 /**
  * The ghost: each piece new or reused, with its structure as it would be built (a new piece's from the
- * preview's `diff.added`, a reused piece's from the network, else ground).
+ * preview's `diff.added`, a reused piece's from the network, else ground), and whether the limit holds its end.
  */
-function ghostOf(plan: TrackPlan, verdict: Result | null, network: NetworkView): GhostModel {
+function ghostOf(plan: TrackPlan, verdict: Result | null, network: NetworkView, endHeld: boolean): GhostModel {
   const existing = pieceKeys(network);
   const added = verdict?.ok ? new Map(verdict.diff.added.map((r) => [r.key, r.structure])) : undefined;
   const fallback: Structure = "ground";
@@ -487,6 +543,7 @@ function ghostOf(plan: TrackPlan, verdict: Result | null, network: NetworkView):
       return { spec, status: reused !== undefined ? "reused" : "new", structure };
     }),
     valid: verdict !== null && verdict.ok,
+    endHeld,
   };
 }
 

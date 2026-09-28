@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { diorama } from "../../tests/support/groundPlans";
 import { makeTerrain } from "../../tests/support/makeTerrain";
 import { type Drag, type Sim, type Terrain, generateTerrain, waterDeckMm } from "../core/sim/api";
 import { createWorld } from "../core/sim/world";
@@ -642,9 +643,13 @@ describe("track tool: Straight line mode (owner decision 2026-09-28, \"One 'Stra
     const t = session({ terrain: LAKE });
     t.send({ type: "activate", mode: "straight" });
     t.down(22, 10);
-    t.move(34, 10);
-    // The deck start (M2) is 14 m; four steps put the end 4 m over the water surface too: a level deck.
-    for (let i = 0; i < 4; i++) t.send({ type: "height", delta: 1 });
+    const drag = t.move(34, 10);
+    // The deck start (M2) is 14 m. Asked down to the water surface, 35‰ over 60 m holds the end 1.9 m above it; since
+    // "Keep the limit, show it" (2026-09-28) ] steps from the held end, so three presses put it at +2, +3, then +4 m
+    // over the water: a level deck. (Before, the first press changed nothing and a fourth was needed.)
+    expect(tooltipOf(drag)?.held).toBe("End held 1.9 m above the water by the 3.5 % limit");
+    for (let i = 0; i < 3; i++) t.send({ type: "height", delta: 1 });
+    expect(t.state.heightSteps).toBe(4);
     const fx = t.move(34, 10);
     expect(t.state.plan?.pieces.every((p) => p.from.zMm === 14_000 && p.z1Mm === 14_000)).toBe(true);
     const ghost = ghostOf(fx) ?? ghostOf(t.all);
@@ -712,5 +717,120 @@ describe("track tool: Straight line mode (owner decision 2026-09-28, \"One 'Stra
     t.send({ type: "deactivate" });
     t.send({ type: "activate" });
     expect(t.state.mode).toBe("follow");
+  });
+});
+
+describe("track tool: a Straight line end held by the 3.5 % limit (owner decision 2026-09-28, \"Keep the limit, show it\")", () => {
+  /** A straight line from (q0, r) to (q1, r), still dragging, with the tool in mode "straight". */
+  function held(terrain: Terrain, q0: number, q1: number, r = 10) {
+    const t = session({ terrain });
+    t.send({ type: "activate", mode: "straight" });
+    t.down(q0, r);
+    const fx = t.move(q1, r);
+    return { t, fx };
+  }
+
+  const SCENE_B = "End held 11.2 m below the ground by the 3.5 % limit";
+
+  it("says where the limit holds the end, draws its drop line, and keeps the steps for keys pressed into the limit (diorama scene B)", () => {
+    // The diagnosis' scene B: (220, 140) → (236, 140) on the diorama, 16 pieces (80 m). 35‰ reaches 2.8 m, and the
+    // ground at the end stands 14 m above the start, so the line ends 11.2 m under the hill (a dead-end tunnel).
+    const { t, fx } = held(diorama().terrain, 220, 236, 140);
+    expect(t.state.phase).toBe("dragging");
+    const tip = tooltipOf(fx);
+    expect(tip?.metrics?.endHeight).toBe("End height −11.2 m");
+    expect(tip?.held).toBe(SCENE_B);
+    // Under the metrics line (after the counts and the structure line), and in the announcement.
+    expect(tip?.lines.indexOf(SCENE_B)).toBe(3);
+    expect(last(fx, "announce")?.text).toContain(`End height −11.2 m. ${SCENE_B}. `);
+    expect(ghostOf(fx)?.endHeld).toBe(true);
+    expect(ghostOf(fx)?.valid).toBe(true);
+    const plan = t.state.plan;
+
+    // ] asks for a higher end, which 35‰ cannot reach either: 16 presses, 16 announcements, no step and no re-plan.
+    const planned = t.drags.length;
+    for (let i = 0; i < 16; i++) {
+      expect(t.send({ type: "height", delta: 1 })).toEqual([{ type: "announce", text: `Height unchanged: end held 11.2 m below the ground by the 3.5 % limit.` }]);
+      expect(t.state.heightSteps).toBe(0);
+    }
+    expect(t.drags.length).toBe(planned);
+    expect(t.state.plan).toBe(plan);
+
+    // Laid and chained: the next drag starts with no hidden steps (before, the 16 presses carried +16 into it).
+    t.up(236, 140);
+    expect(t.sim.network().pieces).toHaveLength(16);
+    expect(t.state.phase).toBe("anchored");
+    expect(t.state.heightSteps).toBe(0);
+  });
+
+  it("steps a held end from where it is held when a key presses away from the limit", () => {
+    const { t, fx } = held(diorama().terrain, 220, 236, 140);
+    expect(tooltipOf(fx)?.held).toBe(SCENE_B);
+    const ground = t.groundZmm(236, 140) ?? 0;
+    // [ lowers the end at once, to the first whole step under it: 12 m below the ground, which 35‰ reaches.
+    const down = t.send({ type: "height", delta: -1 });
+    expect(t.state.heightSteps).toBe(-12);
+    expect(t.state.plan?.end?.node.zMm).toBe(ground - 12_000);
+    expect(tooltipOf(down)?.metrics?.endHeight).toBe("End height −12 m");
+    expect(tooltipOf(down)?.held).toBeNull();
+    expect(ghostOf(down)?.endHeld).toBe(false);
+    // Then one step at a time, as anywhere else.
+    t.send({ type: "height", delta: -1 });
+    expect(t.state.heightSteps).toBe(-13);
+    expect(t.state.plan?.end?.node.zMm).toBe(ground - 13_000);
+  });
+
+  it("holds an end above the ground as well: from a cliff top down to the plain", () => {
+    // 10 pieces (50 m) from the cliff top at 15 m to the plain at 0 m: 35‰ reaches 1.75 m, so the end stays at 13.25 m.
+    const { t, fx } = held(CLIFF, 14, 4);
+    expect(t.state.plan?.end?.node.zMm).toBe(15_000 - 1750);
+    expect(tooltipOf(fx)?.metrics?.endHeight).toBe("End height +13.3 m");
+    expect(tooltipOf(fx)?.held).toBe("End held 13.3 m above the ground by the 3.5 % limit");
+    expect(ghostOf(fx)?.endHeld).toBe(true);
+    // [ asks for a lower end still: the limit. ] steps up from the held end, to 14 m.
+    expect(t.send({ type: "height", delta: -1 })).toEqual([{ type: "announce", text: "Height unchanged: end held 13.3 m above the ground by the 3.5 % limit." }]);
+    expect(t.state.heightSteps).toBe(0);
+    const up = t.send({ type: "height", delta: 1 });
+    expect(t.state.heightSteps).toBe(14);
+    expect(t.state.plan?.end?.node.zMm).toBe(14_000);
+    expect(tooltipOf(up)?.held).toBeNull();
+  });
+
+  it("counts an end as held exactly when it lies more than half a step off the ground plus the steps", () => {
+    // 4 pieces (20 m): 35‰ reaches 0.7 m. A 1.2 m rise at the end leaves the end 0.5 m short (half a step: not held);
+    // a 1.3 m rise leaves it 0.6 m short (held).
+    const rise = (dm: number) => makeTerrain(TERRAIN.columns, TERRAIN.rows, (q) => (q >= 14 ? dm : 0), -100);
+    const half = held(rise(12), 10, 14);
+    expect(half.t.state.plan?.end?.node.zMm).toBe(700);
+    expect(tooltipOf(half.fx)?.held).toBeNull();
+    expect(ghostOf(half.fx)?.endHeld).toBe(false);
+    const more = held(rise(13), 10, 14);
+    expect(more.t.state.plan?.end?.node.zMm).toBe(700);
+    expect(tooltipOf(more.fx)?.held).toBe("End held 0.6 m below the ground by the 3.5 % limit");
+    expect(ghostOf(more.fx)?.endHeld).toBe(true);
+    // ] asks for more still: the limit, so the steps stay.
+    more.t.send({ type: "height", delta: 1 });
+    expect(more.t.state.heightSteps).toBe(0);
+    // A Track drag over the same rise never counts as held: auto-grade chooses its end, and steps fix it.
+    const track = session({ terrain: rise(13) });
+    track.down(10, 10);
+    const fx = track.move(14, 10);
+    expect(tooltipOf(fx)?.held).toBeNull();
+    expect(ghostOf(fx)?.endHeld).toBe(false);
+  });
+
+  it("measures an end held over water from the water surface", () => {
+    // From the land at 11 m out to the lake (water level 10 m), 4 pieces: 35‰ reaches 0.7 m, so an end asked down to
+    // the water surface stays 0.3 m above it, within half a step (not held). One step down asks for 9 m: the end
+    // still stays at 10.3 m, now held; a second step presses into the limit.
+    const { t, fx } = held(LAKE, 16, 20);
+    expect(t.groundZmm(20, 10)).toBe(10_000);
+    expect(t.state.plan?.end?.node.zMm).toBe(10_300);
+    expect(tooltipOf(fx)?.held).toBeNull();
+    const first = t.send({ type: "height", delta: -1 });
+    expect(t.state.heightSteps).toBe(-1);
+    expect(tooltipOf(first)?.held).toBe("End held 0.3 m above the water by the 3.5 % limit");
+    expect(t.send({ type: "height", delta: -1 })).toEqual([{ type: "announce", text: "Height unchanged: end held 0.3 m above the water by the 3.5 % limit." }]);
+    expect(t.state.heightSteps).toBe(-1);
   });
 });

@@ -37,6 +37,8 @@ export interface HudTooltip {
     readonly minRadius: string;
     readonly endHeight: string;
   } | null;
+  /** D4: "End held 11.2 m below the ground by the 3.5 % limit" when the limit holds a Straight line's end. */
+  readonly held?: string | null;
   readonly note: string | null;
   readonly invalid: { readonly reason: string; readonly fix: string | null } | null;
   readonly precision: string | null;
