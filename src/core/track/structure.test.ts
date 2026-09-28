@@ -6,10 +6,13 @@ import { type Heading, toWorld } from "../lattice";
 import type { Command } from "../sim/api";
 import { generateTerrain, heightDmAt, nodeOfOffset } from "../terrain";
 import {
+  ABUTMENT_DIP_MM,
+  ABUTMENT_ZONE_MM,
   GROUND_BAND_MM,
   STRUCTURE_SAMPLE_STEP_M,
   TUNNEL_COVER_MM,
   inferStructure,
+  isAbutment,
   isPortal,
   pieceGround,
   structureFault,
@@ -86,7 +89,9 @@ describe("structure inference and rules", () => {
   const wet = pieceGround(LAND, piece(straight(lake.q, lake.r, 0)));
   const noPortal = () => Number.POSITIVE_INFINITY;
 
-  it("infers ground within ±4 m on dry land, a bridge above it or in or over water, a tunnel below it or under water", () => {
+  it("infers ground within ±8 m on dry land, a bridge above it or in or over water, a tunnel below it or under water", () => {
+    // D4 thresholds (owner decision 2026-09-28 "M2"): the band was ±4 m.
+    expect(GROUND_BAND_MM).toBe(8000);
     expect(inferStructure(dry, GROUND_BAND_MM, GROUND_BAND_MM)).toBe("ground");
     expect(inferStructure(dry, -GROUND_BAND_MM, -GROUND_BAND_MM)).toBe("ground");
     expect(inferStructure(dry, 0, GROUND_BAND_MM + 1)).toBe("bridge");
@@ -98,60 +103,125 @@ describe("structure inference and rules", () => {
   });
 
   it("checks ground against the band and water", () => {
-    expect(structureFault(dry, 4500, 4500, 5000, "ground", WATER_MM, noPortal)).toEqual({ code: "needs-bridge", aboveMm: 4500, overWater: false });
-    expect(structureFault(dry, -4500, -4500, 5000, "ground", WATER_MM, noPortal)).toMatchObject({ code: "needs-tunnel", belowMm: 4500, underWater: false });
+    expect(structureFault(dry, 8500, 8500, 5000, "ground", WATER_MM, noPortal)).toEqual({ code: "needs-bridge", aboveMm: 8500, overWater: false });
+    expect(structureFault(dry, -8500, -8500, 5000, "ground", WATER_MM, noPortal)).toMatchObject({ code: "needs-tunnel", belowMm: 8500, underWater: false });
     expect(structureFault(wet, 0, 0, 5000, "ground", WATER_MM, noPortal)).toMatchObject({ code: "needs-bridge", overWater: true });
     expect(structureFault(wet, -7000, -7000, 5000, "ground", WATER_MM, noPortal)).toMatchObject({ code: "needs-tunnel", underWater: true });
-    expect(structureFault(dry, 4000, -4000, 5000, "ground", WATER_MM, noPortal)).toBeNull();
+    expect(structureFault(dry, 8000, -8000, 5000, "ground", WATER_MM, noPortal)).toBeNull();
   });
 
   it("checks a bridge's deck against the terrain and the water level + 4.0 m", () => {
-    expect(structureFault(dry, -1, 0, 5000, "bridge", WATER_MM, noPortal)).toEqual({ code: "bridge-below-ground", belowMm: 1 });
     expect(structureFault(dry, 0, 0, 5000, "bridge", WATER_MM, noPortal)).toBeNull();
     expect(structureFault(wet, 1999, 1999, 5000, "bridge", WATER_MM, noPortal)).toEqual({ code: "bridge-too-low-over-water", missingMm: 1 });
     expect(structureFault(wet, 2000, 2000, 5000, "bridge", WATER_MM, noPortal)).toBeNull();
   });
 
+  it("lets a deck dip up to 2 m below the terrain within 15 m of an abutment, and nowhere else (M2)", () => {
+    expect([ABUTMENT_DIP_MM, ABUTMENT_ZONE_MM]).toEqual([2000, 15_000]);
+    // No abutment within 15 m: any dip fails, as before the owner decision.
+    expect(structureFault(dry, -1, 0, 5000, "bridge", WATER_MM, noPortal)).toEqual({ code: "bridge-below-ground", belowMm: 1, abutmentMm: Number.POSITIVE_INFINITY });
+    // End 0 is an abutment: 2 m below passes there, 1 mm more fails and names it.
+    const atEnd0 = (end: 0 | 1) => (end === 0 ? 0 : Number.POSITIVE_INFINITY);
+    expect(structureFault(dry, -ABUTMENT_DIP_MM, 0, 5000, "bridge", WATER_MM, atEnd0)).toBeNull();
+    expect(structureFault(dry, -ABUTMENT_DIP_MM - 1, 0, 5000, "bridge", WATER_MM, atEnd0)).toEqual({ code: "bridge-below-ground", belowMm: 2001, abutmentMm: 0 });
+    // A 1 m dip at end 1 of a 5 m piece: 10 m behind end 0 puts it 15 m from the abutment and passes; 1 mm more fails.
+    const behind = (mm: number) => (end: 0 | 1) => (end === 0 ? mm : Number.POSITIVE_INFINITY);
+    expect(structureFault(dry, 0, -1000, 5000, "bridge", WATER_MM, behind(10_000))).toBeNull();
+    expect(structureFault(dry, 0, -1000, 5000, "bridge", WATER_MM, behind(10_001))).toEqual({ code: "bridge-below-ground", belowMm: 1000, abutmentMm: Number.POSITIVE_INFINITY });
+    // The reach is only asked for when the deck dips.
+    let asked = 0;
+    expect(structureFault(dry, 500, 0, 5000, "bridge", WATER_MM, () => (asked++, 0))).toBeNull();
+    expect(asked).toBe(0);
+  });
+
+  it("finds abutments on dry land within the band only", () => {
+    expect(isAbutment(LAND, { q: 5, r: 5, zMm: GROUND_BAND_MM })).toBe(true);
+    expect(isAbutment(LAND, { q: 5, r: 5, zMm: -GROUND_BAND_MM })).toBe(true);
+    expect(isAbutment(LAND, { q: 5, r: 5, zMm: GROUND_BAND_MM + 1 })).toBe(false);
+    expect(isAbutment(LAND, { q: 5, r: 5, zMm: -GROUND_BAND_MM - 1 })).toBe(false);
+    // A node over the lake (bed −6 m under water at −2 m) with the deck 7 m over the bed is not an abutment.
+    expect(isAbutment(LAND, { q: lake.q, r: lake.r, zMm: 1000 })).toBe(false);
+  });
+
   it("checks a tunnel's cover, except within 10 m of a portal, and rejects one no deeper than a cutting", () => {
-    expect(structureFault(dry, -4000, -4000, 5000, "tunnel", WATER_MM, noPortal)).toMatchObject({ code: "tunnel-too-shallow", shallowOnly: true });
-    expect(structureFault(dry, -5000, -5000, 5000, "tunnel", WATER_MM, noPortal)).toMatchObject({ code: "tunnel-too-shallow", coverMm: 5000, shallowOnly: false });
-    expect(structureFault(dry, -TUNNEL_COVER_MM, -TUNNEL_COVER_MM, 5000, "tunnel", WATER_MM, noPortal)).toBeNull();
-    // 5 m of cover passes when a portal lies within 10 m of every sample: 5 m behind end 0 reaches 10 m at end 1.
-    expect(structureFault(dry, -5000, -5000, 5000, "tunnel", WATER_MM, (end) => (end === 0 ? 5000 : Number.POSITIVE_INFINITY))).toBeNull();
-    expect(structureFault(dry, -5000, -5000, 5000, "tunnel", WATER_MM, (end) => (end === 0 ? 5001 : Number.POSITIVE_INFINITY))).toMatchObject({ code: "tunnel-too-shallow" });
+    expect(structureFault(dry, -GROUND_BAND_MM, -GROUND_BAND_MM, 5000, "tunnel", WATER_MM, noPortal)).toMatchObject({ code: "tunnel-too-shallow", shallowOnly: true });
+    // At ±8 m a tunnel 5 m down is a cutting (it was a shallow tunnel at ±4 m).
+    expect(structureFault(dry, -5000, -5000, 5000, "tunnel", WATER_MM, noPortal)).toMatchObject({ code: "tunnel-too-shallow", coverMm: 5000, shallowOnly: true });
+    // 9 m down at end 0 and 5 m at end 1: deeper than the band, but 5 m of cover with no portal near.
+    expect(structureFault(dry, -9000, -5000, 5000, "tunnel", WATER_MM, noPortal)).toMatchObject({ code: "tunnel-too-shallow", coverMm: 5000, shallowOnly: false });
+    expect(structureFault(dry, -9000, -TUNNEL_COVER_MM, 5000, "tunnel", WATER_MM, noPortal)).toBeNull();
+    // 5 m of cover at end 1 passes when a portal lies within 10 m of it: 5 m beyond end 1, not 5,001 mm.
+    expect(structureFault(dry, -9000, -5000, 5000, "tunnel", WATER_MM, (end) => (end === 1 ? 5000 : Number.POSITIVE_INFINITY))).toBeNull();
+    expect(structureFault(dry, -5000, -9000, 5000, "tunnel", WATER_MM, (end) => (end === 1 ? 5001 : Number.POSITIVE_INFINITY))).toMatchObject({ code: "tunnel-too-shallow" });
     expect(isPortal(LAND, { q: 5, r: 5, zMm: -GROUND_BAND_MM })).toBe(true);
     expect(isPortal(LAND, { q: 5, r: 5, zMm: -GROUND_BAND_MM - 1 })).toBe(false);
   });
 });
 
-describe("tunnel portals along the track", () => {
-  /** Flat land at 0 m, and from column 20 east a plateau `plateauDm` high (a cliff between columns 19 and 20). */
-  const cliff = (plateauDm: number) => makeTerrain(40, 20, (_q, _r, col) => (col >= 20 ? plateauDm : 0), -20);
-  const row = 10;
-  const q0 = nodeOfOffset(15, row).q;
-  const run = (count: number): Command => ({
-    type: "build-track",
-    pieces: Array.from({ length: count }, (_, i) => straight(q0 + i, row, 0)),
-    structure: "auto",
+/**
+ * A secondary run (heading 1, nodes (q0 + i, r0 + i)) whose midpoints sample other ground than its nodes: from row
+ * `fromRow` on, the nodes on the run's line stand at `lineDm` and the nodes beside it (the ends of the edge each
+ * midpoint crosses) at `sideDm`; before that row everything is `flatDm`. Since the band (8 m) is deeper than the 6 m
+ * cover, a node with less cover is itself a portal, and a node where a deck dips 2 m or less is itself an abutment,
+ * so only such midpoints (and curves) need the walk along the track (owner decision 2026-09-28 "M2").
+ */
+function ridgeRun(lineDm: number, sideDm: number, flatDm: number, fromRow: number) {
+  const q0 = 10;
+  const r0 = fromRow - 3;
+  const line = q0 - r0;
+  const terrain = makeTerrain(40, 30, (q, r) => (r < fromRow ? flatDm : q - r === line ? lineDm : sideDm), -20);
+  const specs = (count: number, zMm: number, first = 0): PieceSpec[] => Array.from({ length: count - first }, (_, i) => straight(q0 + first + i, r0 + first + i, 1, zMm));
+  return { terrain, specs };
+}
+
+describe("walks along the track to the nearest portal or abutment", () => {
+  const build = (pieces: PieceSpec[]): Command => ({ type: "build-track", pieces, structure: "auto" });
+
+  it("counts the distance to a portal through the tunnel pieces before it", () => {
+    // Track at 0 m under a 9 m ridge line with 5 m ground beside it: nodes under 9 m of cover (not portals),
+    // midpoints under 5 m. The first ridge piece's midpoint lies 4.3 m from the portal on the flat (cover 2.5 m)
+    // and passes; the next one's lies 13 m from it, walking back through the first, and fails.
+    const { terrain, specs } = ridgeRun(90, 50, 0, 8);
+    const sim = simOn(terrain);
+    const three = sim.preview(build(specs(3, 0)));
+    expect(three.ok && three.diff.added.map((r) => r.structure).sort()).toEqual(["ground", "ground", "tunnel"]);
+    const four = sim.preview(build(specs(4, 0)));
+    expect(!four.ok && four.reason.code).toBe("tunnel-too-shallow");
+    expect(!four.ok && four.reason.message).toContain("5 m of cover 13 m from the nearest portal");
+    // Built piece by piece the same: a new piece walks back through the tunnel piece already built.
+    const stepwise = simOn(terrain);
+    expect(stepwise.execute(build(specs(3, 0))).ok).toBe(true);
+    const next = stepwise.preview(build(specs(4, 0, 3)));
+    expect(!next.ok && next.reason.message).toContain("5 m of cover 13 m from the nearest portal");
+    // Alone, with nothing to walk through, no portal lies within 10 m.
+    const alone = simOn(terrain).preview(build(specs(4, 0, 3)));
+    expect(!alone.ok && alone.reason.message).toContain("5 m of cover with no portal within 10 m");
+    // With 7 m beside the ridge the midpoints keep 6 m of cover, so any length passes.
+    expect(simOn(ridgeRun(120, 70, 0, 8).terrain).preview(build(specs(10, 0))).ok).toBe(true);
   });
 
-  it("counts the distance to the portal through the tunnel pieces before it", () => {
-    // Under 5.5 m of plateau: the portal is column 19 (cover 0). Two tunnel pieces reach 10 m in and pass; a third
-    // reaches 15 m and fails.
-    const shallow = cliff(55);
-    const sim = simOn(shallow);
-    const two = sim.preview(run(6));
-    expect(two.ok && two.diff.added.map((r) => r.structure)).toEqual(["ground", "ground", "ground", "ground", "tunnel", "tunnel"]);
-    const three = sim.preview(run(7));
-    expect(!three.ok && three.reason.code).toBe("tunnel-too-shallow");
-    expect(!three.ok && three.reason.message).toContain("5.5 m of cover 15 m from the nearest portal");
-    // Built piece by piece the same: a new piece walks back through the tunnel pieces already built.
-    const stepwise = simOn(shallow);
-    expect(stepwise.execute(run(5)).ok).toBe(true);
-    expect(stepwise.execute({ type: "build-track", pieces: [straight(q0 + 5, row, 0)], structure: "auto" }).ok).toBe(true);
-    const third = stepwise.preview({ type: "build-track", pieces: [straight(q0 + 6, row, 0)], structure: "auto" });
-    expect(!third.ok && third.reason.code).toBe("tunnel-too-shallow");
-    // Under 8 m of plateau the cover reaches 6 m within 5 m of the portal, so any length passes.
-    expect(simOn(cliff(80)).preview(run(15)).ok).toBe(true);
+  it("counts the distance to an abutment through the bridge pieces before it (M2)", () => {
+    // A deck at 9 m over a trench line at 0 m (nodes 9 m up: not abutments) with banks at 10.5 m beside it
+    // (midpoints 1.5 m above the deck), from a flat at the deck's height (nodes on it: abutments). The midpoints lie
+    // 4.3 m, 13 m and 21.7 m from the last abutment: the first two pass, walking back through the bridge; the third fails.
+    const { terrain, specs } = ridgeRun(0, 105, 90, 8);
+    const sim = simOn(terrain);
+    const four = sim.preview(build(specs(4, 9000)));
+    expect(four.ok && four.diff.added.map((r) => r.structure).sort()).toEqual(["bridge", "bridge", "ground", "ground"]);
+    const five = sim.preview(build(specs(5, 9000)));
+    expect(!five.ok && five.reason.code).toBe("bridge-below-ground");
+    expect(!five.ok && five.reason.message).toBe(
+      "Bridge piece 5 dips 1.5 m below the terrain with no abutment within 15 m (only there may a deck sit up to 2 m in the bank); raise the deck or build on the ground.",
+    );
+    // Built piece by piece the same, through the bridge pieces already built.
+    const stepwise = simOn(terrain);
+    expect(stepwise.execute(build(specs(3, 9000))).ok).toBe(true);
+    expect(stepwise.execute(build(specs(4, 9000, 3))).ok).toBe(true);
+    expect(stepwise.preview(build(specs(5, 9000, 4))).ok).toBe(false);
+    // Near an abutment the dip may not pass 2 m: banks at 11.5 m put the second midpoint 2.5 m above the deck.
+    const deep = simOn(ridgeRun(0, 115, 90, 8).terrain).preview(build(specs(4, 9000)));
+    expect(!deep.ok && deep.reason.message).toBe(
+      "Bridge piece 4 dips 2.5 m below the terrain 13 m from an abutment, more than the 2 m a deck may sit in the bank; raise the deck or build on the ground.",
+    );
   });
 });

@@ -131,7 +131,9 @@ import { type Counts, MAX_GRADE_PERMILLE, type StructureChoice, type TrackContex
  *
  * **Elevation: track follows the ground within 35‰** (owner decisions
  * 2026-09-27 for D3, "track follows the ground", and 2026-09-28 for D4,
- * "Auto-grade"). The start z is `from.zMm`. Every piece is at most 35‰
+ * "Auto-grade"). The start z is `from.zMm` (the track tool starts a free drag
+ * on water at the deck height, the water level + 4.0 m: owner decision
+ * 2026-09-28 "M2"). Every piece is at most 35‰
  * whenever the fixed heights allow it; `profileOf` has the exact rules:
  * - The **end** is fixed in "fixed" mode (`from.zMm + dzMm`) and at a snapped
  *   port (the port's z). In "auto" mode a free end takes the ground at the end
@@ -156,7 +158,7 @@ import { type Counts, MAX_GRADE_PERMILLE, type StructureChoice, type TrackContex
  *   target, Σ|z − t| (L1), in each gap between them. Where the target is
  *   already within 35‰ the fit is the target itself, so on gentle ground a
  *   plan is exactly the D3 profile; elsewhere only the stretch that is too
- *   steep deviates, as cuttings and embankments and, beyond ±4 m, the bridges
+ *   steep deviates, as cuttings and embankments and, beyond ±8 m, the bridges
  *   and tunnels `preview` infers. Two fixed heights no 35‰ profile joins are
  *   joined by a uniform ramp instead, which `preview` rejects as
  *   `grade-too-steep`.

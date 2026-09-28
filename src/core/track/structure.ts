@@ -1,7 +1,7 @@
 import type { NodeRef, Piece, Structure } from "../geometry/piece";
 import { sampleCentrelineEvery } from "../geometry/sample";
 import { type Heading, SQRT3, isPrimary, rotateHeading, stepOf } from "../lattice";
-import { type Terrain, heightDmAt } from "../terrain";
+import { type Terrain, heightDmAt, isWaterAt } from "../terrain";
 
 /**
  * Terrain under a piece, structure inference and the rule-4 checks
@@ -37,41 +37,62 @@ import { type Terrain, heightDmAt } from "../terrain";
  * over the water; track below the bed runs under it, in the earth.
  *
  * **Inference (structure `auto`).** With A the largest z − h and B the largest
- * h − z over the samples:
+ * h − z over the samples, and the ground band ±8 m (`GROUND_BAND_MM`; owner
+ * decision 2026-09-28 "M2", it was ±4 m):
  * - in or over water anywhere: bridge;
  * - else under water anywhere (below the bed): tunnel;
- * - A > 4 m and B > 4 m: bridge when A ≥ B, else tunnel (such a piece fails
+ * - A > 8 m and B > 8 m: bridge when A ≥ B, else tunnel (such a piece fails
  *   the chosen structure's own rule);
- * - A > 4 m: bridge; B > 4 m: tunnel;
- * - otherwise ground (−4 m ≤ z − h ≤ 4 m everywhere, and dry).
+ * - A > 8 m: bridge; B > 8 m: tunnel;
+ * - otherwise ground (−8 m ≤ z − h ≤ 8 m everywhere, and dry): cuttings and
+ *   embankments up to 8 m.
  *
  * **Rules** (each structure's own; the codes in catalogue order):
- * - ground: `needs-bridge` when A > 4 m or in or over water, `needs-tunnel`
- *   when B > 4 m or under water (a cutting under a river would flood);
- * - bridge: `bridge-below-ground` when the deck is below the terrain at any
- *   sample (B > 0), `bridge-too-low-over-water` when a sample over water has
- *   the deck below the water level + 4.0 m;
+ * - ground: `needs-bridge` when A > 8 m or in or over water, `needs-tunnel`
+ *   when B > 8 m or under water (a cutting under a river would flood);
+ * - bridge: `bridge-below-ground` when the deck is below the terrain at a
+ *   sample, beyond what an abutment allows: up to 2 m (`ABUTMENT_DIP_MM`)
+ *   within 15 m along the track (`ABUTMENT_ZONE_MM`) of an abutment, nothing
+ *   anywhere else (owner decision 2026-09-28 "M2": abutments may sit 2 m into
+ *   the bank); `bridge-too-low-over-water` when a sample over water has the
+ *   deck below the water level + 4.0 m;
  * - tunnel: `tunnel-too-shallow` when the piece never goes deeper than the
- *   ground band (B ≤ 4 m: a cutting, not a tunnel), or when a sample has less
+ *   ground band (B ≤ 8 m: a cutting, not a tunnel), or when a sample has less
  *   than 6 m of cover (h − z) farther than 10 m along the track from the
  *   nearest portal.
  *
  * **Portals.** A portal is a node of a tunnel piece where the track is within
- * the ground band (cover h − z ≤ 4 m at the node): where a tunnel meets ground
+ * the ground band (cover h − z ≤ 8 m at the node): where a tunnel meets ground
  * track (whose end is in the band), a bridge (whose deck is above the ground),
  * or open air. The distance to the nearest portal is measured along the track,
  * through the neighbouring tunnel pieces (`portalReach`), so the second 5 m
- * piece of a tunnel is still within 10 m of the portal before the first.
+ * piece of a tunnel is still within 10 m of the portal before the first. With
+ * the band (8 m) deeper than the cover (6 m), a node with less than 6 m of
+ * cover is itself a portal, so the cover rule binds only between nodes: at a
+ * secondary straight's midpoint and along curves and shifts.
+ *
+ * **Abutments.** An abutment is a node of a bridge piece on dry land where the
+ * track is within the ground band (−8 m ≤ z − h ≤ 8 m at the node): where a
+ * bridge meets ground track, a tunnel's portal or the bank. The distance to the
+ * nearest one is measured along the track through the neighbouring bridge
+ * pieces, as for portals. At a node itself the deck may dip up to 2 m (it is
+ * its own abutment), so the tolerance matters between nodes, on curves and
+ * shifts and at secondary midpoints, and the walk only along a run whose other
+ * nodes stand more than 8 m up or over water.
  */
 
-/** Track within ±4 m of the terrain, and dry, is ground: cuttings and embankments. */
-export const GROUND_BAND_MM = 4000;
+/** Track within ±8 m of the terrain, and dry, is ground: cuttings and embankments (owner decision 2026-09-28 "M2"; it was ±4 m). */
+export const GROUND_BAND_MM = 8000;
 /** A bridge deck over water must be at least the water level + 4.0 m. */
 export const WATER_CLEARANCE_MM = 4000;
 /** A tunnel needs 6 m of cover (h − z) ... */
 export const TUNNEL_COVER_MM = 6000;
 /** ... except within 10 m of its portals, along the track. */
 export const PORTAL_ZONE_MM = 10_000;
+/** A bridge deck may dip this far below the terrain (an abutment set into the bank) ... */
+export const ABUTMENT_DIP_MM = 2000;
+/** ... within this distance along the track of an abutment (owner decision 2026-09-28 "M2"). */
+export const ABUTMENT_ZONE_MM = 15_000;
 /** Arc-length spacing of the samples along curves and shifts. */
 export const STRUCTURE_SAMPLE_STEP_M = 0.5;
 
@@ -267,15 +288,20 @@ export const STRUCTURE_CODES: readonly StructureCode[] = Object.freeze([
 export type StructureFault =
   | { readonly code: "needs-bridge"; readonly aboveMm: number; readonly overWater: boolean }
   | { readonly code: "needs-tunnel"; readonly belowMm: number; readonly underWater: boolean }
-  | { readonly code: "bridge-below-ground"; readonly belowMm: number }
+  /**
+   * The deepest dip that fails, and how far it lies from the nearest abutment along the track (Infinity when none
+   * lies within 15 m): beyond 2 m within the zone, any dip outside it.
+   */
+  | { readonly code: "bridge-below-ground"; readonly belowMm: number; readonly abutmentMm: number }
   | { readonly code: "bridge-too-low-over-water"; readonly missingMm: number }
   | { readonly code: "tunnel-too-shallow"; readonly coverMm: number; readonly portalMm: number; readonly shallowOnly: boolean };
 
 /**
  * The first failed rule of a piece with structure `structure` (the codes in
- * catalogue order), or null. `portalReachMm(end)` is the distance along the
- * track from the piece's end node 0 or 1 to the nearest portal beyond it (0
- * when that node is a portal, Infinity when none lies within 10 m).
+ * catalogue order), or null. `reachMm(end)` is the distance along the track
+ * from the piece's end node 0 or 1 to the nearest support beyond it: a portal
+ * for a tunnel, an abutment for a bridge (0 when that node is one, Infinity
+ * when none lies within the zone); ground pieces never call it.
  */
 export function structureFault(
   g: PieceGround,
@@ -284,7 +310,7 @@ export function structureFault(
   lengthMm: number,
   structure: Structure,
   waterLevelMm: number,
-  portalReachMm: (end: 0 | 1) => number,
+  reachMm: (end: 0 | 1) => number,
 ): StructureFault | null {
   const { aboveMm, belowMm, overWater, underWater } = clearances(g, z0Mm, z1Mm);
   if (structure === "ground") {
@@ -293,7 +319,10 @@ export function structureFault(
     return null;
   }
   if (structure === "bridge") {
-    if (belowMm > 0) return { code: "bridge-below-ground", belowMm };
+    if (belowMm > 0) {
+      const dip = bridgeDip(g, z0Mm, z1Mm, lengthMm, reachMm);
+      if (dip) return { code: "bridge-below-ground", belowMm: dip.belowMm, abutmentMm: dip.abutmentMm };
+    }
     let missing = 0;
     g.f.forEach((f, i) => {
       if (g.wet[i]) missing = Math.max(missing, waterLevelMm + WATER_CLEARANCE_MM - zAt(z0Mm, z1Mm, f));
@@ -313,8 +342,8 @@ export function structureFault(
     const cover = h - zAt(z0Mm, z1Mm, f);
     if (cover >= TUNNEL_COVER_MM) continue;
     if (Number.isNaN(reach0)) {
-      reach0 = portalReachMm(0);
-      reach1 = portalReachMm(1);
+      reach0 = reachMm(0);
+      reach1 = reachMm(1);
     }
     const portal = Math.min(f * lengthMm + reach0, (1 - f) * lengthMm + reach1);
     if (portal <= PORTAL_ZONE_MM) continue;
@@ -326,8 +355,56 @@ export function structureFault(
   return worstCover === Number.POSITIVE_INFINITY ? null : { code: "tunnel-too-shallow", coverMm: worstCover, portalMm: worstPortal, shallowOnly: false };
 }
 
-/** Whether a node of a tunnel is a portal: the track within the ground band there (cover ≤ 4 m). */
+/**
+ * The deepest dip of a bridge deck below the terrain that an abutment does not allow, or null when every dip is
+ * allowed: at most 2 m, and within 15 m along the track of an abutment (see the module comment).
+ */
+function bridgeDip(
+  g: PieceGround,
+  z0Mm: number,
+  z1Mm: number,
+  lengthMm: number,
+  reachMm: (end: 0 | 1) => number,
+): { readonly belowMm: number; readonly abutmentMm: number } | null {
+  let reach0 = Number.NaN;
+  let reach1 = Number.NaN;
+  let worst: { belowMm: number; abutmentMm: number } | null = null;
+  for (let i = 0; i < g.f.length; i++) {
+    const f = g.f[i] ?? 0;
+    const h = g.hMm[i] ?? Number.NaN;
+    if (Number.isNaN(h)) continue;
+    const dip = h - zAt(z0Mm, z1Mm, f);
+    if (dip <= 0) continue;
+    if (Number.isNaN(reach0)) {
+      reach0 = reachMm(0);
+      reach1 = reachMm(1);
+    }
+    const near = Math.min(f * lengthMm + reach0, (1 - f) * lengthMm + reach1);
+    const abutmentMm = near <= ABUTMENT_ZONE_MM ? near : Number.POSITIVE_INFINITY;
+    if (dip <= ABUTMENT_DIP_MM && abutmentMm !== Number.POSITIVE_INFINITY) continue;
+    if (!worst || dip > worst.belowMm) worst = { belowMm: dip, abutmentMm };
+  }
+  return worst;
+}
+
+/** Whether a node of a tunnel is a portal: the track within the ground band there (cover ≤ 8 m). */
 export function isPortal(t: Terrain, n: NodeRef): boolean {
   const h = nodeTerrainMm(t, n);
   return h !== undefined && h - n.zMm <= GROUND_BAND_MM;
+}
+
+/**
+ * Whether a node of a bridge is an abutment: on dry land (the terrain there at or above the water level) with the
+ * track within the ground band, −8 m ≤ z − h ≤ 8 m.
+ */
+export function isAbutment(t: Terrain, n: NodeRef): boolean {
+  const h = nodeTerrainMm(t, n);
+  if (h === undefined || h < t.waterLevelDm * 100) return false;
+  const d = n.zMm - h;
+  return d <= GROUND_BAND_MM && d >= -GROUND_BAND_MM;
+}
+
+/** The lowest deck height a bridge may carry at a water node, the water level + 4.0 m, in mm; undefined on dry land or off the map. */
+export function waterDeckMm(t: Terrain, n: { readonly q: number; readonly r: number }): number | undefined {
+  return isWaterAt(t, n) ? t.waterLevelDm * 100 + WATER_CLEARANCE_MM : undefined;
 }

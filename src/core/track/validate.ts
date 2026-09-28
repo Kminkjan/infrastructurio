@@ -17,6 +17,8 @@ import { type Terrain, offsetOfNode, terrainBoundsM } from "../terrain";
 import { divFloor } from "../util/int";
 import { type AuthoredState, type Diff, type PieceRecord, makeDiff, recordOf } from "./authored";
 import {
+  ABUTMENT_DIP_MM,
+  ABUTMENT_ZONE_MM,
   GROUND_BAND_MM,
   PORTAL_ZONE_MM,
   type PieceGround,
@@ -25,6 +27,7 @@ import {
   TUNNEL_COVER_MM,
   WATER_CLEARANCE_MM,
   inferStructure,
+  isAbutment,
   isPortal,
   pieceGround,
   structureFault,
@@ -531,7 +534,9 @@ function structureMessage(fault: StructureFault, noun: string): string {
         ? `${who} runs under water, below the bed; use a tunnel or raise the track over the water on a bridge.`
         : `${who} runs ${metres(fault.belowMm)} m below the terrain, deeper than the ${metres(GROUND_BAND_MM)} m a cutting takes; use a tunnel or raise the track.`;
     case "bridge-below-ground":
-      return `Bridge ${noun} dips ${metres(fault.belowMm)} m below the terrain; raise the deck or build on the ground.`;
+      return Number.isFinite(fault.abutmentMm)
+        ? `Bridge ${noun} dips ${metres(fault.belowMm)} m below the terrain ${fault.abutmentMm === 0 ? "at an abutment" : `${metres(fault.abutmentMm)} m from an abutment`}, more than the ${metres(ABUTMENT_DIP_MM)} m a deck may sit in the bank; raise the deck or build on the ground.`
+        : `Bridge ${noun} dips ${metres(fault.belowMm)} m below the terrain with no abutment within ${metres(ABUTMENT_ZONE_MM)} m (only there may a deck sit up to ${metres(ABUTMENT_DIP_MM)} m in the bank); raise the deck or build on the ground.`;
     case "bridge-too-low-over-water":
       return `Bridge ${noun} runs ${metresUp(fault.missingMm)} m too low over the water, which needs the deck ${metres(WATER_CLEARANCE_MM)} m above it; raise the deck by ${metresUp(fault.missingMm)} m.`;
     case "tunnel-too-shallow":
@@ -562,7 +567,7 @@ function terrainStructure(ctx: TrackContext, p: Prepared): Rejection | null {
     });
   }
   const removed = new Set(p.removed.map((r) => r.key));
-  // The added pieces by node, built only when a tunnel's portal walk first needs them.
+  // The added pieces by node, built only when a portal or abutment walk first needs them.
   let addedAt: Map<string, Piece[]> | null = null;
   const addedAtNode = (k: string): readonly Piece[] => {
     if (!addedAt) {
@@ -590,13 +595,17 @@ function terrainStructure(ctx: TrackContext, p: Prepared): Rejection | null {
     for (const piece of addedAtNode(k)) if (piece.key !== except) out.push(piece);
     return out;
   };
-  /** Distance along the track from `node` (leaving `from`) to the nearest portal, through tunnel pieces. */
+  /**
+   * Distance along the track from `node` (leaving `from`) to the nearest support of `from`'s structure, through
+   * pieces of that structure: a portal for a tunnel (the 10 m zone), an abutment for a bridge (the 15 m zone).
+   */
   const reachFrom = (node: NodeRef, from: Piece, acc: number): number => {
-    if (acc > PORTAL_ZONE_MM) return Number.POSITIVE_INFINITY;
-    if (isPortal(terrain, node)) return acc;
+    const bridge = from.structure === "bridge";
+    if (acc > (bridge ? ABUTMENT_ZONE_MM : PORTAL_ZONE_MM)) return Number.POSITIVE_INFINITY;
+    if (bridge ? isAbutment(terrain, node) : isPortal(terrain, node)) return acc;
     const next = others(node, from.key);
     const only = next.length === 1 ? next[0] : undefined;
-    if (!only || only.structure !== "tunnel") return Number.POSITIVE_INFINITY;
+    if (!only || only.structure !== from.structure) return Number.POSITIVE_INFINITY;
     const [a, b] = only.ends;
     const far = a.node.q === node.q && a.node.r === node.r && a.node.zMm === node.zMm ? b.node : a.node;
     return reachFrom(far, only, acc + only.lengthMm);

@@ -13,6 +13,7 @@ import {
   nodeOfOffset,
   stepOf,
   toWorld,
+  waterDeckMm,
 } from "../../src/core/sim/api";
 import { createPrng } from "../../src/core/util/prng";
 
@@ -27,8 +28,15 @@ import { createPrng } from "../../src/core/util/prng";
  * (35‰ auto-grade: the planner chooses the end height and the nodes leave the
  * ground where the ground is steeper than 35‰), so these plans do too. Until
  * D4 they lay on the ground at every node, the end re-planned onto the ground
- * at the plan's actual end.
+ * at the plan's actual end. Since D4's thresholds (owner decision 2026-09-28
+ * "M2") a free start on water begins at the deck height, the water level +
+ * 4.0 m, as the tool's does (`toolStartMm`).
  */
+
+/** The height the track tool gives a free start at node n: the ground, or on water the deck height (`waterDeckMm`). */
+export function toolStartMm(terrain: Terrain, n: { q: number; r: number }): number {
+  return waterDeckMm(terrain, n) ?? groundMmAt(terrain, n) ?? Number.NaN;
+}
 
 export const DIORAMA_PARAMS = { seed: "baltic-diorama", ...DEFAULT_TERRAIN_SIZE } as const;
 
@@ -47,7 +55,6 @@ export function diorama(): DioramaSetup {
 
 export function groundPlans(count: number, seed = "render-lift-probe", setup: DioramaSetup = diorama()): TrackPlan[] {
   const { terrain, sim } = setup;
-  const ground = (n: { q: number; r: number }) => groundMmAt(terrain, n) ?? Number.NaN;
   const point = (q: number, r: number) => {
     const w = toWorld({ q, r });
     return { xMm: Math.round(w.x * 1000), yMm: Math.round(w.y * 1000) };
@@ -67,7 +74,7 @@ export function groundPlans(count: number, seed = "render-lift-probe", setup: Di
       to = { xMm: to.xMm + prng.nextInt(300_001) - 150_000, yMm: to.yMm + prng.nextInt(300_001) - 150_000 };
       if (prng.nextInt(2) === 0) fromHeading = undefined;
     }
-    const from = { q: s.q, r: s.r, zMm: ground(s) };
+    const from = { q: s.q, r: s.r, zMm: toolStartMm(terrain, s) };
     const end = nearestNode({ x: to.xMm / 1000, y: to.yMm / 1000 });
     const drag: Drag = {
       from,

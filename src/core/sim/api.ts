@@ -15,7 +15,7 @@ import { type Command, type NetworkView, type Result, createWorld } from "./worl
 export type { Command, NetworkView, Result } from "./world";
 export type { Counts, Reason, ReasonCode, Ref, RuleFamily, StructureChoice } from "../track/validate";
 export { MAX_GRADE_PERMILLE, MAX_PIECES, REASON_CODES, RULE_ORDER } from "../track/validate";
-export { GROUND_BAND_MM, PORTAL_ZONE_MM, TUNNEL_COVER_MM, WATER_CLEARANCE_MM } from "../track/structure";
+export { ABUTMENT_DIP_MM, ABUTMENT_ZONE_MM, GROUND_BAND_MM, PORTAL_ZONE_MM, TUNNEL_COVER_MM, WATER_CLEARANCE_MM, waterDeckMm } from "../track/structure";
 export { HISTORY_DEPTH } from "../track/history";
 export type { Drag, HeightMode, PlanFit, PlanPointMm, TrackPlan } from "../track/planner";
 export { DEFAULT_RADIUS_CAP_M, MAGNET_RANGE_NODES } from "../track/planner";

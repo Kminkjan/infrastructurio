@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { makeTerrain } from "../../tests/support/makeTerrain";
-import { type Drag, type Sim, type Terrain, generateTerrain, groundMmAt } from "../core/sim/api";
+import { type Drag, type Sim, type Terrain, generateTerrain, groundMmAt, waterDeckMm } from "../core/sim/api";
 import { createWorld } from "../core/sim/world";
 import { HINT_LINE, formatHeight } from "./format";
 import { pickAtNode } from "./picks";
@@ -31,8 +31,8 @@ function simOn(terrain: Terrain): Sim {
  * at height 0 (no water), so heights read as whole steps; otherwise the
  * seeded terrain applies.
  */
-function session({ flat = false }: { flat?: boolean } = {}) {
-  const terrain = flat ? makeTerrain(TERRAIN.columns, TERRAIN.rows, () => 0, -100) : generateTerrain(TERRAIN);
+function session({ flat = false, terrain: given }: { flat?: boolean; terrain?: Terrain } = {}) {
+  const terrain = given ?? (flat ? makeTerrain(TERRAIN.columns, TERRAIN.rows, () => 0, -100) : generateTerrain(TERRAIN));
   const sim: Sim = simOn(terrain);
   const counts = { previews: 0 };
   const drags: Drag[] = [];
@@ -52,6 +52,7 @@ function session({ flat = false }: { flat?: boolean } = {}) {
     },
     preview: memo.preview,
     groundZmm,
+    waterDeckZmm: (q, r) => waterDeckMm(terrain, { q, r }),
     settings: { heightStepMm: STEP_MM, radiusCapM: undefined },
   });
   let state: TrackToolState = initialTrackState();
@@ -554,24 +555,73 @@ describe("track tool: height, precision and keyboard", () => {
   });
 });
 
+/** Flat dry land at 0 m with a 15 m cliff from q = 12 east (row-independent), for Tunnel drags into it. */
+const CLIFF = makeTerrain(TERRAIN.columns, TERRAIN.rows, (q) => (q >= 12 ? 150 : 0), -100);
+
+/** Land at 11 m with a lake (bed 7 m, water level 10 m) from q = 20 east: water nodes carry the deck at 14 m. */
+const LAKE = makeTerrain(TERRAIN.columns, TERRAIN.rows, (q) => (q >= 20 ? 70 : 110), 100);
+
 describe("track tool: Bridge and Tunnel modes (D4)", () => {
   it("builds with the forced structure, and the ghost and tooltip name it", () => {
-    for (const structure of ["bridge", "tunnel"] as const) {
-      const t = session({ flat: true });
+    // A bridge on flat ground at its own level (a deck on the ground breaks no rule), and a tunnel into a cliff from
+    // its foot: since D4 a forced tunnel on flat ground is no deeper than a cutting and is rejected.
+    for (const [structure, terrain, from] of [
+      ["bridge", undefined, 10],
+      ["tunnel", CLIFF, 11],
+    ] as const) {
+      const t = terrain ? session({ terrain }) : session({ flat: true });
       t.send({ type: "activate", structure });
       expect(t.state.structure).toBe(structure);
-      t.down(10, 10);
-      const fx = t.move(14, 10);
+      t.down(from, 10);
+      const fx = t.move(from + 4, 10);
+      // The planner validates its candidates with the forced structure.
+      expect(t.drags.at(-1)?.structure).toBe(structure);
       const ghost = ghostOf(fx);
       expect(ghost?.pieces.map((p) => p.structure)).toEqual([structure, structure, structure, structure]);
+      expect(ghost?.valid).toBe(true);
       const tip = tooltipOf(fx);
       expect(tip?.structure).toBe(`Structure: ${structure}`);
       expect(tip?.lines[1]).toBe(`Structure: ${structure}`);
-      const done = t.up(14, 10);
+      const done = t.up(from + 4, 10);
       const exec = last(done, "execute");
       expect(exec?.command).toMatchObject({ type: "build-track", structure });
       expect(t.sim.network().pieces.every((p) => p.structure === structure)).toBe(true);
     }
+    // The Track tool leaves the structure to the core's inference and says nothing of it to the planner.
+    const track = session({ flat: true });
+    track.down(10, 10);
+    track.move(14, 10);
+    expect(track.drags.at(-1)?.structure).toBeUndefined();
+  });
+
+  it("starts a free drag on water at the deck height, the water level + 4.0 m, still auto-graded (M2)", () => {
+    const t = session({ terrain: LAKE });
+    // (22, 10) is water: the ground there is the water surface at 10 m, the deck at 14 m.
+    expect(t.groundZmm(22, 10)).toBe(10_000);
+    t.down(22, 10);
+    let fx = t.move(30, 10);
+    const drag = t.drags.at(-1);
+    expect(drag?.from).toEqual({ q: 22, r: 10, zMm: 14_000 });
+    expect(drag?.heightMode).toBe("auto");
+    expect(t.state.heightSteps).toBe(0);
+    // A level deck over the water, every piece a bridge, and the end height is the deck over the water surface.
+    expect(t.state.plan?.pieces.every((p) => p.from.zMm === 14_000 && p.z1Mm === 14_000)).toBe(true);
+    expect(ghostOf(fx)?.pieces.every((p) => p.structure === "bridge")).toBe(true);
+    expect(tooltipOf(fx)?.metrics?.endHeight).toBe("End height +4 m");
+    // Back onto the land at 11 m: 3 m above it at the shore, the deck comes down at 35‰ (86 m) to the ground.
+    fx = t.move(12, 10);
+    expect(t.state.plan?.end?.node).toEqual({ q: 12, r: 10, zMm: 14_000 - 7 * 175 });
+    expect(tooltipOf(fx)?.metrics?.endHeight).toBe(`End height ${formatHeight(14_000 - 7 * 175 - 11_000)}`);
+    fx = t.move(0, 10);
+    expect(t.state.plan?.end?.node).toEqual({ q: 0, r: 10, zMm: 11_000 });
+    expect(tooltipOf(fx)?.metrics?.endHeight).toBe("End height 0 m");
+    const done = t.up(0, 10);
+    expect(last(done, "execute")?.command).toMatchObject({ type: "build-track", structure: "auto" });
+    // On dry land the start stays on the ground, as before.
+    const land = session({ terrain: LAKE });
+    land.down(15, 10);
+    land.move(18, 10);
+    expect(land.drags.at(-1)?.from).toEqual({ q: 15, r: 10, zMm: 11_000 });
   });
 
   it("reads each new piece's structure from the preview's diff, and a reused piece's from the network", () => {

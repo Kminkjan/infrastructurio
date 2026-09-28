@@ -1,6 +1,6 @@
 import { Vector3 } from "three";
 import type { Command, Diff, Drag, NodeRef, Result, Sim, Terrain, TrackPlan } from "../core/sim/api";
-import { groundMmAt, toWorld } from "../core/sim/api";
+import { groundMmAt, toWorld, waterDeckMm } from "../core/sim/api";
 import type { CameraController } from "../render/camera/CameraController";
 import type { IsoCamera } from "../render/camera/IsoCamera";
 import { worldToScreen } from "../render/camera/isoMath";
@@ -128,6 +128,7 @@ export class Construction {
    * lower bed), so a plan's ends agree with its ground-following inner nodes.
    */
   groundZmm = (q: number, r: number): number | undefined => groundMmAt(this.d.terrain, { q, r });
+  waterDeckZmm = (q: number, r: number): number | undefined => waterDeckMm(this.d.terrain, { q, r });
 
   previewStats(): PreviewStats {
     const n = this.samples.copyTo(this.scratch);
@@ -230,6 +231,7 @@ export class Construction {
       planTrack: this.timedPlan,
       preview: this.memo.preview,
       groundZmm: this.groundZmm,
+      waterDeckZmm: this.waterDeckZmm,
       settings: this.settings,
     };
   }

@@ -271,12 +271,21 @@ function step(s: TrackToolState, e: ToolEvent, ctx: ToolCtx, out: ToolEffect[]):
 
 /**
  * Anchors at a pick: its node (an existing node keeps its height) and its
- * height above ground in steps. No start heading is forced: on an existing
- * buffer end the planner itself picks continuing the track or running back
- * over it, whichever is nearer the drag direction; elsewhere it follows the
- * drag. Only a chained start carries the previous plan's end heading.
+ * height above ground in steps. A free node on water starts at the deck
+ * height instead, the water level + 4.0 m (`ctx.waterDeckZmm`; D4, owner
+ * decision 2026-09-28 "M2"), with no height steps, so the drag still plans in
+ * "auto" and its first piece can clear the water as a bridge; the end height
+ * the tooltip shows stays the end above the ground there. No start heading is
+ * forced: on an existing buffer end the planner itself picks continuing the
+ * track or running back over it, whichever is nearer the drag direction;
+ * elsewhere it follows the drag. Only a chained start carries the previous
+ * plan's end heading.
  */
 function startAt(s: TrackToolState, pick: ToolPick, ctx: ToolCtx): TrackToolState {
+  const deck = pick.kind === "node" ? ctx.waterDeckZmm(pick.node.q, pick.node.r) : undefined;
+  if (deck !== undefined && pick.node.zMm < deck) {
+    return { ...s, anchor: { node: { q: pick.node.q, r: pick.node.r, zMm: deck }, heading: undefined }, heightSteps: 0, endHeading: undefined, viewKey: null };
+  }
   const ground = ctx.groundZmm(pick.node.q, pick.node.r);
   const stepMm = ctx.settings.heightStepMm;
   const heightSteps = ground === undefined ? 0 : Math.round((pick.node.zMm - ground) / stepMm);
@@ -416,6 +425,8 @@ function planFor(s: TrackToolState, anchor: Anchor, target: ToolPick, ctx: ToolC
     to: target.pointMm,
     dzMm,
     heightMode,
+    // The Bridge and Tunnel tools: the planner validates its candidates with the structure the build will carry.
+    ...(s.structure === "auto" ? {} : { structure: s.structure }),
     magnetism: !s.precision,
     ...(ctx.settings.radiusCapM === undefined ? {} : { radiusCapM: ctx.settings.radiusCapM }),
     ...(s.precision ? { precision: { radiusM: s.radiusM, ...(s.endHeading === undefined ? {} : { endHeading: s.endHeading }) } } : {}),

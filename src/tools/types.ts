@@ -180,6 +180,12 @@ export interface ToolCtx {
    * surface over a lower bed: the planner's `groundMmAt`); undefined off the map.
    */
   groundZmm(q: number, r: number): number | undefined;
+  /**
+   * The lowest deck a bridge may carry at a water node in integer mm, the water level + 4.0 m (the core's
+   * `waterDeckMm`); undefined on dry land or off the map. A free drag starting on water begins there (D4,
+   * owner decision 2026-09-28 "M2").
+   */
+  waterDeckZmm(q: number, r: number): number | undefined;
   readonly settings: ToolSettings;
 }
 

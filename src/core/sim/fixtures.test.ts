@@ -111,18 +111,24 @@ const FIXTURES: Record<ReasonCode, () => Result> = {
   },
   // 176 mm over a 5 m straight is 35.2‰; 175 mm (35‰ exactly) builds.
   "grade-too-steep": () => sim().execute(build(straight(10, 10, 0, 0, 176))),
-  "needs-bridge": () => sim().execute(build(straight(10, 10, 0, 4500))),
-  "needs-tunnel": () => sim().execute(build(straight(10, 10, 0, -4500))),
-  "bridge-below-ground": () => sim().execute(buildAs("bridge", straight(10, 10, 0, -500))),
+  // Beyond the ±8 m band (owner decision 2026-09-28 "M2"; ±4 m until then, when these were 4.5 m).
+  "needs-bridge": () => sim().execute(build(straight(10, 10, 0, 8500))),
+  "needs-tunnel": () => sim().execute(build(straight(10, 10, 0, -8500))),
+  // A forced bridge 2.5 m under flat land: its nodes are abutments, where a deck may sit only 2 m in the bank (M2;
+  // 0.5 m failed until then).
+  "bridge-below-ground": () => sim().execute(buildAs("bridge", straight(10, 10, 0, -2500))),
   // Over the lake (water level −2 m): a deck at 1.999 m is 1 mm under the water level + 4.0 m. Auto infers the bridge.
   "bridge-too-low-over-water": () => sim().execute(buildAs("auto", ...run(20, HILL_ROW, 4, 1999))),
-  // Under the 5 m hill at ground level: 5 m of cover everywhere, more than 10 m from any portal. Auto infers the tunnel.
-  "tunnel-too-shallow": () => sim().execute(buildAs("auto", ...run(-12, HILL_ROW, 6))),
-  // A bridge 6 m over a level line, crossing it at node (8, 20): 0.5 m short of 6.5 m.
+  // The Tunnel tool under the 5 m hill at ground level: nowhere deeper than a cutting. (Until the M2 band, auto
+  // inferred a tunnel here and failed its 5 m of cover; at ±8 m auto makes it a 5 m cutting, and a node with less
+  // than 6 m of cover is itself a portal, so the cover rule binds only between nodes: structure.test.ts walks it.)
+  "tunnel-too-shallow": () => sim().execute(buildAs("tunnel", ...run(-12, HILL_ROW, 6))),
+  // A bridge 6 m over a level line, crossing it at node (8, 20): 0.5 m short of 6.5 m. Forced: at ±8 m auto would
+  // make it an embankment.
   "vertical-clearance": () => {
     const s = sim();
     expectOk(s.execute(build(...run(5, 20, 6))));
-    return s.execute(buildAs("auto", ...Array.from({ length: 6 }, (_, i) => straight(8, 17 + i, 2, 6000))));
+    return s.execute(buildAs("bridge", ...Array.from({ length: 6 }, (_, i) => straight(8, 17 + i, 2, 6000))));
   },
 };
 
@@ -163,11 +169,15 @@ describe("negative fixtures, one per reason code", () => {
       "Piece 1 climbs 0.2 m over 5 m (3.52 %), steeper than the 3.5 % maximum; it needs 5.1 m to climb 0.2 m, so lengthen the drag or change the end height.",
     );
     const high = FIXTURES["needs-bridge"]();
-    expect(!high.ok && high.reason.message).toContain("runs 4.5 m above the terrain, more than the 4 m an embankment takes");
+    expect(!high.ok && high.reason.message).toContain("runs 8.5 m above the terrain, more than the 8 m an embankment takes");
+    const dip = FIXTURES["bridge-below-ground"]();
+    expect(!dip.ok && dip.reason.message).toBe(
+      "Bridge piece 1 dips 2.5 m below the terrain at an abutment, more than the 2 m a deck may sit in the bank; raise the deck or build on the ground.",
+    );
     const water = FIXTURES["bridge-too-low-over-water"]();
     expect(!water.ok && water.reason.message).toContain("raise the deck by 0.1 m");
     const shallow = FIXTURES["tunnel-too-shallow"]();
-    expect(!shallow.ok && shallow.reason.message).toContain("5 m of cover with no portal within 10 m");
+    expect(!shallow.ok && shallow.reason.message).toContain("lies at most 5 m below the terrain, no deeper than a cutting");
     const cross = FIXTURES["vertical-clearance"]();
     expect(!cross.ok && cross.reason.message).toContain("cross with 6 m of height between them, but need 6.5 m; raise or lower one by 0.5 m");
     expect(!cross.ok && cross.highlight).toEqual(["S:8,19,6000:2:6000", "S:7,20,0:0:0"]);
@@ -175,31 +185,34 @@ describe("negative fixtures, one per reason code", () => {
 });
 
 describe("D4 positive cases beside each negative fixture", () => {
-  it("builds 35‰ exactly, 4 m of fill or cutting as ground, and the matching structures", () => {
+  it("builds 35‰ exactly, 8 m of fill or cutting as ground, and the matching structures", () => {
     expect(sim().execute(build(straight(10, 10, 0, 0, 175))).ok).toBe(true);
-    expect(sim().execute(build(straight(10, 10, 0, 4000))).ok).toBe(true);
-    expect(sim().execute(build(straight(10, 10, 0, -4000))).ok).toBe(true);
-    // Auto: more than 4 m up is a bridge, more than 4 m down with 6 m of cover a tunnel.
+    expect(sim().execute(build(straight(10, 10, 0, 8000))).ok).toBe(true);
+    expect(sim().execute(build(straight(10, 10, 0, -8000))).ok).toBe(true);
+    // Auto: more than 8 m up is a bridge, more than 8 m down a tunnel (with 6 m of cover or more).
     const up = sim();
-    expectOk(up.execute(buildAs("auto", straight(10, 10, 0, 4001))));
+    expectOk(up.execute(buildAs("auto", straight(10, 10, 0, 8001))));
     expect(up.network().pieces.map((p) => p.structure)).toEqual(["bridge"]);
     const down = sim();
-    expectOk(down.execute(buildAs("auto", straight(10, 10, 0, -6000))));
+    expectOk(down.execute(buildAs("auto", straight(10, 10, 0, -9000))));
     expect(down.network().pieces.map((p) => p.structure)).toEqual(["tunnel"]);
+    // A forced bridge may sit 2 m in the bank at its abutments (M2).
+    expect(sim().execute(buildAs("bridge", straight(10, 10, 0, -2000))).ok).toBe(true);
     // Over the lake at the water level + 4.0 m exactly.
     const water = sim();
     expectOk(water.execute(buildAs("auto", ...run(20, HILL_ROW, 4, 2000))));
     expect(water.network().pieces.every((p) => p.structure === "bridge")).toBe(true);
-    // Under the hill with 6 m of cover: 1 m under the ground.
+    // Under the hill with 8.5 m of cover: 3.5 m under the ground (at 6 m of cover it would be a cutting now).
     const tunnel = sim();
-    expectOk(tunnel.execute(buildAs("auto", ...run(-12, HILL_ROW, 6, -1000))));
+    expectOk(tunnel.execute(buildAs("auto", ...run(-12, HILL_ROW, 6, -3500))));
     expect(tunnel.network().pieces.every((p) => p.structure === "tunnel")).toBe(true);
   });
 
   it("passes a grade-separated crossing at 6.5 m, and never joins the two tracks in the network", () => {
     const s = sim();
     expectOk(s.execute(build(...run(5, 20, 6))));
-    expectOk(s.execute(buildAs("auto", ...Array.from({ length: 6 }, (_, i) => straight(8, 17 + i, 2, 6500)))));
+    // Forced: at ±8 m auto would make 6.5 m over flat land an embankment.
+    expectOk(s.execute(buildAs("bridge", ...Array.from({ length: 6 }, (_, i) => straight(8, 17 + i, 2, 6500)))));
     const view = s.network();
     expect(view.pieces.filter((p) => p.structure === "bridge")).toHaveLength(6);
     // Two nodes at (8, 20), one per height, each plain through track: no shared node, no junction.
@@ -225,14 +238,14 @@ describe("fixed rule order", () => {
   it("reports geometry before grade, grade before terrain and structure, and those before topology", () => {
     const s = sim();
     expectOk(s.execute(build(straight(10, 10))));
-    // 5 m up, climbing 400 mm in 5 m: too steep and in need of a bridge. Geometry wins when a bad curve joins it.
-    const steepAndHigh = straight(20, 10, 0, 5000, 5400);
+    // 9 m up, climbing 400 mm in 5 m: too steep and in need of a bridge. Geometry wins when a bad curve joins it.
+    const steepAndHigh = straight(20, 10, 0, 9000, 9400);
     const geometryFirst = s.preview(build(steepAndHigh, curve(30, 5, 1, 50, 0)));
     expect(!geometryFirst.ok && geometryFirst.reason.code).toBe("radius-too-tight");
     const gradeFirst = s.preview(build(steepAndHigh));
     expect(!gradeFirst.ok && gradeFirst.reason.code).toBe("grade-too-steep");
     // A kink at (11, 10) beside a piece that needs a bridge: the structure rule reports first.
-    const structureFirst = s.preview(build(straight(11, 10, 2), straight(30, 10, 0, 5000)));
+    const structureFirst = s.preview(build(straight(11, 10, 2), straight(30, 10, 0, 9000)));
     expect(!structureFirst.ok && structureFirst.reason.code).toBe("needs-bridge");
   });
 

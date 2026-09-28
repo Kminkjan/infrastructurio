@@ -16,13 +16,15 @@ import {
   toWorld,
 } from "../../src/core/sim/api";
 import { createPrng } from "../../src/core/util/prng";
-import { diorama } from "./groundPlans";
+import { diorama, toolStartMm } from "./groundPlans";
 import { simOn } from "./simOn";
 
 /**
  * Auto-graded drags on the diorama map, made as the track tool makes them
  * with no height steps (D4, owner decision 2026-09-28 "Auto-grade"): the
- * start on the ground (or on the chain's last end), `heightMode: "auto"`,
+ * start on the ground (on water at the deck height, the water level + 4.0 m,
+ * since the owner decision 2026-09-28 "M2"; or on the chain's last end),
+ * `heightMode: "auto"`,
  * `dzMm` from the ground at the pointer's node, magnetism on. Free drags are
  * previewed on an empty network, each on its own; chains of 3–6 drags are
  * built on one network, each continuing from the last accepted end with its
@@ -44,10 +46,6 @@ export interface AutoGradeSample {
 function point(q: number, r: number): { xMm: number; yMm: number } {
   const w = toWorld({ q, r });
   return { xMm: Math.round(w.x * 1000), yMm: Math.round(w.y * 1000) };
-}
-
-function groundAt(terrain: Terrain, n: { q: number; r: number }): number {
-  return groundMmAt(terrain, n) ?? Number.NaN;
 }
 
 function autoDrag(terrain: Terrain, from: NodeRef, fromHeading: Heading | undefined, to: { xMm: number; yMm: number }): Drag {
@@ -85,7 +83,7 @@ export function autoGradeSamples(free: number, chains: number, seed = "auto-grad
     const heading: Heading = HEADINGS[prng.nextInt(12)] ?? 0;
     const to = pointerFrom(prng, s, heading);
     const fromHeading = !to.straight && prng.nextInt(2) === 0 ? undefined : heading;
-    const from = { q: s.q, r: s.r, zMm: groundAt(terrain, s) };
+    const from = { q: s.q, r: s.r, zMm: toolStartMm(terrain, s) };
     const plan = sim.planTrack(autoDrag(terrain, from, fromHeading, to));
     if (plan.fit === "none") continue;
     out.push({ plan, verdict: sim.preview({ type: "build-track", pieces: plan.pieces, structure: "auto" }), chained: false });
@@ -93,7 +91,7 @@ export function autoGradeSamples(free: number, chains: number, seed = "auto-grad
   for (let c = 0; c < chains; c++) {
     const chainSim: Sim = simOn(terrain);
     const s = nodeOfOffset(60 + prng.nextInt(280), 80 + prng.nextInt(186));
-    let from: NodeRef = { q: s.q, r: s.r, zMm: groundAt(terrain, s) };
+    let from: NodeRef = { q: s.q, r: s.r, zMm: toolStartMm(terrain, s) };
     let heading: Heading | undefined = prng.nextInt(4) === 0 ? undefined : (HEADINGS[prng.nextInt(12)] ?? 0);
     const length = 3 + prng.nextInt(4);
     for (let k = 0; k < length; k++) {
@@ -186,7 +184,7 @@ export function describeAutoGrade(s: AutoGradeStats): string[] {
   return [
     `${s.drags} drags, ${s.accepted} accepted (${pct(s.accepted, s.drags)}); rejected: ${[...s.reasons].sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(", ") || "none"}`,
     `new pieces of accepted plans: ${(["ground", "bridge", "tunnel"] as const).map((k) => `${k} ${s.structures.get(k) ?? 0} (${pct(s.structures.get(k) ?? 0, pieces)} of pieces, ${pct(s.structureLengthMm.get(k) ?? 0, length)} of length)`).join(", ")}`,
-    `node − ground over ${s.deviationsMm.length} nodes: on the ground ${pct(s.deviationsMm.filter((d) => d === 0).length, s.deviationsMm.length)}, |d| p50 ${(quantile(abs, 0.5) / 1000).toFixed(2)} m, p95 ${(quantile(abs, 0.95) / 1000).toFixed(2)} m, max ${(quantile(abs, 1) / 1000).toFixed(2)} m; beyond ±4 m ${pct(abs.filter((d) => d > 4000).length, abs.length)} (min ${(quantile(s.deviationsMm, 0) / 1000).toFixed(2)} m, max ${(quantile(s.deviationsMm, 1) / 1000).toFixed(2)} m)`,
+    `node − ground over ${s.deviationsMm.length} nodes: on the ground ${pct(s.deviationsMm.filter((d) => d === 0).length, s.deviationsMm.length)}, |d| p50 ${(quantile(abs, 0.5) / 1000).toFixed(2)} m, p95 ${(quantile(abs, 0.95) / 1000).toFixed(2)} m, max ${(quantile(abs, 1) / 1000).toFixed(2)} m; beyond ±4 m ${pct(abs.filter((d) => d > 4000).length, abs.length)}, beyond ±8 m ${pct(abs.filter((d) => d > 8000).length, abs.length)} (min ${(quantile(s.deviationsMm, 0) / 1000).toFixed(2)} m, max ${(quantile(s.deviationsMm, 1) / 1000).toFixed(2)} m)`,
     `grades over ${s.gradesPermille.length} pieces: 0‰ ${pct(s.gradesPermille.filter((g) => g === 0).length, s.gradesPermille.length)}, (0, 10) ${pct(band(1e-9, 10), s.gradesPermille.length)}, [10, 20) ${pct(band(10, 20), s.gradesPermille.length)}, [20, 30) ${pct(band(20, 30), s.gradesPermille.length)}, [30, 35] ${pct(s.gradesPermille.filter((g) => g >= 30 && g <= 35).length, s.gradesPermille.length)}, over 35 ${pct(s.gradesPermille.filter((g) => g > 35).length, s.gradesPermille.length)}; p50 ${quantile(s.gradesPermille, 0.5).toFixed(1)}‰, p95 ${quantile(s.gradesPermille, 0.95).toFixed(1)}‰; plans with a piece over 35‰: ${s.steepPlans}`,
   ];
 }

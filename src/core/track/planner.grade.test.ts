@@ -10,12 +10,15 @@ import { type World, createWorld } from "../sim/world";
 import { type Terrain, groundMmAt, heightDmAt, isWaterAt, nodeOfOffset } from "../terrain";
 import { createPrng } from "../util/prng";
 import type { Drag, TrackPlan } from "./planner";
+import { GROUND_BAND_MM } from "./structure";
 
 /**
  * D4 auto-grade (owner decision 2026-09-28, "Auto-grade": "Track follows the
  * ground wherever it can within 35‰; the rest is absorbed by
  * cuttings/embankments (±4 m) and, beyond that, automatic bridges and tunnels.
- * The end may sit above or below the ground; the tooltip shows by how much.")
+ * The end may sit above or below the ground; the tooltip shows by how much."),
+ * with the thresholds of the owner decision 2026-09-28 "M2": cuttings and
+ * embankments up to 8 m.
  *
  * Drag cases on shaped 200 × 174-node maps (row 60 runs east; col = q + 30),
  * then properties, the simulation model's open point 4 (do ordinary seeded
@@ -89,19 +92,21 @@ describe("auto-grade drag cases", () => {
     expect(ok(w.run(build(plan.pieces), false)).diff.added.every((r) => r.structure === "ground")).toBe(true);
   });
 
-  it("into a valley: follows the ground to its rims, then crosses on a bridge where it runs more than 4 m up", () => {
-    // A valley 12 m deep with 100‰ sides around col 100, in 20 m land; no water.
-    const t = profileTerrain((col) => 200 - Math.max(0, 120 - 5 * Math.abs(col - 100)));
+  it("into a valley: follows the ground to its rims, then crosses on a bridge where it runs more than 8 m up", () => {
+    // A valley 16 m deep with 100‰ sides around col 100, in 20 m land; no water. (12 m deep until the ±8 m band,
+    // owner decision 2026-09-28 "M2": its 7.8 m crossing is an embankment now.)
+    const t = profileTerrain((col) => 200 - Math.max(0, 160 - 5 * Math.abs(col - 100)));
     const w = createWorld(t);
-    const plan = w.plan(eastDrag(t, 70, 130));
+    const plan = w.plan(eastDrag(t, 60, 140));
     expect(within35(plan.pieces)).toBe(true);
     const d = nodesOf(plan).map((n) => n.zMm - ground(t, n));
-    // On the ground to the rims (col 76 and 124), then 35‰ down from each: 7.8 m up at the middle.
-    expect(d.slice(0, 7)).toEqual([0, 0, 0, 0, 0, 0, 0]);
-    expect(d[30]).toBe(7800);
+    // On the ground to the rims (col 68 and 132), then 35‰ down from each: 10.4 m up at the middle.
+    expect(d.slice(0, 9)).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    expect(d[40]).toBe(10_400);
     expect(Math.min(...d)).toBe(0);
     const structures = ok(w.run(build(plan.pieces), false)).diff.added.map((r) => r.structure);
-    expect(structures.filter((s) => s === "bridge").length).toBeGreaterThan(10);
+    // More than 8 m up from col 93 to col 107: 16 bridge pieces, embankments up to 8 m either side.
+    expect(structures.filter((s) => s === "bridge")).toHaveLength(16);
     expect(structures.filter((s) => s === "tunnel")).toHaveLength(0);
   });
 
@@ -272,17 +277,21 @@ describe("auto-grade properties", () => {
 // Open point 4 and the diorama
 
 describe("the diorama under auto-grade (dev measurements, not gates)", () => {
-  it("admits a tunnel through ordinary seeded hills only where a face is steep: open point 4", async ({ annotate }) => {
+  it("admits a tunnel through ordinary seeded hills under the ±8 m band: open point 4", async ({ annotate }) => {
     // Straight lines of 10–60 pieces over dry diorama land, both ends on the ground, where even the highest 35‰
-    // profile between the ends lies more than 4 m under the ground: no cutting can take them, a tunnel must.
+    // profile between the ends lies more than 8 m (the band) under the ground: no cutting can take them, a tunnel
+    // must. Until the owner decision 2026-09-28 "M2" the band was 4 m: then 300 such lines were found in 20,000
+    // tries, the planner built 10 (3.3%) and the deepest profile 5 (1.7%), the rest failing tunnel-too-shallow (4–6 m
+    // of cover more than 10 m from a portal). At 8 m, a node with less than 6 m of cover is itself a portal.
     const { terrain } = diorama();
     const w = createWorld(terrain);
     const prng = createPrng("tunnel-admission");
     let needTunnel = 0;
     let planned = 0;
     let deepest = 0;
+    let tries = 0;
     let example: { from: NodeRef; heading: Heading; pieces: number } | null = null;
-    for (let k = 0; k < 20_000 && needTunnel < 300; k++) {
+    for (; tries < 40_000 && needTunnel < 300; tries++) {
       const s = nodeOfOffset(40 + prng.nextInt(320), 40 + prng.nextInt(266));
       const h: Heading = HEADINGS[prng.nextInt(12)] ?? 0;
       const n = 10 + prng.nextInt(51);
@@ -295,7 +304,7 @@ describe("the diorama under auto-grade (dev measurements, not gates)", () => {
       const zn = g[n] ?? 0;
       if (Math.abs(zn - z0) > n * rise) continue;
       const highest = nodes.map((_, i) => Math.min(z0 + i * rise, zn + (n - i) * rise));
-      if (!highest.some((z, i) => (heightDmAt(terrain, nodes[i] ?? { q: 0, r: 0 }) ?? 0) * 100 - z > 4000)) continue;
+      if (!highest.some((z, i) => (heightDmAt(terrain, nodes[i] ?? { q: 0, r: 0 }) ?? 0) * 100 - z > GROUND_BAND_MM)) continue;
       needTunnel += 1;
       // The deepest 35‰ profile has the most cover everywhere.
       const lowest = nodes.map((_, i) => Math.max(z0 - i * rise, zn - (n - i) * rise));
@@ -311,15 +320,14 @@ describe("the diorama under auto-grade (dev measurements, not gates)", () => {
     }
     const pct = (x: number) => `${((100 * x) / needTunnel).toFixed(1)}%`;
     await annotate(
-      `${needTunnel} straight lines that need a tunnel: the planner's profile builds ${planned} (${pct(planned)}), the deepest 35‰ profile ${deepest} (${pct(deepest)}); the rest fail tunnel-too-shallow (4–6 m of cover more than 10 m from a portal)`,
+      `${needTunnel} straight lines that need a tunnel in ${tries} tries: the planner's profile builds ${planned} (${pct(planned)}), the deepest 35‰ profile ${deepest} (${pct(deepest)})`,
     );
-    expect(needTunnel).toBe(300);
-    // Some ordinary hills do admit one: where the terrain rises steeply enough past the portal.
-    expect(planned).toBeGreaterThan(0);
+    expect(needTunnel).toBeGreaterThanOrEqual(200);
     if (!example) throw new Error("no tunnel example found");
     await annotate(`example: ${example.pieces} pieces from (${example.from.q}, ${example.from.r}) on heading ${example.heading}`);
-    // But most do not: the gap is the rule's, not the planner's (simulation model open point 4).
-    expect(planned / needTunnel).toBeLessThan(0.5);
+    // Ordinary hills now admit them: measured at 100% on both profiles when written (2026-09-28).
+    expect(planned / needTunnel).toBeGreaterThanOrEqual(0.95);
+    expect(deepest / needTunnel).toBeGreaterThanOrEqual(0.95);
   });
 
   it("accepts most auto-graded free and chained drags; reports reasons, structures, deviations and grades", async ({ annotate }) => {
@@ -329,7 +337,8 @@ describe("the diorama under auto-grade (dev measurements, not gates)", () => {
     const chained = measureAutoGrade(samples.filter((s) => s.chained));
     for (const line of describeAutoGrade(chained)) await annotate(`chained: ${line}`);
     // Loose guards against a degenerate planner (when written, at 1,000 + 150 chains: 72.9% accepted, no piece
-    // over 35‰ outside a pinned span, 86.6% ground pieces).
+    // over 35‰ outside a pinned span, 86.6% ground pieces; under the owner decision 2026-09-28 "M2": 88.7%
+    // accepted, 95.3% of the 1,000 free drags, 88.3% ground pieces).
     expect(stats.accepted / stats.drags).toBeGreaterThan(0.6);
     expect(stats.steepPlans / stats.drags).toBeLessThan(0.01);
     expect(stats.structures.get("bridge") ?? 0).toBeGreaterThan(0);

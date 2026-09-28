@@ -15,8 +15,8 @@ import type { NetworkView, Result, Sim } from "./api";
  * negative fixtures cover them. Since D4 the map is flat dry ground at 0 m
  * (until D4 the seeded map "d2-properties", whose ground at 10–40 m the D4
  * terrain rules would judge the generator's track at 0 m against): the
- * generator's track lies on it, and its level at 7 m is a bridge under
- * structure auto and `needs-bridge` under ground.
+ * generator's track lies on it, and its level at 9 m (7 m until the ±8 m
+ * band) is a bridge under structure auto and `needs-bridge` under ground.
  */
 
 const SIZE = { columns: 80, rows: 70 } as const;
