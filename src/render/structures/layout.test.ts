@@ -8,7 +8,11 @@ import { type LayoutEnv, layoutBridge } from "./layout";
 import { RunPath } from "./runPath";
 import { type StructureRun, isPortalEnd, structureRuns } from "./runs";
 
-const terrain = makeTerrain(90, 60, () => 200);
+/**
+ * Flat dry land at 20 m, with a 30 m hill on rows 8–12 from q = 25 east and a 35 m one on rows 28–32 from q = 35 east
+ * for the tunnels: since D4 a tunnel must lie deeper than a cutting (8 m, owner decision 2026-09-28 "M2").
+ */
+const terrain = makeTerrain(90, 60, (q, r) => (r >= 8 && r <= 12 && q >= 25 ? 300 : r >= 28 && r <= 32 && q >= 35 ? 350 : 200));
 
 function world() {
   return createWorld(terrain);
@@ -31,10 +35,11 @@ function execute(w: ReturnType<typeof world>, cmd: Command): void {
 describe("structure runs", () => {
   it("groups a chain's bridge and tunnel pieces into runs and names what lies beyond each end", () => {
     const w = world();
-    execute(w, build(straights(10, 20, 5, 20_000), "ground"));
-    execute(w, build(straights(15, 20, 6, 20_000), "bridge"));
-    execute(w, build(straights(21, 20, 3, 20_000), "ground"));
-    execute(w, build(straights(24, 20, 4, 20_000), "tunnel"));
+    // On row 10, the tunnel under the 30 m hill (10 m of cover) from its foot at q = 24.
+    execute(w, build(straights(10, 10, 5, 20_000), "ground"));
+    execute(w, build(straights(15, 10, 6, 20_000), "bridge"));
+    execute(w, build(straights(21, 10, 3, 20_000), "ground"));
+    execute(w, build(straights(24, 10, 4, 20_000), "tunnel"));
     const runs = structureRuns(w.network() as NetworkView);
     expect(runs.map((r) => [r.structure, r.pieces.length, r.ends])).toEqual([
       ["bridge", 6, ["ground", "ground"]],
@@ -47,7 +52,7 @@ describe("structure runs", () => {
     const order = qs.map((id) => nodes[id]?.q);
     expect(order).toEqual([...order].sort((a, b) => (order[0] === 15 ? (a ?? 0) - (b ?? 0) : (b ?? 0) - (a ?? 0))));
     expect(bridge.key.startsWith("bridge:")).toBe(true);
-    // A tunnel end at a buffer opens to daylight only under less than 12 m of ground (here: none).
+    // A tunnel end at a buffer opens to daylight only under less than 12 m of ground (here: 10 m).
     const tunnel = runs[1] as StructureRun;
     expect([isPortalEnd(terrain, tunnel, 0), isPortalEnd(terrain, tunnel, 1)]).toEqual([true, true]);
     expect(isPortalEnd(terrain, bridge, 0)).toBe(false);
@@ -55,11 +60,12 @@ describe("structure runs", () => {
 
   it("opens no portal at a deep dead end, and treats a closed loop of one structure as endless", () => {
     const w = world();
+    // Level into the 35 m hill from its foot at q = 34 (until D4 it fell 15 m in 15 m, which the 35‰ rule rejects).
     execute(w, build(straights(30, 30, 4, 20_000), "ground"));
-    execute(w, build(straights(34, 30, 4, 20_000 - 15_000 * 0).map((s, i) => ({ ...s, from: { ...s.from, zMm: 20_000 - 5000 * Math.min(i, 3) }, z1Mm: 20_000 - 5000 * Math.min(i + 1, 3) })), "tunnel"));
+    execute(w, build(straights(34, 30, 4, 20_000), "tunnel"));
     const run = structureRuns(w.network() as NetworkView)[0] as StructureRun;
     expect(run.ends).toEqual(["ground", "buffer"]);
-    // The buffer lies 15 m under the 20 m ground: a dead end inside the hill.
+    // The buffer lies 15 m under the 35 m hill: a dead end inside it.
     expect([isPortalEnd(terrain, run, 0), isPortalEnd(terrain, run, 1)]).toEqual([true, false]);
   });
 });
@@ -67,14 +73,15 @@ describe("structure runs", () => {
 describe("run path", () => {
   it("follows a straight run east, with right to the south and signed offsets", () => {
     const w = world();
-    execute(w, build(straights(15, 20, 4, 12_000), "bridge"));
+    // 2 m over the 20 m ground (until D4 at 12 m, a deck under the ground, which D4 rejects).
+    execute(w, build(straights(15, 20, 4, 22_000), "bridge"));
     const run = structureRuns(w.network() as NetworkView)[0] as StructureRun;
     const path = RunPath.ofRun(run.pieces);
     expect(path.lengthM).toBeCloseTo(20, 9);
     const start = toWorld(run.nodes[0]);
     const p = path.toSim(0, 3, 1, { x: 0, y: 0, z: 0 });
     const eastward = run.nodes[0].q === 15;
-    expect(p.z).toBeCloseTo(13, 9);
+    expect(p.z).toBeCloseTo(23, 9);
     expect(p.x).toBeCloseTo(start.x, 9);
     expect(p.y).toBeCloseTo(start.y + (eastward ? -3 : 3), 9);
     const near = path.nearest(start.x + (eastward ? 7 : -7), start.y - 2, { s: 0, d: 0 });
@@ -87,7 +94,7 @@ describe("run path", () => {
 
   it("follows a curve with exact end tangents", () => {
     const w = world();
-    const curve: PieceSpec = { kind: "curve", from: { q: 20, r: 20, zMm: 12_000 }, heading: 0, turn: 1, radiusM: 60, variant: 0, z1Mm: 12_000 };
+    const curve: PieceSpec = { kind: "curve", from: { q: 20, r: 20, zMm: 22_000 }, heading: 0, turn: 1, radiusM: 60, variant: 0, z1Mm: 22_000 };
     execute(w, build([curve], "bridge"));
     const run = structureRuns(w.network() as NetworkView)[0] as StructureRun;
     const path = RunPath.ofRun(run.pieces);

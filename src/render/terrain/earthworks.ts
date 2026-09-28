@@ -29,6 +29,14 @@ import { CHUNK_NODES, chunkCounts } from "./terrainGeometry";
  * natural, blending in fully by twice that, so there is no step at the edge.
  * Fills continue their slope under water (the opaque water plane hides them),
  * so a bank meets the shore as a slope, not a shelf with vertical steps.
+ *
+ * **Bridges: a cut only** (D4, owner decision 2026-09-28 "M2": a deck may sit
+ * up to 2 m below the terrain within 15 m of an abutment). A bridge piece whose
+ * deck the natural ground comes near (within DAYLIGHT_ROUND_M of its lowest bed,
+ * anywhere its cut could reach: `cutsUnderDeck`) takes the cut envelope U and
+ * no fill, so the ground is cut down to the deck where it would stand over it,
+ * with the same 1 : 1.5 slopes, and never raised under a bridge. A deck clear of
+ * the ground moves nothing and never enters the pass, and tunnels never do.
  * (Round-1 earthworks-lite, `329b69a`, had sharp kinks, a hard 5 cm step and a
  * fill capped 10 cm under the water; see the render pass iteration finding.)
  *
@@ -89,7 +97,7 @@ export const CAP_FADE_M = 10;
  * past any plan box, which the LOD0 node scan (one LOD0 step of slack) does not see.
  */
 export const LOD1_SCAN_MARGIN_M = 2 * LATTICE_SPACING_M;
-/** Only ground structure gets earthworks; bridges and tunnels are D4's. */
+/** Only ground structure gets full earthworks; bridges near the ground get a cut only (`cutsUnderDeck`), tunnels none. */
 const CONFORMED: ReadonlySet<Structure> = new Set(["ground"]);
 
 const HALF_SQRT3 = SQRT3 / 2;
@@ -121,6 +129,8 @@ export interface PieceReach {
 /** A piece prepared for the conform: its centreline, heights and how far its earthworks can reach (LOD0 here, LOD1 in `lod1`). */
 export interface EarthworkPiece extends PieceReach {
   readonly key: string;
+  /** A bridge: the cut envelope only, never a fill (see the module comment). */
+  readonly cutOnly: boolean;
   readonly prims: readonly RenderPrim[];
   readonly lengthM: number;
   readonly z0M: number;
@@ -154,6 +164,30 @@ export function conforms(piece: PieceInput): boolean {
   return piece.structure === undefined || CONFORMED.has(piece.structure);
 }
 
+/** The highest bed a piece's fill envelope stands on: −Infinity for a cut-only piece, whose fill is none. */
+function fillBedMax(p: { readonly z0M: number; readonly z1M: number; readonly cutOnly: boolean }): number {
+  return p.cutOnly ? Number.NEGATIVE_INFINITY : p.z0M < p.z1M ? p.z1M : p.z0M;
+}
+
+/**
+ * Whether a bridge piece takes a cut (the module comment): the natural ground anywhere its cut envelope could
+ * reach, at either LOD, rises within DAYLIGHT_ROUND_M of its lowest bed. Below that the envelope lies more than the
+ * smooth clamp's band over every natural height it reaches, so it would move nothing. False for any other piece.
+ */
+export function cutsUnderDeck(terrain: Terrain, piece: PieceInput): boolean {
+  if (piece.structure !== "bridge") return false;
+  const c = centrelineIndex(piece);
+  const bedMin = Math.min(piece.z0Mm, piece.z1Mm) / 1000 - BED_BELOW_TRACK_M;
+  const reach1 = convergedReach(terrain, c, bedMin, Number.NEGATIVE_INFINITY, reachForRelief(0), LOD1_SCAN_MARGIN_M);
+  const grow = reach1 + LOD1_SCAN_MARGIN_M;
+  return naturalRange(terrain, c.minX - grow, c.minY - grow, c.maxX + grow, c.maxY + grow).max > bedMin - DAYLIGHT_ROUND_M;
+}
+
+/** Whether the conform takes a piece at all: ground (full earthworks) or a bridge near the ground (a cut only). */
+export function takesEarthworks(terrain: Terrain, piece: PieceInput): boolean {
+  return conforms(piece) || cutsUnderDeck(terrain, piece);
+}
+
 /**
  * Prepares a piece: its centreline index (prim lengths, arc ends and plan box,
  * all from `geometry/sample.ts`), and its reach at each LOD from the natural
@@ -164,8 +198,9 @@ export function earthworkPiece(terrain: Terrain, piece: PieceInput): EarthworkPi
   const c = centrelineIndex(piece);
   const z0M = piece.z0Mm / 1000 - BED_BELOW_TRACK_M;
   const z1M = piece.z1Mm / 1000 - BED_BELOW_TRACK_M;
+  const cutOnly = piece.structure === "bridge";
   const bedMin = Math.min(z0M, z1M);
-  const bedMax = Math.max(z0M, z1M);
+  const bedMax = fillBedMax({ z0M, z1M, cutOnly });
   const reach = convergedReach(terrain, c, bedMin, bedMax, reachForRelief(2), 0);
   // LOD1's fixed point lies at or past LOD0's (its scan is wider), so its search starts there.
   const reach1 = convergedReach(terrain, c, bedMin, bedMax, reach, LOD1_SCAN_MARGIN_M);
@@ -174,6 +209,7 @@ export function earthworkPiece(terrain: Terrain, piece: PieceInput): EarthworkPi
   return withReach(
     {
       key: piece.key,
+      cutOnly,
       prims: c.prims,
       lengthM: c.lengthM,
       z0M,
@@ -196,6 +232,7 @@ export function withReach(p: Omit<EarthworkPiece, keyof PieceReach | "lod1">, re
   const { minX, minY, maxX, maxY } = p.centreBox;
   return {
     key: p.key,
+    cutOnly: p.cutOnly,
     prims: p.prims,
     lengthM: p.lengthM,
     z0M: p.z0M,
@@ -280,6 +317,15 @@ function naturalCapRise(t: Terrain, box: Box, bedMin: number, bedMax: number, ma
   const range = naturalRange(t, box.minX - grow, box.minY - grow, box.maxX + grow, box.maxY + grow);
   const relief = Math.max(0, range.max - bedMin, bedMax - range.min);
   return Math.max(0, relief + DAYLIGHT_ROUND_M + 1 / SIDE_SLOPE_RUN - slopeRiseM(MAX_REACH_M));
+}
+
+/**
+ * How far a cut from bed height `zM` at plan point (x, y) reaches through the natural relief around it: the reach a
+ * ground piece's rounded end has there (`convergedReach` for a point, cut only). The hill plug behind a tunnel portal
+ * sizes itself by it, so it covers the approach cutting's whole rounded end however the hill rises behind the face.
+ */
+export function pointCutReachM(terrain: Terrain, x: number, y: number, zM: number): number {
+  return convergedReach(terrain, { minX: x, minY: y, maxX: x, maxY: y }, zM - BED_BELOW_TRACK_M, Number.NEGATIVE_INFINITY, reachForRelief(0), 0);
 }
 
 /** Whether box `a` grown by `grow` meets box `b`. */
@@ -382,20 +428,22 @@ function neighbourShortfall(set: SettleSet, self: number, reach: number): number
   if (!p) return 0;
   const rise = slopeRiseM(reach);
   const cutFloor = (p.z0M < p.z1M ? p.z0M : p.z1M) + rise - DAYLIGHT_ROUND_M;
-  const fillTop = (p.z0M < p.z1M ? p.z1M : p.z0M) - rise + DAYLIGHT_ROUND_M;
+  // A cut-only piece has no fill to drop, so a neighbour's cut can pass under it.
+  const fillTop = fillBedMax(p) - rise + DAYLIGHT_ROUND_M;
   let need = 0;
   set.forNear(self, p.centreBox, reach + NEIGHBOUR_SAMPLE_M, (_j, q, qReach) => {
-    // A neighbour whose beds all lie between the two bounds cannot fail (its fill lies under its bed, its cut over it).
-    if ((q.z0M < q.z1M ? q.z1M : q.z0M) <= cutFloor && (q.z0M < q.z1M ? q.z0M : q.z1M) >= fillTop) return;
+    // A neighbour whose beds all lie between the two bounds cannot fail (its fill lies under its bed, its cut over
+    // it; a cut-only neighbour has no fill to rise over the cut).
+    if (fillBedMax(q) <= cutFloor && (q.z0M < q.z1M ? q.z0M : q.z1M) >= fillTop) return;
     const b = q.bedSamples;
     for (let k = 0; k + 2 < b.length; k += 3) {
       const z = b[k + 2] ?? 0;
-      if (z <= cutFloor && z >= fillTop) continue;
+      if ((q.cutOnly || z <= cutFloor) && z >= fillTop) continue;
       const d = nearestOnCentreline(p, b[k] ?? 0, b[k + 1] ?? 0, near).d;
       const gap = (d > reach ? d - reach : reach - d) - NEIGHBOUR_SAMPLE_M;
       if (gap >= qReach) continue;
       const e = slopeRiseM(gap);
-      const short = Math.max(z - e - cutFloor, fillTop - (z + e));
+      const short = Math.max(q.cutOnly ? Number.NEGATIVE_INFINITY : z - e - cutFloor, fillTop - (z + e));
       if (short <= 0) continue;
       if (short > shortfall.worst) shortfall.worst = short;
       const until = Math.min(reach + (short * SIDE_SLOPE_RUN) / 2, d + NEIGHBOUR_SAMPLE_M + qReach);
@@ -415,7 +463,7 @@ function settledReach(t: Terrain, set: SettleSet, self: number, margin: number, 
   const p = set.pieces[self];
   if (!p) return from;
   const bedMin = p.z0M < p.z1M ? p.z0M : p.z1M;
-  const bedMax = p.z0M < p.z1M ? p.z1M : p.z0M;
+  const bedMax = fillBedMax(p);
   let reach = from;
   for (;;) {
     if (reach >= MAX_REACH_M) return MAX_REACH_M;
@@ -477,7 +525,7 @@ export function settledPiece(terrain: Terrain, pieces: readonly EarthworkPiece[]
   const capAt = (reach: Float64Array, r: number, margin: number): number => {
     if (r < MAX_REACH_M) return 0;
     const bedMin = p.z0M < p.z1M ? p.z0M : p.z1M;
-    const bedMax = p.z0M < p.z1M ? p.z1M : p.z0M;
+    const bedMax = fillBedMax(p);
     const natural = naturalCapRise(terrain, p.centreBox, bedMin, bedMax, margin);
     neighbourShortfall(new SettleSet(pieces, reach), i, MAX_REACH_M);
     return Math.max(natural, shortfall.worst);
@@ -490,7 +538,7 @@ export function settledPiece(terrain: Terrain, pieces: readonly EarthworkPiece[]
 
 /** Prepares `inputs` (the conformed ones) and settles their reaches beside each other, from scratch. */
 export function earthworkPieces(terrain: Terrain, inputs: readonly PieceInput[]): EarthworkPiece[] {
-  const pieces = inputs.filter(conforms).map((p) => earthworkPiece(terrain, p));
+  const pieces = inputs.filter((p) => takesEarthworks(terrain, p)).map((p) => earthworkPiece(terrain, p));
   const reach0 = Float64Array.from(pieces, (p) => p.reachM);
   const reach1 = Float64Array.from(pieces, (p) => p.lod1.reachM);
   settleReaches(terrain, pieces, reach0, reach1, pieces.keys());
@@ -577,7 +625,7 @@ export function conformedHeightM(pieces: readonly EarthworkPiece[], x: number, y
     const bed = bedAt(p, n.s);
     const rise = r.capRiseM === 0 ? slopeRiseM(n.d) : riseAt(r, n.d);
     if (bed + rise < u) u = bed + rise;
-    if (bed - rise > l) l = bed - rise;
+    if (!p.cutOnly && bed - rise > l) l = bed - rise;
   }
   return conformRule(natural, u, l);
 }
@@ -596,6 +644,8 @@ export function conformRule(natural: number, u: number, l: number): number {
   if (Number.isNaN(natural) || u === Infinity) return natural;
   let c: number;
   if (l >= u) c = u;
+  // Only cut-only pieces (bridges) reach here: the two-sided clamp's limit as l falls away, a smooth minimum.
+  else if (l === -Infinity) c = smoothMin(natural, u, DAYLIGHT_ROUND_M);
   else {
     const mid = (u + l) / 2;
     const half = (u - l) / 2;
@@ -1013,6 +1063,7 @@ export class ChunkPass {
     // the x range within the reach (plus a micrometre, so rounding never drops a point the reach would keep).
     const c = p.centreBox;
     const out = r.reachM + 1e-6;
+    const cutOnly = p.cutOnly;
     let evaluated = 0;
     for (let rs = rsA; rs <= rsB; rs++) {
       const parity = rs & 1;
@@ -1031,16 +1082,17 @@ export class ChunkPass {
         if (n.d >= r.reachM) continue;
         const bed = bedAt(p, n.s);
         const rise = r.capRiseM === 0 ? slopeRiseM(n.d) : riseAt(r, n.d);
+        const fill = cutOnly ? -Infinity : bed - rise;
         const g = rowBase + cs;
         if (this.stamp[g] !== this.gen) {
           this.stamp[g] = this.gen;
           this.upper[g] = bed + rise;
-          this.lower[g] = bed - rise;
+          this.lower[g] = fill;
           this.dist[g] = n.d;
           this.touched[this.touchedCount++] = g;
         } else {
           if (bed + rise < (this.upper[g] ?? Infinity)) this.upper[g] = bed + rise;
-          if (bed - rise > (this.lower[g] ?? -Infinity)) this.lower[g] = bed - rise;
+          if (fill > (this.lower[g] ?? -Infinity)) this.lower[g] = fill;
           if (n.d < (this.dist[g] ?? Infinity)) this.dist[g] = n.d;
         }
       }

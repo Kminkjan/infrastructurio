@@ -13,6 +13,7 @@ import {
   conformRule,
   conformTerrain,
   conformedHeightM,
+  cutsUnderDeck,
   earthworkPiece,
   earthworkPotential,
   nearestOnPiece,
@@ -29,6 +30,11 @@ function piece(spec: PieceSpec): PieceInput {
 
 function straight(q: number, r: number, heading: number, zMm: number, z1Mm = zMm): PieceInput {
   return piece({ kind: "straight", from: { q, r, zMm }, heading, z1Mm } as PieceSpec);
+}
+
+/** Plan metres of lattice node (q, r). */
+function toWorldM(q: number, r: number): { x: number; y: number } {
+  return { x: 5 * (q + r / 2), y: 2.5 * Math.sqrt(3) * r };
 }
 
 /** 120 × 80 nodes (2 × 2 chunks), flat at 20 m. */
@@ -236,6 +242,28 @@ describe("earthworks conform (the rule)", () => {
     const field = conformTerrain(flat, { pieces: [...low, ...high] });
     const y0 = 40 * 2.5 * Math.sqrt(3);
     for (let x = 60; x < 90; x += 0.5) expect(field.heightAtM(x, y0)).toBeLessThanOrEqual(20 + 1e-5);
+  });
+
+  it("gives a bridge near the ground a cut and no fill, and one clear of it nothing (D4, M2)", () => {
+    const bridge = (zMm: number): PieceInput => ({ ...straight(20, 40, 0, zMm), structure: "bridge" });
+    // Flat land at 20 m: a deck at 20.5 m has the ground within the clamp's 0.6 m band, one at 21 m does not.
+    expect(cutsUnderDeck(flat, bridge(20_500))).toBe(true);
+    expect(cutsUnderDeck(flat, bridge(21_000))).toBe(false);
+    expect(cutsUnderDeck(flat, straight(20, 40, 0, 20_000))).toBe(false);
+    expect(cutsUnderDeck(flat, { ...straight(20, 40, 0, 12_000), structure: "tunnel" })).toBe(false);
+    // With no fill envelope the rule is the two-sided clamp's limit: a smooth minimum under the cut, natural below it.
+    expect(conformRule(25, 20, -Infinity)).toBe(20);
+    expect(conformRule(15, 20, -Infinity)).toBe(15);
+    expect(conformRule(19.95, 20, -Infinity)).toBeCloseTo(smoothMin(19.95, 20, DAYLIGHT_ROUND_M), 12);
+    expect(conformRule(20 - 1e-3, 20 + 1e6, 20 - 2e6)).toBeCloseTo(conformRule(20 - 1e-3, 20 + 1e6, -Infinity), 6);
+    // A deck 1 m under a 21 m hump on 20 m land is cut to, and the land around it is never raised.
+    const hump = makeTerrain(120, 80, (q, r) => (Math.abs(q - 21) <= 1 && Math.abs(r - 40) <= 1 ? 210 : 200));
+    const deck = earthworkPiece(hump, bridge(20_000));
+    expect(deck.cutOnly).toBe(true);
+    // The piece's midpoint, between nodes (20, 40) and (21, 40).
+    const at = toWorldM(20.5, 40);
+    expect(conformedHeightM([deck], at.x, at.y, 21)).toBe(20);
+    for (const d of [0, 2, 5, 9]) expect(conformedHeightM([deck], at.x + 1, at.y + d, 19)).toBe(19);
   });
 
   it("finds the nearest centreline point on lines and arcs", () => {

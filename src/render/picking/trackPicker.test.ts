@@ -1,12 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { Vector3 } from "three";
-import { createSim, toWorld } from "../../core/sim/api";
+import { makeTerrain } from "../../../tests/support/makeTerrain";
+import { simOn } from "../../../tests/support/simOn";
+import { toWorld } from "../../core/sim/api";
 import { ISO_PITCH_RAD, type IsoView, worldToScreen } from "../camera/isoMath";
 import { simToWorld } from "../coords";
 import { NODE_PICK_RADIUS_PX, PICK_LIFT_M, TRACK_PICK_RADIUS_PX, pickTrack, pickTrackStack } from "./trackPicker";
 
+/**
+ * Flat dry land at 3 m, where the ground runs lie, with a 15 m hill on rows 28–32 from q = 9 east for the tunnel.
+ * Since D4 the sim judges each piece against the terrain (until then the seeded maps "d3-pick" and "d4-pick").
+ */
+const TERRAIN = makeTerrain(80, 60, (q, r) => (r >= 28 && r <= 32 && q >= 9 ? 150 : 30), -100);
+
 function setup() {
-  const sim = createSim({ terrain: { seed: "d3-pick", columns: 80, rows: 60 } });
+  const sim = simOn(TERRAIN);
   // A 20 m run east from (10, 20) at 3 m, and an elevated run at 12 m further north.
   sim.execute({
     type: "build-track",
@@ -71,7 +79,7 @@ describe("track picker", () => {
      * and a tunnel at 3 m along r = 30.
      */
     function crossing() {
-      const sim = createSim({ terrain: { seed: "d4-pick", columns: 80, rows: 60 } });
+      const sim = simOn(TERRAIN);
       const east = (q0: number, r: number, n: number, zMm: number) =>
         Array.from({ length: n }, (_, i) => ({ kind: "straight", from: { q: q0 + i, r, zMm }, heading: 0, z1Mm: zMm }) as const);
       const north = Array.from({ length: 8 }, (_, i) => ({ kind: "straight", from: { q: 13 - i, r: 16 + 2 * i, zMm: 12_192 }, heading: 3, z1Mm: 12_192 }) as const);

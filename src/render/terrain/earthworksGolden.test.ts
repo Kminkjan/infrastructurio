@@ -161,22 +161,29 @@ describe("earthworks and terrain bake output (a byte pin)", () => {
       shadingB: fnv([b.normals, b.colors, b.dryColors, b.waterDistance]),
       splat: fnv([splat.splat, splat.field, splat.ao]),
     };
+    // Re-recorded 2026-09-28 for D4 (owner decision "M2"), deliberately: the pinned network changed, not the conform.
+    // The 40 plans are auto-graded under D4's rules, so some pieces are bridges and tunnels the conform leaves alone
+    // (411 ground pieces until D4, when every plan followed the ground and nothing was judged); since M2 the band is
+    // ±8 m (cuts and fills to 8.5 m and 8.7 m here, 4.3 m and 6.5 m until D4) and a drag on water starts at the deck
+    // height. The bridges near the ground now take a cut (`cutsUnderDeck`). Checked before re-recording: under the D4
+    // core half's rules (±4 m, no dip at abutments, no deck start) this code with bridge cuts disabled drew every hash
+    // of the merged head c21e941 exactly (299 pieces, 5,406 refined), so the refactor itself moved no byte; with bridge
+    // cuts on, one deck within 0.6 m of the ground there added 7 refined triangles. The terrain bakes (shading, splat)
+    // are unchanged.
     expect(hashes).toEqual({
-      pieces: 411,
-      refined: 6458,
-      withEarthworks: 38,
-      cleared: 255,
-      maxCutFill: [4.316668701171871, 6.461734008789062],
-      // Positions, normals, colours and indices as recorded at 81663f8; the earthwork attributes since the PR #83
-      // review's seam corners (both LODs) and converged LOD1 reach (LOD1 only).
-      lod0: "ae0326d8 f61ad335 68f93f83 ef0087f3 172c603b",
-      lod1: "de4c69ec 0b3769cb f7cf5dc0 f0d18e12 3d8f5a3b",
-      heightfield0: "46021029",
-      heightfield1: "9278cb59",
-      reach: "9951e90e",
-      nearest: "f56f9205",
-      clearedFlags: "d62db300",
-      surfaces: "7ff955c6",
+      pieces: 327,
+      refined: 6670,
+      withEarthworks: 37,
+      cleared: 306,
+      maxCutFill: [8.487522315979003, 8.74652214050293],
+      lod0: "2da0e401 15b116a5 b7f5f408 3881496b 4a198c0d",
+      lod1: "d7e135fa e2e48d8b 6d22e4f6 1b7daadb 09b7907d",
+      heightfield0: "6447579c",
+      heightfield1: "af9d8f19",
+      reach: "10a1303f",
+      nearest: "ccf44728",
+      clearedFlags: "8174592b",
+      surfaces: "6f39970e",
       shadingD11a: "ab72930b",
       shadingB: "aed09c41",
       splat: "d14a2fa6",

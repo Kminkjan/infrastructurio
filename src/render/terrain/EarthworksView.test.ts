@@ -3,6 +3,7 @@ import { type BufferGeometry, MeshBasicMaterial } from "three";
 import { type Command, type PieceSpec, type TrackPlan, createSim } from "../../core/sim/api";
 import { DIORAMA_PARAMS, diorama, groundPlans } from "../../../tests/support/groundPlans";
 import { makeTerrain } from "../../../tests/support/makeTerrain";
+import { simOn } from "../../../tests/support/simOn";
 import { steepestDrawnFace } from "../../../tests/support/drawnFaces";
 import { type ClearableLayer, SceneryClearance } from "../scenery/clearance";
 import { EARTHWORK_ATTRIBUTE, EARTHWORK_ITEM_SIZE } from "../art/shaderChunks/earthwork";
@@ -39,11 +40,12 @@ function snapshotChunks(view: TerrainView, t: { columns: number; rows: number })
 
 /** A ridge across a small map with a run cut through it: 130 × 70 nodes (3 × 2 chunks at LOD0). */
 function ridgeSetup(options: { budgetMs?: number; clockStepMs?: number; enabled?: boolean; scenery?: SceneryClearance } = {}) {
-  const params = { seed: "ridge", columns: 130, rows: 70 };
-  // A hand-shaped terrain for the view, and a sim over a flat seeded map of the same size (its heights do not matter:
-  // the pieces carry their own heights, and the view conforms the view's terrain).
+  const params = { columns: 130, rows: 70 };
+  // A hand-shaped terrain for the view and the sim (until D4 the sim ran on a seeded map of the same size, since its
+  // heights did not matter; D4's rules judge each piece against the terrain). The run cuts 6 m through the ridge's
+  // crest, a cutting within the ±8 m band (owner decision 2026-09-28 "M2"; at ±4 m it was a tunnel).
   const terrain = makeTerrain(params.columns, params.rows, (_q, _r, col) => 200 + Math.max(0, 60 - Math.abs(col - 64) * 4));
-  const sim = createSim({ terrain: params });
+  const sim = simOn(terrain);
   const view = new TerrainView(terrain, material, material);
   let t = 0;
   let frames = 0;
@@ -163,9 +165,11 @@ describe("earthworks view", () => {
     // PR #83 re-review: a piece's reach now depends on its neighbours' beds, so an edit must re-derive the pieces
     // beside it (and an undo lower them again). Flat ground at 20 m; a run on row 30 at 20 m, one 3 rows north at
     // 26 m, one 3 rows south at 14 m, and a 60° run at 23 m north of them.
-    const params = { seed: "neighbours", columns: 130, rows: 70 };
+    // The runs lie within the ±8 m band, so all are ground (owner decision 2026-09-28 "M2"; at ±4 m the 26 m and
+    // 14 m runs were a bridge and a tunnel). The sim judges the view's terrain (until D4 a seeded map).
+    const params = { columns: 130, rows: 70 };
     const terrain = makeTerrain(params.columns, params.rows, () => 200);
-    const sim = createSim({ terrain: params });
+    const sim = simOn(terrain);
     const shading = computeTerrainShading(terrain);
     const view = new RecordingTarget(shading);
     const earthworks = new EarthworksView({ terrain, target: view, requestFrame: () => {}, now: () => 0, budgetMs: Infinity });
@@ -255,12 +259,14 @@ describe("earthworks view", () => {
   });
 
   it("spreads a chunk too big for one slice over frames, drawing the same bytes (a run capped at 120 m)", async ({ annotate }) => {
-    // PR #83 re-review: a 20-piece run 90 m over flat ground reaches the 120 m cap, and one chunk's pass took 13.6 ms,
+    // PR #83 re-review: a 20-piece run 90 m over flat ground reached the 120 m cap, and one chunk's pass took 13.6 ms,
     // over the 8 ms slice, with its mesh on top. Each step now yields between pieces, resolve blocks and mesh rows.
-    const params = { seed: "capped", columns: 200, rows: 160 };
-    const terrain = makeTerrain(params.columns, params.rows, () => 200);
-    const sim = createSim({ terrain: params });
-    const run: PieceSpec[] = Array.from({ length: 20 }, (_, i) => ({ kind: "straight", from: { q: 60 + i, r: 80, zMm: 110_000 }, heading: 0, z1Mm: 110_000 }));
+    // Since D4 ground track stays within ±8 m of the terrain, so the capped reach comes from a cut instead: a run on
+    // 20 m land 43 m south of a 120 m plateau (rows 90 on), whose 1 : 1.5 cut slope cannot daylight within 120 m.
+    const params = { columns: 200, rows: 160 };
+    const terrain = makeTerrain(params.columns, params.rows, (_q, r) => (r >= 90 ? 1200 : 200));
+    const sim = simOn(terrain);
+    const run: PieceSpec[] = Array.from({ length: 20 }, (_, i) => ({ kind: "straight", from: { q: 60 + i, r: 80, zMm: 20_000 }, heading: 0, z1Mm: 20_000 }));
     expect(sim.execute(build(run)).ok).toBe(true);
     const whole = new TerrainView(terrain, material, material);
     const once = new EarthworksView({ terrain, target: whole, requestFrame: () => {}, now: () => 0, budgetMs: Infinity });
@@ -316,7 +322,7 @@ describe("earthworks view", () => {
     expect(layer.cleared).toEqual([false, false, false, false]);
   });
 
-  it("never conforms bridges or tunnels, but clears scenery under a bridge and around a portal (D4)", () => {
+  it("never conforms bridges or tunnels clear of the ground, but clears scenery under a bridge and around a portal (D4)", () => {
     const y0 = 30 * 2.5 * Math.sqrt(3);
     const points = [
       { x: 280, y: y0 }, // on the run
@@ -326,11 +332,18 @@ describe("earthworks view", () => {
       { x: 250 - PORTAL_SCENERY_CLEARANCE_M - 1, y: y0 + 3 }, // beyond the portal's reach
     ];
     const terrain = makeTerrain(130, 70, (_q, _r, col) => 200 + Math.max(0, 60 - Math.abs(col - 64) * 4));
-    for (const structure of ["bridge", "tunnel"] as const) {
+    // The same plan as a bridge 1 m over the ridge's 26 m crest, and as a tunnel 9 m under the 20 m land (15 m under
+    // the crest). Until D4's rules both lay at 20 m, a deck under the ridge and a tunnel no deeper than a cutting.
+    for (const [structure, zMm] of [
+      ["bridge", 27_000],
+      ["tunnel", 11_000],
+    ] as const) {
       const layer = new FakeLayer(points);
       const s = ridgeSetup({ scenery: new SceneryClearance(terrain, [layer]) });
       const natural = snapshotChunks(s.view, s.terrain);
-      expect(s.sim.execute({ type: "build-track", pieces: s.run, structure }).ok).toBe(true);
+      const pieces = s.run.map((p) => ({ ...p, from: { ...p.from, zMm }, z1Mm: zMm }));
+      const built = s.sim.execute({ type: "build-track", pieces, structure });
+      expect(built.ok, JSON.stringify(built)).toBe(true);
       s.earthworks.sync(s.sim.network());
       expect(s.earthworks.stats).toMatchObject({ pieces: 0, chunksWithEarthworks: 0, refinedTriangles: 0 });
       const after = snapshotChunks(s.view, s.terrain);
@@ -342,6 +355,42 @@ describe("earthworks view", () => {
       s.earthworks.sync(s.sim.network());
       expect(layer.cleared.every((c) => !c)).toBe(true);
     }
+  });
+
+  it("cuts the ground down to a bridge deck set into the bank, and never raises it under a bridge (D4, M2)", () => {
+    // A deck at 25 m along the ridge's run: 5 m over the 20 m land, 1 m under the 26 m crest (x = 320 m). Its nodes
+    // on the ridge are abutments (within the ±8 m band), so the dip is allowed (owner decision 2026-09-28 "M2").
+    const s = ridgeSetup();
+    const natural = snapshotChunks(s.view, s.terrain);
+    const pieces = s.run.map((p) => ({ ...p, from: { ...p.from, zMm: 25_000 }, z1Mm: 25_000 }));
+    const built = s.sim.execute({ type: "build-track", pieces, structure: "bridge" });
+    expect(built.ok, JSON.stringify(built)).toBe(true);
+    s.earthworks.sync(s.sim.network());
+    // Only the pieces near the crest take the cut: the rest of the deck stands clear of the ground.
+    const taken = s.earthworks.stats.pieces;
+    expect(taken).toBeGreaterThan(0);
+    expect(taken).toBeLessThan(pieces.length);
+    const y = 30 * 2.5 * Math.sqrt(3);
+    const f = s.earthworks.heightfield;
+    expect(f.naturalAtM(320, y)).toBeCloseTo(26, 1);
+    expect(f.heightAtM(320, y)).toBeCloseTo(25, 5);
+    // Never a fill under a bridge: the drawn ground lies at or under the natural ground everywhere near the run, and
+    // under the deck (plus the smooth clamp's band) along it.
+    let cut = 0;
+    for (let x = 240; x <= 410; x += 0.7) {
+      for (let dy = -20; dy <= 20; dy += 0.7) {
+        const drawn = f.heightAtM(x, y + dy);
+        expect(drawn).toBeLessThanOrEqual(f.naturalAtM(x, y + dy) + 1e-4);
+        if (Math.abs(dy) <= 1) expect(drawn).toBeLessThanOrEqual(25 + 1e-4);
+        if (f.naturalAtM(x, y + dy) - drawn > 0.1) cut += 1;
+      }
+    }
+    expect(cut).toBeGreaterThan(0);
+    // Undo gives back the natural terrain exactly.
+    s.sim.execute({ type: "undo" });
+    s.earthworks.sync(s.sim.network());
+    const restored = snapshotChunks(s.view, s.terrain);
+    for (const [key, arrays] of natural) arrays.forEach((a, i) => expect(restored.get(key)?.[i], key).toEqual(a));
   });
 
   it("measures the rebuild of 10-piece edits and of a 500-piece network on the diorama (a dev measurement)", async ({ annotate }) => {
@@ -393,9 +442,12 @@ describe("earthworks view", () => {
     const median = (xs: number[]) => sorted(xs)[Math.floor(xs.length / 2)] ?? Number.NaN;
     await annotate(`10-piece edits (${edits.length}): rebuild median ${median(edits).toFixed(2)} ms, p95 ${p95(edits).toFixed(2)} ms, max ${Math.max(...edits).toFixed(2)} ms; undo median ${median(undos).toFixed(2)} ms, p95 ${p95(undos).toFixed(2)} ms`);
     await annotate(
-      `500-piece network (${network.network().pieces.length} pieces): full rebuild ${fullMs.toFixed(1)} ms over ${full.lastRebuild.chunks} chunk rebuilds (${full.chunksWithEarthworks} with earthworks, ${full.refinedTriangles} refined LOD0 triangles, cut up to ${full.maxCutM.toFixed(2)} m, fill up to ${full.maxFillM.toFixed(2)} m); with 8 ms slices: ${sliced.stats.lastRebuild.slices} frames, longest slice ${sliced.stats.lastRebuild.longestSliceMs.toFixed(2)} ms`,
+      `500-piece network (${network.network().pieces.length} pieces, ${full.pieces} with earthworks): full rebuild ${fullMs.toFixed(1)} ms over ${full.lastRebuild.chunks} chunk rebuilds (${full.chunksWithEarthworks} with earthworks, ${full.refinedTriangles} refined LOD0 triangles, cut up to ${full.maxCutM.toFixed(2)} m, fill up to ${full.maxFillM.toFixed(2)} m); with 8 ms slices: ${sliced.stats.lastRebuild.slices} frames, longest slice ${sliced.stats.lastRebuild.longestSliceMs.toFixed(2)} ms`,
     );
-    expect(full.pieces).toBeGreaterThanOrEqual(500);
+    // Since D4 some of the network's pieces are bridges and tunnels, which the conform leaves alone (432 of 500 ground
+    // at the D4 core lane, before the owner decision 2026-09-28 "M2").
+    expect(network.network().pieces.length).toBeGreaterThanOrEqual(500);
+    expect(full.pieces).toBeGreaterThan(400);
     expect(sliced.stats.appliedRev).toBe(network.network().rev);
     view.dispose();
   });

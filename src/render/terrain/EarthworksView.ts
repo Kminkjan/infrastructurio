@@ -9,6 +9,7 @@ import {
   FORMATION_HALF_WIDTH_M,
   chunksTouching,
   conforms,
+  cutsUnderDeck,
   earthworkPiece,
   MAX_REACH_M,
   mayNeighbour,
@@ -115,6 +116,8 @@ export class EarthworksView {
   /** The drawn LOD1 surface (tests and checks). */
   readonly heightfieldLod1: DrawnHeightfield;
   private readonly pieces = new Map<string, EarthworkPiece>();
+  /** Whether a bridge piece takes a cut (`cutsUnderDeck`), by key: the terrain never changes, so each is decided once. */
+  private readonly bridgeCuts = new Map<string, boolean>();
   /** Bridges and portals scenery clears around (by `b:<key>` and `p:<node>`); never conformed. */
   private readonly clearing = new Map<string, Clearing>();
   /** Pending steps as `${order}:${x}:${y}` (order: STEP_*), sorted so LOD0 goes first. */
@@ -251,12 +254,24 @@ export class EarthworksView {
     return Math.abs(drawn - natural) > SCENERY_MOVED_M;
   }
 
+  /** Whether the conform takes a network piece: ground always, a bridge where the ground comes near its deck (D4 M2). */
+  private takes(p: NetworkView["pieces"][number]): boolean {
+    if (conforms(p)) return true;
+    if (p.structure !== "bridge") return false;
+    let cut = this.bridgeCuts.get(p.key);
+    if (cut === undefined) {
+      cut = cutsUnderDeck(this.options.terrain, p);
+      this.bridgeCuts.set(p.key, cut);
+    }
+    return cut;
+  }
+
   private applyRevision(network: NetworkView): void {
     const terrain = this.options.terrain;
     const next = new Set<string>();
     const added: EarthworkPiece[] = [];
     for (const p of network.pieces) {
-      if (!conforms(p)) continue;
+      if (!this.takes(p)) continue;
       next.add(p.key);
       if (!this.pieces.has(p.key)) added.push(earthworkPiece(terrain, p));
     }

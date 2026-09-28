@@ -5,7 +5,7 @@ import type { AssetRegistry } from "../art/AssetRegistry";
 import { EARTHWORK_ATTRIBUTE, EARTHWORK_ITEM_SIZE } from "../art/shaderChunks/earthwork";
 import { palette } from "../art/palette";
 import { PICK_LAYER } from "../picking/layers";
-import { lodLattice, naturalHeightM } from "../terrain/earthworks";
+import { lodLattice, naturalHeightM, pointCutReachM } from "../terrain/earthworks";
 import type { WaterPlane } from "../terrain/heightfieldRay";
 import type { TerrainShading } from "../terrain/terrainShading";
 import { OverlayRibbons } from "../track/GhostView";
@@ -542,8 +542,11 @@ export class StructureView {
       for (const g of Object.values(asset.slots)) if (g) place(sink, g, frame);
       counts.portals += 1;
       // The plug covers the approach cutting's rounded end (its radius grows with the cut) and the mound over a low bore.
+      // The rounded end reaches as far as the relief around the portal needs (`pointCutReachM`), which on a hill rising
+      // behind the face passes the cover at the node: portals sit under up to 8 m since the owner decision 2026-09-28
+      // "M2", and a plug sized by the node's cover alone left a ring of the cut bowl open behind it.
       const skyTop = P.z + portalSkylineV(0) + PLUG_UNDER_COPING_M;
-      const bowl = 3 + 1 + 1.5 * Math.max(0, cover) + 3;
+      const bowl = Math.max(3 + 1 + 1.5 * Math.max(0, cover) + 3, pointCutReachM(this.options.terrain, P.x, P.y, P.z) + 1);
       const rise = Math.max(0, skyTop - (Number.isNaN(natural) ? P.z : natural));
       const depthM = Math.min(45, Math.max(10, bowl, MOUND_FLAT_M + MOUND_END_RUN * rise + 1));
       const halfWidthM = Math.min(45, Math.max(8, bowl, PORTAL_HALF_WIDTH_M + Math.max(wings.left, wings.right) + 1.5, MOUND_CROWN_HALF_M + MOUND_SIDE_RUN * rise + 1));

@@ -77,10 +77,12 @@ function scene(s: ReturnType<typeof setup>) {
   s.build(straights(5, 30, 6, 30_000), "ground");
   s.build(straights(11, 30, 64, 30_000), "bridge");
   s.build(straights(75, 30, 6, 30_000), "ground");
-  // Row 58: q = col − 29; the hill peaks at column 20.
-  s.build(straights(-25, 58, 5, 30_000), "ground");
-  s.build(straights(-20, 58, 20, 30_000), "tunnel");
-  s.build(straights(0, 58, 5, 30_000), "ground");
+  // Row 58: q = col − 29; the hill peaks at column 20 (15 m over the track). The tunnel runs where the cover passes
+  // the 8 m band, columns 14–26 (7.8 m at each portal, 9 m or more inside), with cuttings up to 7.8 m deep before it
+  // (until the band, owner decision 2026-09-28 "M2", the tunnel ran columns 9–29 and its ends were cuttings' depth).
+  s.build(straights(-25, 58, 10, 30_000), "ground");
+  s.build(straights(-15, 58, 12, 30_000), "tunnel");
+  s.build(straights(-3, 58, 8, 30_000), "ground");
 }
 
 function meshes(view: StructureView): Mesh[] {
@@ -110,8 +112,8 @@ describe("structure view", () => {
     expect(all.length).toBeGreaterThanOrEqual(2);
     for (const m of all) expect(windingMismatches(m.geometry)).toBe(0);
     expect(meshes(s.view).filter((m) => m.name === "hill plug")).toHaveLength(2);
-    // One proxy per 5 m straight: 64 deck proxies and 20 bore proxies.
-    expect(s.view.pickScene.children).toHaveLength(64 + 20);
+    // One proxy per 5 m straight: 64 deck proxies and 12 bore proxies.
+    expect(s.view.pickScene.children).toHaveLength(64 + 12);
   });
 
   it("keeps every pier clear of a track passing under the deck, and spans it with a girder", () => {
@@ -236,8 +238,8 @@ describe("structure view", () => {
     const s = setup();
     scene(s);
     s.settle();
-    // Just inside the west portal (column 9 at row 58 is q −20): the plug stands over the natural hill there.
-    const p = toWorld({ q: -19, r: 58 });
+    // Just inside the west portal (column 14 at row 58 is q −15): the plug stands over the natural hill there.
+    const p = toWorld({ q: -14, r: 58 });
     const plug = s.view.plugHeightAt(p.x, p.y);
     expect(plug).toBeGreaterThan(30 + 6);
     expect(Number.isNaN(s.view.plugHeightAt(toWorld({ q: 40, r: 30 }).x, toWorld({ q: 40, r: 30 }).y))).toBe(true);
@@ -292,7 +294,9 @@ describe("structure rebuild cost on the diorama (a dev measurement, not a gate)"
     const sites: [string, PieceSpec[]][] = [
       ["viaduct 54 pieces", line(23, 230, 4, 3, 57, 27_000)],
       ["river bridge 27 pieces", line(242, 104, 2, 4, 31, 31_900)],
-      ["tunnel 49 pieces", line(40, 180, 2, 8, 57, 17_000)],
+      // Where the cover passes the 8 m band (owner decision 2026-09-28 "M2"): until then nodes 8–57, whose ends lie
+      // under 4.7–7.7 m, a cutting's depth now.
+      ["tunnel 43 pieces", line(40, 180, 2, 12, 55, 17_000)],
     ];
     const results: string[] = [];
     for (const [name, pieces] of sites) {
