@@ -1615,9 +1615,11 @@ amending it is the owner's.
   - Portals now sit under up to 8 m of cover. On a hill rising behind the face the approach
     cutting's rounded end reached about 23 m, past the plug sized from the node's cover (17.4 m),
     and the captures showed a dark gap behind the east portal. The plug now reaches as far as the
-    relief around the portal needs (`pointCutReachM`), which doubles the 43-piece tunnel's rebuild
-    (median 6.2–6.4 → 11.9–12.3 ms, two runs each). The cheaper fix, stopping the approach cutting at
-    the portal plane, needs structure topology in the earthworks and is not done.
+    relief around the portal needs (`pointCutReachM`), but at most half-way to the other portal (the
+    whole run at a dead end): uncapped, it spilled over the far portal's wings of a 26 m tunnel in
+    the captures. This doubles the 43-piece tunnel's rebuild (median 6.2–6.4 → 11.9–12.3 ms, two runs
+    each). The cheaper fix, stopping the approach cutting at the portal plane, needs structure
+    topology in the earthworks and is not done.
   - Visibility still holds: 300 plans, 5,347 pieces, 0.000% of rail tops buried at LOD0 and LOD1
     (the test conforms every piece, to cuts of 19.1 m and fills of 27.7 m). The D3 render-lift probe
     now measures only pieces with both nodes on the ground (1,004 of 5,347); straights keep 0.000%

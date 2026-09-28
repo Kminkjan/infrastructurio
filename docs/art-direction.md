@@ -1004,7 +1004,7 @@ for a bridge, dashed bore edges at ±2.6 m for a tunnel), and the tooltip adds a
 **Earthworks, skirts, scenery.** Bridges and tunnels are never conformed (tested). *Since the
 owner decision 2026-09-28 "M2" (a deck may sit 2 m into the bank near an abutment), a bridge
 the natural ground comes near takes a cut down to its deck, never a fill, and a portal's plug
-reaches as far as the relief around it needs
+reaches as far as the relief around it needs, up to half-way to the other portal
 ([ADR 0010 M2 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-thresholds-m2)).*
 Ground track
 gets **ballast skirts**: the shoulders run on at their own slope to 2.92 m out and 0.62 m under
