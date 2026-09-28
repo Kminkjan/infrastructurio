@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { type TrackPlan, createSim } from "../core/sim/api";
-import { HINT_LINE, STRAIGHT_HINT_LINE, buildTooltip, formatGrade, formatHeight, formatHeld, formatStructures, gradeLevel, heightLimitText, splitReason } from "./format";
+import { HINT_LINE, STRAIGHT_HINT_LINE, buildTooltip, formatGrade, formatHeight, formatHeld, formatHeldOffEnd, formatStructures, gradeLevel, heightLimitText, splitReason } from "./format";
 import { planPointOfNode } from "./picks";
 
 function plan(overrides: Partial<TrackPlan> = {}): TrackPlan {
@@ -119,6 +119,12 @@ describe("tooltip text", () => {
       else expect(held).toContain(` ${height.slice(1)} ${height.startsWith("+") ? "above" : "below"} the ground`);
     }
     expect(heightLimitText(formatHeld(-11_200))).toBe("Height unchanged: end held 11.2 m below the ground by the 3.5 % limit.");
+  });
+
+  it("says how far the limit holds a line off the track end it is aimed at (verification fix, 2026-09-29)", () => {
+    expect(formatHeldOffEnd(-7670, { q: 30, r: 10 })).toBe("End held 7.7 m below the track end at (30, 10) by the 3.5 % limit");
+    expect(formatHeldOffEnd(4000, { q: -2, r: 7 })).toBe("End held 4 m above the track end at (-2, 7) by the 3.5 % limit");
+    expect(heightLimitText(formatHeldOffEnd(-7670, { q: 30, r: 10 }))).toBe("Height unchanged: end held 7.7 m below the track end at (30, 10) by the 3.5 % limit.");
   });
 
   it("puts the held-end line under the metrics, in the tooltip and the announcement", () => {

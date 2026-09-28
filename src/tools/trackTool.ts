@@ -15,7 +15,7 @@ import {
   rotateHeading,
   stepOf,
 } from "../core/sim/api";
-import { buildTooltip, formatCounts, formatHeight, formatHeld, formatStructures, heightLimitText, splitReason } from "./format";
+import { buildTooltip, formatCounts, formatHeight, formatHeld, formatHeldOffEnd, formatStructures, heightLimitText, splitReason } from "./format";
 import { nodesAt, pickAtNode } from "./picks";
 import { commandKey } from "./previewMemo";
 import type { GhostModel, Reduced, ScreenPoint, ToolCtx, ToolEffect, ToolEvent, ToolPick, TrackMode } from "./types";
@@ -64,12 +64,16 @@ import type { GhostModel, Reduced, ScreenPoint, ToolCtx, ToolEffect, ToolEvent, 
  *
  * A held end is shown, not hidden (owner decision 2026-09-28, "Keep the limit,
  * show it"): when the limit holds a straight line's free end more than half a
- * step off the ground plus the steps, the tooltip and the announcement add
- * "End held 11.2 m below the ground by the 3.5 % limit" and the ghost draws a
- * drop line from the end to the ground. A height key pressed further into the
- * limit keeps the steps (nothing could move, so no hidden count drifts into
- * the chained drags) and announces the limit; one pressed the other way steps
- * from the held end, so it moves the end at once.
+ * step off the height the tool asked for (the ground plus the steps), the
+ * tooltip and the announcement add "End held 11.2 m below the ground by the
+ * 3.5 % limit" and the ghost draws a drop line from the end to the ground. A
+ * height key pressed further into the limit keeps the steps (nothing could
+ * move, so no hidden count drifts into the chained drags) and announces the
+ * limit; one pressed the other way steps from the held end, so it moves the
+ * end at once. On the track end the pointer is on, the tool asks for that
+ * end's height, which no key changes: when the limit holds the line off it
+ * ("End held 7.7 m below the track end at (30, 10) …"), both keys keep the
+ * steps and announce the limit.
  *
  * After a commit the app executes and sends `refresh`; that re-plan's
  * announcement leads with the build result, so a screen reader hears both.
@@ -246,8 +250,9 @@ function step(s: TrackToolState, e: ToolEvent, ctx: ToolCtx, out: ToolEffect[]):
         return s;
       }
       const held = s.plan && s.target ? heldEnd(s, s.plan, s.target, ctx) : undefined;
-      if (held && e.delta * held.offsetMm < 0) {
-        // Further into the limit that holds the end: nothing can move, so the steps stay as they are.
+      if (held && (held.pinned || e.delta * held.offsetMm < 0)) {
+        // Further into the limit that holds the end, or an end asked for the height of the track end the pointer is
+        // on (which no key changes): nothing can move, so the steps stay as they are.
         out.push({ type: "announce", text: heightLimitText(held.text) });
         return s;
       }
@@ -440,34 +445,55 @@ function present(s: TrackToolState, ctx: ToolCtx, out: ToolEffect[], lead: strin
 
 /** A Straight line end the 3.5 % limit holds: how far off the asked height, where it stands, and the tooltip line. */
 interface HeldEnd {
-  /** The end minus the height the tool asked for (the ground plus the steps), integer mm: negative when held below it. */
+  /** The end minus the height the tool asked for (`askedHeight`), integer mm: negative when held below it. */
   readonly offsetMm: number;
   /** The end above the ground there, integer mm (the tooltip's end height). */
   readonly endHeightMm: number;
-  /** "End held 11.2 m below the ground by the 3.5 % limit". */
+  /**
+   * True when the asked height is the track end the pointer is on, which the height steps do not change: no key
+   * can move the end, so both keys keep the steps and announce the limit.
+   */
+  readonly pinned: boolean;
+  /** "End held 11.2 m below the ground by the 3.5 % limit", or "… below the track end at (30, 10) …". */
   readonly text: string;
 }
 
 /**
  * Whether the 3.5 % limit holds the plan's end (owner decision 2026-09-28, "Keep the limit, show it"): in Straight
- * line mode, a free end (not snapped by magnetism, not on the track end the pointer is on) that the planner moved
- * more than half a height step off the ground at the end node plus the height steps, the height the tool asked
- * for. Magnetism joins the track the player aimed at, and vertical magnetism moves an end by at most half a step,
- * so neither alone counts as held. Undefined otherwise, and always for Track: its "fixed" ends never move, and
- * auto-grade chooses its end.
+ * line mode, a free end (not snapped by magnetism) that the planner moved more than half a height step off the
+ * height the tool asked for there (`askedHeight`, the same height `planFor` asks for: the ground plus the height
+ * steps, or the height of the track end the pointer is on). Magnetism joins the track the player aimed at, and
+ * vertical magnetism moves an end by at most half a step, so neither alone counts as held. Undefined otherwise,
+ * and always for Track: its "fixed" ends never move, and auto-grade chooses its end.
  */
 function heldEnd(s: TrackToolState, plan: TrackPlan, target: ToolPick, ctx: ToolCtx): HeldEnd | undefined {
   const end = plan.end?.node;
   if (s.mode !== "straight" || !end || plan.snapped) return undefined;
-  if (target.kind === "endpoint" && end.q === target.node.q && end.r === target.node.r && end.zMm === target.node.zMm) return undefined;
   const ground = ctx.groundZmm(end.q, end.r);
   if (ground === undefined) return undefined;
-  const stepMm = ctx.settings.heightStepMm;
-  const offsetMm = end.zMm - (ground + s.heightSteps * stepMm);
-  if (Math.abs(offsetMm) * 2 <= stepMm) return undefined;
+  const asked = askedHeight(s, target, end, ctx);
+  const offsetMm = end.zMm - asked.zMm;
+  if (Math.abs(offsetMm) * 2 <= ctx.settings.heightStepMm) return undefined;
   const endHeightMm = end.zMm - ground;
+  if (asked.pinned) return { offsetMm, endHeightMm, pinned: true, text: formatHeldOffEnd(offsetMm, end) };
   const surface = ctx.waterDeckZmm(end.q, end.r) === undefined ? "ground" : "water";
-  return { offsetMm, endHeightMm, text: formatHeld(endHeightMm, surface) };
+  return { offsetMm, endHeightMm, pinned: false, text: formatHeld(endHeightMm, surface) };
+}
+
+/**
+ * The height the tool asks the planner for at an end node (q, r), integer mm: on the track end the pointer is on,
+ * that end's height (`pinned`: the height steps do not change it); elsewhere the ground there plus the height
+ * steps, or, outside precision, the height of existing track within half a step of that (vertical magnetism, like
+ * the planner's), so the plan meets the node instead of passing it.
+ */
+function askedHeight(s: TrackToolState, target: ToolPick, end: { readonly q: number; readonly r: number }, ctx: ToolCtx): { readonly zMm: number; readonly pinned: boolean } {
+  if (target.kind === "endpoint" && end.q === target.node.q && end.r === target.node.r) return { zMm: target.node.zMm, pinned: true };
+  const stepMm = ctx.settings.heightStepMm;
+  const free = (ctx.groundZmm(end.q, end.r) ?? s.anchor?.node.zMm ?? 0) + s.heightSteps * stepMm;
+  if (!s.precision) {
+    for (const node of nodesAt(ctx.network, end.q, end.r)) if (Math.abs(node.zMm - free) * 2 <= stepMm) return { zMm: node.zMm, pinned: false };
+  }
+  return { zMm: free, pinned: false };
 }
 
 /**
@@ -480,10 +506,7 @@ function heldEnd(s: TrackToolState, plan: TrackPlan, target: ToolPick, ctx: Tool
  * track joins it.
  */
 function planFor(s: TrackToolState, anchor: Anchor, target: ToolPick, ctx: ToolCtx): TrackPlan {
-  const stepMm = ctx.settings.heightStepMm;
-  const lift = s.heightSteps * stepMm;
   const from = anchor.node;
-  const groundOr = (q: number, r: number): number => ctx.groundZmm(q, r) ?? from.zMm;
   // D4 auto-grade: with no height steps the planner chooses the end height too (within 35‰), so no re-plan. A
   // straight line takes the end the tool wants (the ground there plus the steps) and the planner keeps it in reach.
   const heightMode = s.mode === "straight" ? "straight" : s.heightSteps === 0 ? "auto" : "fixed";
@@ -497,17 +520,7 @@ function planFor(s: TrackToolState, anchor: Anchor, target: ToolPick, ctx: ToolC
     ...(ctx.settings.radiusCapM === undefined ? {} : { radiusCapM: ctx.settings.radiusCapM }),
     ...(s.precision ? { precision: { radiusM: s.radiusM, ...(s.endHeading === undefined ? {} : { endHeading: s.endHeading }) } } : {}),
   });
-  const wanted = (end: NodeRef, snapped: NodeRef | null): number => {
-    if (snapped) return snapped.zMm;
-    if (target.kind === "endpoint" && end.q === target.node.q && end.r === target.node.r) return target.node.zMm;
-    const free = groundOr(end.q, end.r) + lift;
-    // Vertical magnetism (off in precision, like the planner's): ending on existing track within
-    // half a step of its height takes that height, so the plan meets the node instead of passing it.
-    if (!s.precision) {
-      for (const node of nodesAt(ctx.network, end.q, end.r)) if (Math.abs(node.zMm - free) * 2 <= stepMm) return node.zMm;
-    }
-    return free;
-  };
+  const wanted = (end: NodeRef, snapped: NodeRef | null): number => (snapped ? snapped.zMm : askedHeight(s, target, end, ctx).zMm);
   const first = wanted(target.node, null);
   const plan = ctx.planTrack(drag(first - from.zMm));
   if (!plan.end || heightMode === "auto") return plan;

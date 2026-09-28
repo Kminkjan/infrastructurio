@@ -833,4 +833,47 @@ describe("track tool: a Straight line end held by the 3.5 % limit (owner decisio
     expect(t.send({ type: "height", delta: -1 })).toEqual([{ type: "announce", text: "Height unchanged: end held 0.3 m above the water by the 3.5 % limit." }]);
     expect(t.state.heightSteps).toBe(-1);
   });
+
+  it("keeps the steps for both keys when the line is aimed at a raised track end it cannot reach, and chains with none", () => {
+    // Verification finding (2026-09-29): a 10 m raised track (10 bridge pieces) east from (30, 10) on flat 0 m ground,
+    // and a straight line from (16, 12) with the pointer on its buffer end. The tool asks for that end's 10 m, which
+    // 35‰ cannot reach, and magnetism does not fit, so the line ends on the end's (q, r) at 2.33 m. Before, the held
+    // check measured that end against the ground plus the steps (2.3 m "above the ground"), so the first ] jumped the
+    // steps 0 -> 3 without moving the end or saying so, and the hidden +3 m carried into the chained drag.
+    const t = session({ flat: true });
+    const raised = Array.from({ length: 10 }, (_, i) => ({ kind: "straight", from: { q: 30 + i, r: 10, zMm: 10_000 }, heading: 0, z1Mm: 10_000 }) as const);
+    expect(t.sim.execute({ type: "build-track", pieces: raised, structure: "auto" }).ok).toBe(true);
+    t.send({ type: "activate", mode: "straight" });
+    t.down(16, 12);
+    t.move(17, 13);
+    const fx = t.move(30, 10);
+    const plan = t.state.plan;
+    expect(plan?.snapped).toBeNull();
+    expect(plan?.end?.node).toEqual({ q: 30, r: 10, zMm: 2330 });
+    const HELD = "End held 7.7 m below the track end at (30, 10) by the 3.5 % limit";
+    expect(tooltipOf(fx)?.held).toBe(HELD);
+    expect(tooltipOf(fx)?.metrics?.endHeight).toBe("End height +2.3 m");
+    expect(ghostOf(fx)?.endHeld).toBe(true);
+    expect(ghostOf(fx)?.valid).toBe(true);
+    // No key changes the height asked for on a track end: both announce the limit and keep the steps, with no re-plan.
+    const planned = t.drags.length;
+    for (const delta of [1, 1, 1, -1, -1, -1, -1, 1] as const) {
+      expect(t.send({ type: "height", delta })).toEqual([{ type: "announce", text: `Height unchanged: ${HELD.charAt(0).toLowerCase()}${HELD.slice(1)}.` }]);
+      expect(t.state.heightSteps).toBe(0);
+    }
+    expect(t.drags.length).toBe(planned);
+    expect(t.state.plan).toBe(plan);
+    // Laid below the raised end (not joined: it ends at 2.33 m), the chain goes on with no hidden steps.
+    t.up(30, 10);
+    expect(t.state.phase).toBe("anchored");
+    expect(t.state.anchor?.node).toEqual({ q: 30, r: 10, zMm: 2330 });
+    expect(t.state.heightSteps).toBe(0);
+    const next = t.move(30, 20);
+    const end = t.state.plan?.end?.node;
+    if (!end) throw new Error("no chained plan");
+    // The chained drag asks for the ground (0 m) plus no steps, so its end is the nearest height 35‰ reaches from 2.33 m.
+    expect(t.drags.at(-1)?.dzMm).toBe(end.zMm - 2330);
+    expect(end.zMm).toBeLessThan(2330);
+    expect(tooltipOf(next)?.metrics?.endHeight).not.toBe("End height +3 m");
+  });
 });

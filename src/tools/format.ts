@@ -89,6 +89,16 @@ export function formatHeld(endHeightMm: number, surface: HeldSurface = "ground")
   return `End held ${where} by the ${formatGrade(MAX_GRADE_PERMILLE)} limit`;
 }
 
+/**
+ * The held-end line for a Straight line aimed at a track end it cannot reach: the tool asks for that end's height,
+ * and the 3.5 % limit holds the line `offsetMm` off it, for example "End held 7.7 m below the track end at (30, 10)
+ * by the 3.5 % limit". A held end lies more than half a step off, so the offset never rounds to 0 m.
+ */
+export function formatHeldOffEnd(offsetMm: number, at: { readonly q: number; readonly r: number }): string {
+  const tenths = Math.round(offsetMm / 100);
+  return `End held ${tenthsText(Math.abs(tenths))} m ${tenths > 0 ? "above" : "below"} the track end at (${at.q}, ${at.r}) by the ${formatGrade(MAX_GRADE_PERMILLE)} limit`;
+}
+
 /** The announcement for a height key pressed further into the limit that holds the end: "Height unchanged: end held …". */
 export function heightLimitText(held: string): string {
   return `Height unchanged: ${held.charAt(0).toLowerCase()}${held.slice(1)}.`;
