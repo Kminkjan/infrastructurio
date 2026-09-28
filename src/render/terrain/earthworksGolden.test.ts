@@ -176,14 +176,23 @@ describe("earthworks and terrain bake output (a byte pin)", () => {
     // ±8 m band); 12 fewer scenery items cleared. Checked before re-recording: with the clip planes disabled, the rule
     // moved into `core/track/earthworks.ts` drew every hash of 3a4c2f5 exactly (the pieces, reaches and nearest points
     // are unchanged here too), so moving the rule into the core moved no byte.
+    // Re-recorded again 2026-09-28 (D4 second feel-check fixes), deliberately, the normals and the earthwork attribute
+    // only (the 2nd and 4th hash of each LOD): behind a tunnel portal the attribute's potential and the normals' tilt
+    // now read the core's "ground"-mode conform (the hill the portal retains, which the hill plug draws), so the
+    // shading, the colour weights and the relief's facet fading follow the visible ground at the plug's outline
+    // instead of the underlay's notch under it. Only pieces with a tunnel plane evaluate it, and the modes differ only
+    // past such a plane. The drawn heights keep the underlay: positions, colours, indices, both heightfields, the
+    // reaches, the nearest points, the scenery and the bakes are byte-identical (checked: lod0 normals ef2655d1 →
+    // 17c1cc93 and attribute 778ca5e3 → e8933918, lod1 normals e2453d1e → 0f96eea6 and attribute 4ed5d1ee →
+    // 8dbbfbbb; nothing else moved).
     expect(hashes).toEqual({
       pieces: 327,
       refined: 6275,
       withEarthworks: 37,
       cleared: 294,
       maxCutFill: [7.997250366210935, 7.86400032043457],
-      lod0: "50204995 ef2655d1 e3e3a27f 778ca5e3 d942eb22",
-      lod1: "d31316ee e2453d1e 196ab467 4ed5d1ee ccb98367",
+      lod0: "50204995 17c1cc93 e3e3a27f e8933918 d942eb22",
+      lod1: "d31316ee 0f96eea6 196ab467 8dbbfbbb ccb98367",
       heightfield0: "169bf062",
       heightfield1: "2b01c99e",
       reach: "10a1303f",

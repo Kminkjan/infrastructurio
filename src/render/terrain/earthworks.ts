@@ -303,8 +303,17 @@ export class ChunkPass {
   private gen = 0;
   private stamp = new Uint32Array(0);
   private upper = new Float32Array(0);
+  /**
+   * The cut envelope as the core shows the ground (`"ground"` mode): above the underlay's behind a tunnel portal, where
+   * the hill plug draws the hill the portal retains (`structures/plug.ts`). The earthwork attribute's potential reads it,
+   * so the colour weights and the relief's facet fading follow the visible ground at the plug's outline; the drawn
+   * heights keep `upper`.
+   */
+  private upperShown = new Float32Array(0);
   private lower = new Float32Array(0);
   private drawn = new Float32Array(0);
+  /** The shown conformed height (`shownDepartureAt`); `drawn` wherever no tunnel plane clips. */
+  private shown = new Float32Array(0);
   private natural = new Float32Array(0);
   /** Plan distance to the nearest centreline of any piece reaching the sub-vertex. */
   private dist = new Float32Array(0);
@@ -323,6 +332,7 @@ export class ChunkPass {
   private readonly sub = { qs: 0, rs: 0 };
   private readonly near = { d: 0, s: 0 };
   private readonly envelope: Envelope = { u: 0, l: 0, d: 0 };
+  private readonly shownEnvelope: Envelope = { u: 0, l: 0, d: 0 };
 
   /** Chunk box in plan metres, grown by one LOD cell (the ring), for picking candidate pieces. */
   static chunkBox(t: Pick<Terrain, "columns" | "rows">, lod: TerrainLod, chunkX: number, chunkY: number): { minX: number; minY: number; maxX: number; maxY: number } {
@@ -410,7 +420,7 @@ export class ChunkPass {
       return;
     }
     const n = this.natural[g] ?? Number.NaN;
-    out[offset] = encodeEarthworkPotential(earthworkPotential(n, this.upper[g] ?? Infinity, this.lower[g] ?? -Infinity));
+    out[offset] = encodeEarthworkPotential(earthworkPotential(n, this.upperShown[g] ?? Infinity, this.lower[g] ?? -Infinity));
     out[offset + 1] = this.modified[g] === 1 ? (this.drawn[g] ?? n) - n : 0;
     out[offset + 2] = this.dist[g] ?? FAR_M;
   }
@@ -420,6 +430,17 @@ export class ChunkPass {
     const g = this.gridIndex(Qs, Rs);
     if (g < 0 || this.stamp[g] !== this.gen || this.modified[g] !== 1) return 0;
     return (this.drawn[g] ?? 0) - (this.natural[g] ?? 0);
+  }
+
+  /**
+   * The departure of the ground as the core shows it (`"ground"` mode): `departureAt`, except past a tunnel end's
+   * plane, where the hill plug draws the hill the portal retains over the underlay. The mesh's normals tilt by it, so
+   * the terrain round a plug is shaded as the visible hill, not toward the notch under the plug.
+   */
+  shownDepartureAt(Qs: number, Rs: number): number {
+    const g = this.gridIndex(Qs, Rs);
+    if (g < 0 || this.stamp[g] !== this.gen || this.modified[g] !== 1) return 0;
+    return (this.shown[g] ?? 0) - (this.natural[g] ?? 0);
   }
 
   /** Whether the pass moved sub-vertex (Qs, Rs) off the natural surface. */
@@ -462,8 +483,10 @@ export class ChunkPass {
     if (this.stamp.length < n) {
       this.stamp = new Uint32Array(n);
       this.upper = new Float32Array(n);
+      this.upperShown = new Float32Array(n);
       this.lower = new Float32Array(n);
       this.drawn = new Float32Array(n);
+      this.shown = new Float32Array(n);
       this.natural = new Float32Array(n);
       this.dist = new Float32Array(n);
       this.modified = new Uint8Array(n);
@@ -509,6 +532,9 @@ export class ChunkPass {
     const c = p.centreBox;
     const out = r.reachM + 1e-6;
     const env = this.envelope;
+    const shown = this.shownEnvelope;
+    // Only past a tunnel end's plane do the modes differ (`envelopeAt`).
+    const portal = p.planes.some((plane) => plane.fixed && plane.tunnel);
     let evaluated = 0;
     for (let rs = rsA; rs <= rsB; rs++) {
       const parity = rs & 1;
@@ -521,18 +547,24 @@ export class ChunkPass {
       const rowBase = (rs - this.rs0) * this.width - this.cs0;
       for (let cs = csA; cs <= csB; cs++) {
         const x = sub * (cs + parity / 2);
-        // The core's envelopes (`envelopeAt`: the nearest centreline point, the side slope, a clipped end's headwall).
+        // The core's envelopes (`envelopeAt`: the nearest centreline point, the side slope, a clipped end's headwall),
+        // in "underlay" mode: behind a tunnel portal the mesh keeps the 45° headwall from the track bed, which the hill
+        // plug covers with the core's retained hill (`structures/plug.ts`); a 1.25 m mesh cannot draw the 7.65 m step
+        // at the face without grass wedges in front of it (D4 second feel-check fixes, 2026-09-28).
         evaluated += 1;
-        if (!envelopeAt(p, r, x, y, null, this.near, env)) continue;
+        if (!envelopeAt(p, r, x, y, null, this.near, env, "underlay")) continue;
+        const us = portal && envelopeAt(p, r, x, y, null, this.near, shown, "ground") ? shown.u : env.u;
         const g = rowBase + cs;
         if (this.stamp[g] !== this.gen) {
           this.stamp[g] = this.gen;
           this.upper[g] = env.u;
+          this.upperShown[g] = us;
           this.lower[g] = env.l;
           this.dist[g] = env.d;
           this.touched[this.touchedCount++] = g;
         } else {
           if (env.u < (this.upper[g] ?? Infinity)) this.upper[g] = env.u;
+          if (us < (this.upperShown[g] ?? Infinity)) this.upperShown[g] = us;
           if (env.l > (this.lower[g] ?? -Infinity)) this.lower[g] = env.l;
           if (env.d < (this.dist[g] ?? Infinity)) this.dist[g] = env.d;
         }
@@ -558,10 +590,13 @@ export class ChunkPass {
       if (Number.isNaN(nat) || c === nat) {
         this.modified[g] = 0;
         this.drawn[g] = nat;
+        this.shown[g] = nat;
         continue;
       }
       this.modified[g] = 1;
       this.drawn[g] = c;
+      // The ground as the core shows it: the underlay's own height except past a tunnel plane (`upperShown`).
+      this.shown[g] = (this.upperShown[g] ?? Infinity) === (this.upper[g] ?? Infinity) ? c : conformRule(nat, this.upperShown[g] ?? Infinity, this.lower[g] ?? -Infinity);
       if (nat - c > maxCut) maxCut = nat - c;
       if (c - nat > maxFill) maxFill = c - nat;
       // Flag every LOD triangle whose closure holds this sub-vertex.

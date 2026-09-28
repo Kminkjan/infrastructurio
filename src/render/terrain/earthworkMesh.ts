@@ -168,11 +168,13 @@ export function* earthworkChunkSteps(pass: ChunkPass, shading: TerrainShading, p
     // normal tilted by D's least-squares gradient over the six neighbours, (Σ u·ΔD) / (3·spacing). D is smooth
     // and exactly 0 on natural ground, so the normals stay continuous across the lip; the 5 m lattice facets
     // a raw drawn-surface normal would carry never enter it (the relief chunk's slope gain magnifies those).
+    // (The departure of the ground as shown: behind a tunnel portal the hill plug's, not the underlay notch's.)
     const d0 = pass.departureAt(qs, rs);
+    const s0d = pass.shownDepartureAt(qs, rs);
     let gx = 0;
     let gy = 0;
     for (let i = 0; i < 24; i += 4) {
-      const dd = pass.departureAt(qs + (NEIGHBOURS[i] ?? 0), rs + (NEIGHBOURS[i + 1] ?? 0)) - d0;
+      const dd = pass.shownDepartureAt(qs + (NEIGHBOURS[i] ?? 0), rs + (NEIGHBOURS[i + 1] ?? 0)) - s0d;
       gx += (NEIGHBOURS[i + 2] ?? 0) * dd;
       gy += (NEIGHBOURS[i + 3] ?? 0) * dd;
     }
