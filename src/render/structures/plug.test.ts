@@ -47,7 +47,10 @@ describe("hill plug", () => {
     const { terrain, shading, frame } = site(400);
     const plug = new HillPlug(terrain, shading, frame, { left: 12, right: 12 }, 40, 30);
     const face = frame.z + PORTAL_TOP_V + PLUG_UNDER_COPING_M;
-    expect(plug.heightAt(100 + 1, 90)).toBeCloseTo(face + PLUG_LIFT_M, 9);
+    // At the face the rising hillside and the mound meet, and the smooth maximum rounds them by at most k/4 = 0.15 m.
+    const atFace = plug.heightAt(100 + 1, 90);
+    expect(atFace).toBeGreaterThanOrEqual(face + PLUG_LIFT_M - 1e-9);
+    expect(atFace).toBeLessThanOrEqual(face + PLUG_LIFT_M + 0.15 + 1e-9);
     expect(plug.heightAt(100 + 10, 90)).toBeCloseTo(face + 9 / 1.5 + PLUG_LIFT_M, 9);
     expect(plug.heightAt(100 + 35, 90)).toBeCloseTo(40 + PLUG_LIFT_M, 9);
   });

@@ -99,6 +99,8 @@ interface QueuedRun {
 interface BuiltRun extends QueuedRun {
   readonly mesh: Mesh | undefined;
   readonly plugs: readonly HillPlug[];
+  /** Each plug's drawn-ground signature when it was built (`HillPlug.groundSignature`). */
+  readonly plugGround: readonly string[];
   readonly plugMeshes: readonly Mesh[];
   readonly proxies: readonly Mesh[];
   readonly layout: BridgeLayout | undefined;
@@ -268,15 +270,21 @@ export class StructureView {
   }
 
   /**
-   * Re-checks every pier and abutment foot against the ground as drawn now; a run whose feet would show (a
-   * cutting beside it landed after it was built) is rebuilt. The app calls it when the earthworks finish a
-   * revision. Returns true when anything was queued.
+   * Re-checks every pier and abutment foot, and every hill plug, against the ground as drawn now; a run whose
+   * feet would show (a cutting beside it landed after it was built), or whose plug's ground changed (the
+   * approach's cutting landed), is rebuilt. The app calls it when the earthworks finish a revision. Returns
+   * true when anything was queued.
    */
   refreshGround(): boolean {
     const groundM = this.options.groundM;
     if (!groundM || !this.network) return false;
     let queued = false;
     for (const b of this.built.values()) {
+      if (b.plugs.some((p, i) => p.groundSignature() !== b.plugGround[i])) {
+        this.queue.push(b);
+        queued = true;
+        continue;
+      }
       const f = b.feet;
       for (let i = 0; i + 2 < f.length; i += 3) {
         const g = groundM(f[i] ?? 0, f[i + 1] ?? 0);
@@ -506,7 +514,7 @@ export class StructureView {
     let topZ = -Infinity;
     for (let i = 0; i < path.zs.length; i++) topZ = Math.max(topZ, (path.zs[i] ?? 0) + layout.topV);
     const proxies = run.pieces.map((rp) => this.proxiesFor(rp.piece, PICK_LAYER.DECK, -1.6, Math.max(layout.topV, PARAPET_TOP_V + 0.2), DECK_HALF_M + 0.3)).flat();
-    return { ...q, mesh, plugs: [], plugMeshes: [], proxies, layout, feet: Float64Array.from(feet), counts, triangles: sink.triangleCount, topZ };
+    return { ...q, mesh, plugs: [], plugGround: [], plugMeshes: [], proxies, layout, feet: Float64Array.from(feet), counts, triangles: sink.triangleCount, topZ };
   }
 
   private buildTunnel(q: QueuedRun): BuiltRun {
@@ -539,7 +547,8 @@ export class StructureView {
       const rise = Math.max(0, skyTop - (Number.isNaN(natural) ? P.z : natural));
       const depthM = Math.min(45, Math.max(10, bowl, MOUND_FLAT_M + MOUND_END_RUN * rise + 1));
       const halfWidthM = Math.min(45, Math.max(8, bowl, PORTAL_HALF_WIDTH_M + Math.max(wings.left, wings.right) + 1.5, MOUND_CROWN_HALF_M + MOUND_SIDE_RUN * rise + 1));
-      const plug = new HillPlug(this.options.terrain, this.shading, frame, wings, depthM, halfWidthM);
+      const drawn = this.options.groundM;
+      const plug = new HillPlug(this.options.terrain, this.shading, frame, wings, depthM, halfWidthM, drawn ? (x, y) => drawn(x, y) : undefined);
       plugs.push(plug);
       const pm = this.plugMesh(plug);
       if (pm) plugMeshes.push(pm);
@@ -547,7 +556,7 @@ export class StructureView {
     }
     const mesh = this.meshOf(sink, `tunnel portals ${run.pieces.length} pieces`, this.tunnelGroup);
     const proxies = run.pieces.map((rp) => this.proxiesFor(rp.piece, PICK_LAYER.TUNNEL, -0.4, BORE_SPRING_V + BORE_HALF_M, BORE_HALF_M + 0.3)).flat();
-    return { ...q, mesh, plugs, plugMeshes, proxies, layout: undefined, feet: new Float64Array(0), counts, triangles: sink.triangleCount, topZ };
+    return { ...q, mesh, plugs, plugGround: plugs.map((p) => p.groundSignature()), plugMeshes, proxies, layout: undefined, feet: new Float64Array(0), counts, triangles: sink.triangleCount, topZ };
   }
 
   private meshOf(sink: GeometrySink, name: string, parent: Group): Mesh | undefined {

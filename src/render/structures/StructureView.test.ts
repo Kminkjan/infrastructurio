@@ -265,3 +265,65 @@ describe("structure view", () => {
     s.registry.dispose();
   });
 });
+
+describe("structure rebuild cost on the diorama (a dev measurement, not a gate)", () => {
+  it("times the capture sites' runs and 10-piece bridge edits", async ({ annotate }) => {
+    const { generateTerrain, DEFAULT_TERRAIN_SIZE } = await import("../../core/sim/api");
+    const dio = generateTerrain({ seed: "baltic-diorama", ...DEFAULT_TERRAIN_SIZE });
+    const dshading = computeTerrainShading(dio);
+    const world = createWorld(dio);
+    const registry = new AssetRegistry();
+    registerStructureAssets(registry);
+    const view = new StructureView({
+      terrain: dio,
+      registry,
+      material,
+      plugMaterial: material,
+      shading: dshading,
+      water: waterPlane(dio, dshading.waterDistance),
+      requestFrame: () => undefined,
+      now: () => performance.now(),
+      budgetMs: 1e9,
+    });
+    const line = (q: number, r: number, d: 0 | 2 | 4, from: number, to: number, zMm: number): PieceSpec[] => {
+      const [dq, dr] = d === 0 ? [1, 0] : d === 2 ? [0, 1] : [-1, 1];
+      return Array.from({ length: to - from }, (_, k) => ({ kind: "straight", from: { q: q + dq * (from + k), r: r + dr * (from + k), zMm }, heading: d, z1Mm: zMm }) as const);
+    };
+    const sites: [string, PieceSpec[]][] = [
+      ["viaduct 54 pieces", line(23, 230, 4, 3, 57, 27_000)],
+      ["river bridge 27 pieces", line(242, 104, 2, 4, 31, 31_900)],
+      ["tunnel 49 pieces", line(40, 180, 2, 8, 57, 17_000)],
+    ];
+    const results: string[] = [];
+    for (const [name, pieces] of sites) {
+      const times: number[] = [];
+      for (let i = 0; i < 5; i++) {
+        expect(world.run({ type: "build-track", pieces, structure: name.startsWith("tunnel") ? "tunnel" : "bridge" }, true).ok).toBe(true);
+        const t0 = performance.now();
+        view.sync(world.network() as NetworkView);
+        times.push(performance.now() - t0);
+        world.run({ type: "undo" }, true);
+        view.sync(world.network() as NetworkView);
+      }
+      times.sort((a, b) => a - b);
+      results.push(`${name}: median ${times[2]?.toFixed(2)} ms, max ${times[4]?.toFixed(2)} ms`);
+    }
+    // 10-piece bridge edits over the valley: each adds a new run.
+    const edits: number[] = [];
+    for (let i = 0; i < 20; i++) {
+      expect(world.run({ type: "build-track", pieces: line(23, 230, 4, 20 + (i % 3), 30 + (i % 3), 27_000), structure: "bridge" }, true).ok).toBe(true);
+      const t0 = performance.now();
+      view.sync(world.network() as NetworkView);
+      edits.push(performance.now() - t0);
+      world.run({ type: "undo" }, true);
+      view.sync(world.network() as NetworkView);
+    }
+    edits.sort((a, b) => a - b);
+    results.push(`10-piece bridge edits (20): median ${edits[10]?.toFixed(2)} ms, p95 ${edits[19]?.toFixed(2)} ms`);
+    await annotate(results.join("; "));
+    console.log(`[structures cost] ${results.join("; ")}`);
+    expect(edits[10]).toBeLessThan(200);
+    view.dispose();
+    registry.dispose();
+  });
+});

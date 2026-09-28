@@ -558,7 +558,8 @@ if (import.meta.env.DEV) {
       naturalHeightM: (x: number, y: number, lod: 0 | 1 = 0) => (lod === 0 ? earthworks.heightfield : earthworks.heightfieldLod1).naturalAtM(x, y),
       tool: () => {
         const t = construction.trackState;
-        return { active: construction.activeTool, phase: t.phase, heightSteps: t.heightSteps, cursor: t.cursor };
+        const target = t.target ? { kind: t.target.kind, q: t.target.node.q, r: t.target.node.r, zMm: t.target.node.zMm, pieceKey: t.target.pieceKey ?? null } : null;
+        return { active: construction.activeTool, phase: t.phase, heightSteps: t.heightSteps, cursor: t.cursor, structure: t.structure, target };
       },
       hud: () => store.getSnapshot(),
       /** True once a frame has rendered and the track and earthworks match the current network revision. */

@@ -5,7 +5,9 @@ import { dragBetween, lookAtNode, nodeScreen } from "./hook";
  * D4 structure captures (agent evidence, never a Look Gate verdict). Runs only with
  * `CAPTURE=1 npx playwright test --project=capture structures`; images go to the gitignored
  * test-results/structures/<label>/ (STRUCT_LABEL, default "after"; STRUCT_QUERY adds URL parameters,
- * such as `?structures=0` for the same scene without structures; STRUCT_STILL=1 emulates reduced motion).
+ * such as `?structures=0` for the same scene without structures; STRUCT_STILL=1 emulates reduced motion;
+ * STRUCT_FRAMES=1 also logs the frame cost at four views: the mean ms of 60 back-to-back renders closed by a
+ * one-pixel readPixels after 120 warm-up renders, with the last render's draw calls and triangles).
  *
  * The level decks and the tunnel are laid through the dev hook's sim (`__diorama.sim.execute`, forced
  * structures), not the tools: the D3 planner lays every node on the ground (plus a ramped offset), so a
@@ -22,6 +24,7 @@ const env = (globalThis as { process?: { env: Record<string, string | undefined>
 const LABEL = env.STRUCT_LABEL ?? "after";
 const QUERY = env.STRUCT_QUERY ?? "";
 const STILL = env.STRUCT_STILL === "1";
+const FRAMES = env.STRUCT_FRAMES === "1";
 const OUT = `test-results/structures/${LABEL}`;
 
 const STEPS: Record<number, [number, number]> = { 0: [1, 0], 2: [0, 1], 4: [-1, 1] };
@@ -110,6 +113,7 @@ test(`structure captures (${LABEL})`, async ({ page }) => {
     ["portal-west-close", at(TUNNEL, 8), 12],
     ["portal-west-zoom", at(TUNNEL, 8), 24],
     ["portal-east-close", at(TUNNEL, 57), 12],
+    ["portal-east-zoom", at(TUNNEL, 57), 24],
     ["tunnel-default", at(TUNNEL, 12), 6],
     ["tunnel-region", at(TUNNEL, 32), 2.5],
   ];
@@ -129,9 +133,43 @@ test(`structure captures (${LABEL})`, async ({ page }) => {
   await page.keyboard.press("e");
   await page.waitForTimeout(1200);
   await shoot(page, "portal-west-close-yaw2");
-  await page.keyboard.press("q");
-  await page.keyboard.press("q");
+  // The east portal from its front (three yaw steps turn the view half round).
+  await lookAtNodeZ(page, ...at(TUNNEL, 57), 12);
+  await page.keyboard.press("e");
   await page.waitForTimeout(1200);
+  await shoot(page, "portal-east-close-yaw3");
+  await page.keyboard.press("q");
+  await page.keyboard.press("q");
+  await page.keyboard.press("q");
+  await page.waitForTimeout(1500);
+
+  // The ghosts: the Bridge tool mid-drag beside the river bridge, the Tunnel tool mid-drag over the hill.
+  await lookAtNodeZ(page, ...at(RIVER, 18), 6);
+  await page.keyboard.press("5");
+  const [bq, br] = at(RIVER, 12);
+  await page.mouse.move(...(Object.values(await nodeScreen(page, bq + 6, br)) as [number, number]));
+  await page.mouse.down();
+  await page.mouse.move(...(Object.values(await nodeScreen(page, bq + 6, br + 12)) as [number, number]), { steps: 10 });
+  for (let i = 0; i < 6; i++) await page.keyboard.press("PageUp");
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: `${OUT}/ghost-bridge-default.png` });
+  await page.keyboard.press("Escape");
+  await page.mouse.up();
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await lookAtNodeZ(page, ...at(TUNNEL, 30), 6);
+  await page.keyboard.press("6");
+  const [tq, tr] = at(TUNNEL, 26);
+  await page.mouse.move(...(Object.values(await nodeScreen(page, tq + 6, tr)) as [number, number]));
+  await page.mouse.down();
+  await page.mouse.move(...(Object.values(await nodeScreen(page, tq + 6, tr + 10)) as [number, number]), { steps: 10 });
+  for (let i = 0; i < 8; i++) await page.keyboard.press("PageDown");
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: `${OUT}/ghost-tunnel-default.png` });
+  await page.keyboard.press("Escape");
+  await page.mouse.up();
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
 
   // The occlusion aids: H over the girder crossing, U over the tunnel.
   await lookAtNodeZ(page, ...at(VIADUCT, 14), 6);
@@ -146,5 +184,29 @@ test(`structure captures (${LABEL})`, async ({ page }) => {
   await lookAtNodeZ(page, ...at(TUNNEL, 12), 6);
   await shoot(page, "aid-u-default");
   await page.keyboard.press("u");
+  if (FRAMES) {
+    const costs: Record<string, unknown> = {};
+    for (const [name, [q, r], ppm] of [
+      ["viaduct-default", at(VIADUCT, 24), 6],
+      ["truss-default", at(RIVER, 18), 6],
+      ["tunnel-default", at(TUNNEL, 12), 6],
+      ["viaduct-region", at(VIADUCT, 30), 2.5],
+    ] as const) {
+      await lookAtNodeZ(page, q, r, ppm);
+      costs[name] = await page.evaluate(() => {
+        const h = window.__diorama as unknown as { renderer: { render(s: unknown, c: unknown): void; getContext(): WebGL2RenderingContext; info: { render: { calls: number; triangles: number } } }; scene: unknown; camera: { camera: unknown } };
+        const gl = h.renderer.getContext();
+        const px = new Uint8Array(4);
+        for (let i = 0; i < 120; i++) h.renderer.render(h.scene, h.camera.camera);
+        gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        const t0 = performance.now();
+        for (let i = 0; i < 60; i++) h.renderer.render(h.scene, h.camera.camera);
+        gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        const ms = (performance.now() - t0) / 60;
+        return { ms: +ms.toFixed(3), calls: h.renderer.info.render.calls, triangles: h.renderer.info.render.triangles };
+      });
+    }
+    console.log(`[structures] ${LABEL} frame cost: ${JSON.stringify(costs)}`);
+  }
   console.log(`[structures] ${LABEL} page errors and warnings: ${JSON.stringify(errors)}`);
 });

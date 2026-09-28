@@ -1,5 +1,15 @@
 import { SQRT3, type Terrain } from "../../core/sim/api";
-import { CREST_ROUND_M, EARTHWORK_WEIGHT_FROM_X, FORMATION_HALF_WIDTH_M, SIDE_SLOPE_RUN, lodLattice, lodNodeIndex, naturalHeightM } from "../terrain/earthworks";
+import {
+  CREST_ROUND_M,
+  DAYLIGHT_ROUND_M,
+  EARTHWORK_WEIGHT_FROM_X,
+  FORMATION_HALF_WIDTH_M,
+  SIDE_SLOPE_RUN,
+  lodLattice,
+  lodNodeIndex,
+  naturalHeightM,
+  smoothMin,
+} from "../terrain/earthworks";
 import type { TerrainShading } from "../terrain/terrainShading";
 import { portalSkylineV } from "./assets";
 import { BORE_DEPTH_M, PORTAL_HALF_WIDTH_M, PORTAL_MAX_WING_M, PORTAL_TOP_V, PORTAL_WALL_M, PORTAL_WING_RUN } from "./dimensions";
@@ -22,7 +32,14 @@ import { smoothstep } from "../math";
  *   M = P₀ − max(0, |u| − face) / run(s) − max(0, s − MOUND_FLAT_M) / MOUND_END_RUN
  *                                                      (a mound over the bore where the hill is low),
  *
- * with N the natural ground, s metres into the tunnel, u across it, P₀ the
+ * and the plug never lies below the drawn ground (the earthworks' conformed
+ * surface, when given): where the approach cutting's rounded end would rise
+ * through it, it takes that height, so the plug covers its whole region and
+ * no seam zigzags where two nearly equal surfaces cross. The min and the maxes
+ * are the earthworks' polynomial smooth minimum over DAYLIGHT_ROUND_M (0.6 m),
+ * so the mound's foot eases into the ground instead of meeting it at a crease
+ * that the 1.25 m triangles would draw as a sawtooth. Here N is the natural
+ * ground, s metres into the tunnel, u across it, P₀ the
  * face-top level and `face` the face's half width. Where the hill is high the
  * plug fills the bowl up to a 1 : 1.5 slope rising from the face top, and it
  * meets the natural hill where that slope does; where the hill is low it raises
@@ -129,6 +146,8 @@ export class HillPlug {
     /** How far the plug reaches behind the face and to each side. */
     readonly depthM: number,
     readonly halfWidthM: number,
+    /** The drawn ground (the earthworks' conformed LOD0 surface), NaN where unknown; the plug never lies below it. */
+    private readonly drawnM: (x: number, y: number) => number = () => Number.NaN,
   ) {
     this.lat = lodLattice(terrain, 0);
     this.skyAt0 = frame.z + PORTAL_TOP_V + PLUG_UNDER_COPING_M;
@@ -172,7 +191,24 @@ export class HillPlug {
     const crown = PORTAL_HALF_WIDTH_M + (MOUND_CROWN_HALF_M - PORTAL_HALF_WIDTH_M) * ease;
     const m = this.skyAt0 - Math.max(0, Math.abs(u) - crown) / run - Math.max(0, s - MOUND_FLAT_M) / MOUND_END_RUN;
     const natural = Number.isNaN(n) ? this.frame.z : n;
-    return Math.max(Math.min(natural, t), m) + PLUG_LIFT_M;
+    const drawn = this.drawnM(x, y);
+    const k = DAYLIGHT_ROUND_M;
+    const own = -smoothMin(-smoothMin(natural, t, k), -m, k);
+    return (Number.isNaN(drawn) ? own : -smoothMin(-own, -drawn, k)) + PLUG_LIFT_M;
+  }
+
+  /** The drawn ground at a 5 × 5 grid over the plug's region: the view rebuilds the plug when it changes. */
+  groundSignature(): string {
+    const out: string[] = [];
+    for (let i = 0; i <= 4; i++) {
+      for (let j = 0; j <= 4; j++) {
+        const s = PLUG_START_M + ((this.depthM - PLUG_START_M) * i) / 4;
+        const u = -this.halfWidthM + (2 * this.halfWidthM * j) / 4;
+        const h = this.drawnM(this.frame.x + this.frame.tx * s + this.frame.ty * u, this.frame.y + this.frame.ty * s - this.frame.tx * u);
+        out.push(Number.isNaN(h) ? "-" : h.toFixed(2));
+      }
+    }
+    return out.join(",");
   }
 
   private build(shading: TerrainShading): { data: PlugData; maxZ: number } {
@@ -194,10 +230,11 @@ export class HillPlug {
       pos.push(x, z, -y);
       nor.push(normal[0] ?? 0, normal[1] ?? 1, normal[2] ?? 0);
       col.push(colour[0] ?? 0, colour[1] ?? 0, colour[2] ?? 0);
-      // The earthwork attribute: the lip weight in full where the plug is made ground (the relief's lattice facets
-      // and the slope soil fade out there, as on earthworks), with no earthwork colour (it stays grassed).
+      // The earthwork attribute: the lip weight in full where the plug departs from the natural ground, raised as
+      // a mound or following a cutting (the relief's lattice facets and the slope soil fade out there, as on
+      // earthworks), with no earthwork colour (it stays grassed).
       const natural = naturalHeightM(this.terrain, this.lat, x, y);
-      const made = Number.isNaN(natural) ? 0 : smoothstep(0.05, 0.3, z - PLUG_LIFT_M - natural);
+      const made = Number.isNaN(natural) ? 0 : smoothstep(0.05, 0.3, Math.abs(z - PLUG_LIFT_M - natural));
       ew.push(EARTHWORK_WEIGHT_FROM_X * made, 0, 99);
       maxZ = Math.max(maxZ, z);
     };
