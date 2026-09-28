@@ -110,6 +110,27 @@ describe("hill plug", () => {
     expect(checked).toBeGreaterThan(40);
   });
 
+  it("stays under another track's cut envelope, as any fill does: the mound never covers a neighbour's formation", () => {
+    const { terrain, shading, frame } = site(200);
+    // A neighbour 11 m right of the bore in a cutting at 14 m: its formation to 3 m, then 1 : 1.5 up to the ground.
+    const cut = (x: number, y: number) => {
+      const d = Math.abs(90 - y - 11);
+      return 14 + Math.max(0, d - 3) / 1.5;
+    };
+    const drawn = (x: number, y: number) => Math.min(20, cut(x, y));
+    const plug = new HillPlug(terrain, shading, frame, { left: 6, right: 6 }, 30, 20, drawn, cut);
+    let over = 0;
+    for (let s = 1; s < 29; s += 0.25) {
+      for (let u = -19; u < 19; u += 0.25) {
+        const h = plug.heightAt(100 + s, 90 - u) - PLUG_LIFT_M;
+        over = Math.max(over, h - cut(100 + s, 90 - u));
+      }
+    }
+    expect(over).toBeLessThanOrEqual(1e-9);
+    // On the neighbour's formation the plug is the formation itself.
+    expect(plug.heightAt(100 + 2, 90 - 11) - PLUG_LIFT_M).toBeCloseTo(14, 9);
+  });
+
   it("faces every triangle up, starts at the face line, and marks made ground for the terrain shader", () => {
     const { terrain, shading, frame } = site(200);
     const plug = new HillPlug(terrain, shading, frame, { left: 6, right: 6 }, 30, 20);
@@ -140,5 +161,12 @@ describe("hill plug", () => {
     // Over open ground (a bridge in front) it runs until the skyline meets the natural ground: 4 m up at the face top − 3.4 m.
     const open = portalWings(terrain, frame, "bridge");
     expect(open.left).toBeCloseTo(1.5 * (PORTAL_TOP_V - 4), 0);
+    // Another track's formation 8 m right of the bore (from 4.5 m out): that wing stops short of it, the other runs on.
+    const blocked = portalWings(terrain, frame, "bridge", undefined, (x, y) => 90 - y > 4.5 && 90 - y < 11.5);
+    expect(blocked.right).toBeLessThanOrEqual(4.5 - PORTAL_HALF_WIDTH_M);
+    expect(blocked.left).toBeCloseTo(open.left, 9);
+    // A neighbour's cutting that lowers the ground in front never draws a wing out beyond the portal's own section.
+    const lowered = portalWings(terrain, frame, "ground", () => 10);
+    expect(lowered.left).toBeCloseTo(cut.left, 9);
   });
 });

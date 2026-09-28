@@ -104,9 +104,10 @@ describe("the effective ground", () => {
     // Judged with the end clipped, the first pieces into the block are tunnel, as a single drag would make them.
     expect(tunnel.diff.added.map((a) => a.structure)).toEqual(Array(8).fill("tunnel"));
     // Once the tunnel is built every piece of the run carries the fixed plane at (18, 20), and the block behind the
-    // portal is natural again past the 2 : 1 headwall.
+    // portal is natural again past the 45° headwall: at (21, 20), 15 m past the plane, the headwall stands 15 m up.
     for (const p of sim.ground().pieces.values()) expect(p.planes.some((c) => c.fixed && c.key === "18,20,0"), p.key).toBe(true);
-    expect(sim.groundMm(20, 20)).toBe(10_000);
+    expect(sim.groundMm(21, 20)).toBe(10_000);
+
   });
 
   it("leaves water nodes at the water surface and nodes far from track on the terrain", () => {

@@ -38,7 +38,9 @@ import { smoothstep } from "../math";
  * smooth maximum over DAYLIGHT_ROUND_M (0.6 m). The weight w is 1 inside the
  * plug and falls to 0 over PLUG_FADE_M at the edges of its region (and in
  * front beyond the wings), so the plug meets the drawn ground everywhere on
- * its outline, within PLUG_LIFT_M: no tear. It never reads the natural ground:
+ * its outline, within PLUG_LIFT_M: no tear. It is made ground, so the other
+ * tracks' cut envelopes bound it as they bound any fill (`cutM`): it never
+ * rises over a neighbour's formation or side slopes. It never reads the natural ground:
  * the plug of the D4 render filled the approach cutting's bowl from the
  * natural hill, and so refilled a neighbour's cutting inside its region too,
  * a raised block with open, sawtoothed edges over the neighbour's track (the
@@ -100,7 +102,14 @@ function cutRise(d: number): number {
  * Each wing's length: it runs out from the face until the skyline meets the ground in front of it (a ground
  * approach's cutting, or the natural ground), capped at PORTAL_MAX_WING_M.
  */
-export function portalWings(terrain: Terrain, f: PortalFrame, approach: PortalApproach, drawnM?: (x: number, y: number) => number): { left: number; right: number } {
+export function portalWings(
+  terrain: Terrain,
+  f: PortalFrame,
+  approach: PortalApproach,
+  drawnM?: (x: number, y: number) => number,
+  /** Whether a wing may not stand at (x, y): another track's formation is there. The wing stops short of it. */
+  blocked?: (x: number, y: number) => boolean,
+): { left: number; right: number } {
   const lat = lodLattice(terrain, 0);
   const out = { left: 0, right: 0 };
   for (const side of [1, -1] as const) {
@@ -109,11 +118,18 @@ export function portalWings(terrain: Terrain, f: PortalFrame, approach: PortalAp
       // Right of the direction into the tunnel is (ty, −tx); the wing on side +1 stands there.
       const x = f.x + f.ty * side * u;
       const y = f.y - f.tx * side * u;
-      // The drawn ground just in front of the face (the approach's cutting, or a neighbour's, as drawn), when known;
-      // else the natural ground, cut by a ground approach's side slope.
-      const drawn = drawnM ? drawnM(x - WING_FRONT_M * f.tx, y - WING_FRONT_M * f.ty) : Number.NaN;
+      if (blocked?.(x, y)) {
+        length = Math.max(0, u - PORTAL_HALF_WIDTH_M - 0.25);
+        break;
+      }
+      // The portal's own section in front of the face: the natural ground, cut by a ground approach's side slope (the
+      // approach's cutting stops at the portal plane, so this is its section there). Where the drawn ground just in
+      // front stands higher (a neighbour's embankment) the wing ends sooner; a neighbour's cutting that lowers the
+      // ground never draws it out (the owner's oversized diagonal wings, 2026-09-28).
       const n = naturalHeightM(terrain, lat, x, y);
-      const ground = !Number.isNaN(drawn) ? drawn : Number.isNaN(n) ? f.z : approach === "ground" ? Math.min(n, f.z + cutRise(u)) : n;
+      const own = Number.isNaN(n) ? f.z : approach === "ground" ? Math.min(n, f.z + cutRise(u)) : n;
+      const drawn = drawnM ? drawnM(x - WING_FRONT_M * f.tx, y - WING_FRONT_M * f.ty) : Number.NaN;
+      const ground = Number.isNaN(drawn) ? own : Math.max(own, drawn);
       if (f.z + portalSkylineV(u) <= ground + 0.05) {
         length = u - PORTAL_HALF_WIDTH_M;
         break;
@@ -156,6 +172,12 @@ export class HillPlug {
     readonly halfWidthM: number,
     /** The drawn ground (the earthworks' conformed LOD0 surface), NaN where unknown; the plug never lies below it. */
     private readonly drawnM: (x: number, y: number) => number = () => Number.NaN,
+    /**
+     * The lowest cut envelope of the other tracks' earthworks at (x, y) (Infinity where none reaches): the plug is
+     * made ground, and cuts win over it as over any fill, so it never rises over another track's formation or
+     * side slopes (the owner's ballast break, 2026-09-28).
+     */
+    private readonly cutM: (x: number, y: number) => number = () => Number.POSITIVE_INFINITY,
   ) {
     this.lat = lodLattice(terrain, 0);
     this.skyAt0 = frame.z + PORTAL_TOP_V + PLUG_UNDER_COPING_M;
@@ -221,7 +243,11 @@ export class HillPlug {
   private riseAt(x: number, y: number, s: number, u: number): number {
     const d = this.ground(x, y);
     const k = DAYLIGHT_ROUND_M;
-    return this.weight(s, u) * (-smoothMin(-d, -this.mound(s, u), k) - d);
+    const rise = this.weight(s, u) * (-smoothMin(-d, -this.mound(s, u), k) - d);
+    if (rise <= 0) return 0;
+    // Cuts win: never over another track's cut envelope (the drawn ground already lies under it).
+    const cap = this.cutM(x, y) - d;
+    return cap < rise ? Math.max(0, cap) : rise;
   }
 
   private surface(x: number, y: number, s: number, u: number): number {

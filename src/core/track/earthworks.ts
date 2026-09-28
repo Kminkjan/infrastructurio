@@ -48,14 +48,15 @@ import type { Terrain } from "../terrain";
  * over a neighbour's cutting too (the owner's tear). So every earthwork piece
  * carries the clip planes of its chain's ends within MAX_REACH_M along the
  * track (`ClipPlane`, `chainPlanes`): the plane through the end node square to
- * the track. A structure end's plane always clips (`fixed`); a buffer end's
- * only for a query that names its node (a command continuing from it, since
- * whatever it continues with, a structure clips there and ground track's own
- * section covers the cone; `ground.ts`). Past a clipping plane by t, a piece's
- * envelopes are those at the point's foot on the plane, the cut raised and the
- * fill lowered by HEADWALL_RISE · t: a steep headwall behind the portal face or
- * the abutment (`envelopeAt`). Clipping only raises U and lowers L, so every
- * reach bound below still holds.
+ * the track. A structure end's plane always clips (`fixed`): past it by t, a
+ * piece's envelopes are those at the point's foot on the plane, the cut raised
+ * and the fill lowered by HEADWALL_RISE · t, a 45° headwall behind the
+ * portal face or the abutment (`envelopeAt`). A buffer end's
+ * plane clips only a query that names its node (a command continuing from it),
+ * and then hard: past it the chain moves nothing, as if it ended there, since
+ * whatever the command continues with, a structure clips there and ground
+ * track's own section covers the cone (`ground.ts`). Clipping only raises U and
+ * lowers L (or drops a piece), so every reach bound below still holds.
  *
  * **Bridges: a cut only** (D4, owner decision 2026-09-28 "M2": a deck may sit
  * up to 2 m below the terrain within 15 m of an abutment). A bridge piece whose
@@ -713,17 +714,21 @@ export interface Envelope {
 }
 
 /**
- * Past a clipped end's plane, the cut rises and the fill falls this much per metre (about 63°): a steep headwall
- * behind a portal face or an abutment, so a cutting or embankment ends there instead of rounding off in a cone.
+ * Past a fixed clip plane, the cut rises and the fill falls this much per metre on top of the section at the plane
+ * (45°), so a cutting or embankment ends in a headwall behind a portal face or an abutment instead of a cone reaching
+ * on under the structure. Tried first: 2 : 1, whose crest met the hill in a crease sharper than one 1.25 m
+ * sub-triangle and drew a sawtooth behind the wings; and the side slopes' 1 : 1.5, which ate 12 m into the hill
+ * behind a portal, so a tunnel piece laid later from the portal saw its cover gone and a portal of its own.
  */
-export const HEADWALL_RISE = 2;
+export const HEADWALL_RISE = 1;
 
 /**
  * Piece `p`'s envelopes at plan (x, y) with its reach `r` at one LOD, written to `out`: false beyond the reach (the
- * piece moves nothing there). A clip plane counts when it is fixed or `clipKeys` holds its key (a query for a
- * command that continues from that buffer end, `ground.ts`); past the one the point lies farthest beyond, by t, the
- * envelopes are the piece's own at the point's foot on the plane, U raised and L lowered by HEADWALL_RISE · t (see
- * the module comment). `near` is scratch for the nearest centreline point.
+ * piece moves nothing there). Past a fixed clip plane, by t (the farthest one the point lies beyond), the envelopes
+ * are the piece's own at the point's foot on the plane, U raised and L lowered by HEADWALL_RISE · t (see the module
+ * comment). Past a buffer end's plane that `clipKeys` names (a query for a command continuing from that end,
+ * `ground.ts`), the piece moves nothing at all: the command is judged as if the chain ended at the plane, whatever
+ * it continues with. `near` is scratch for the nearest centreline point.
  */
 export function envelopeAt(p: EarthworkPiece, r: PieceReach, x: number, y: number, clipKeys: ReadonlySet<string> | null, near: { d: number; s: number }, out: Envelope): boolean {
   let t = 0;
@@ -732,7 +737,11 @@ export function envelopeAt(p: EarthworkPiece, r: PieceReach, x: number, y: numbe
   const planes = p.planes;
   for (let i = 0; i < planes.length; i++) {
     const c = planes[i];
-    if (!c || (!c.fixed && (clipKeys === null || !clipKeys.has(c.key)))) continue;
+    if (!c) continue;
+    if (!c.fixed) {
+      if (clipKeys !== null && clipKeys.has(c.key) && (x - c.x) * c.tx + (y - c.y) * c.ty > 0) return false;
+      continue;
+    }
     const tc = (x - c.x) * c.tx + (y - c.y) * c.ty;
     if (tc <= t) continue;
     t = tc;

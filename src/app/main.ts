@@ -167,6 +167,7 @@ const structures = new StructureView({
   requestFrame: () => scheduler.requestFrame("rebuild"),
   now: () => performance.now(),
   groundM: (x, y) => earthworks.heightfield.heightAtM(x, y),
+  cutEnvelopeIn: (box, except) => earthworks.cutEnvelopeIn(box, except),
   enabled: structuresOn,
 });
 /**

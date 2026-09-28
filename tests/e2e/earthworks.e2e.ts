@@ -142,9 +142,9 @@ test("a curve laid across a hill stays visible: the drawn terrain is cut under i
   expect(railPick?.kind).toBe("track");
   expect(railPick?.pieceKey).toBe(built.curveKey);
 
-  // The ghost measures against the drawn ground (PR #83 review): a plan started on the node nearest the cutting floor
-  // starts at the sim's ground there (the natural hill), metres above the floor the player sees, so it draws drop
-  // lines and one end-height tag reads that height (against the natural hill it read "0 m" and showed no tags).
+  // A free node on the cutting floor starts on the floor as drawn (D4 feel-check fixes, 2026-09-28: the tool's ground is
+  // the sim's effective ground). Until then it started at the natural hill's height, metres above the floor the player
+  // saw, and the ghost hung its drop lines and an end-height tag from there (PR #83 review).
   await page.mouse.move(floorScreen.x, floorScreen.y, { steps: 4 });
   const start = await page.evaluate(() => (window.__diorama as unknown as { construction: { trackState: { target: { kind: string; node: { q: number; r: number; zMm: number } } | null } } }).construction.trackState.target);
   expect(start?.kind).toBe("node");
@@ -152,14 +152,8 @@ test("a curve laid across a hill stays visible: the drawn terrain is cut under i
     ({ q, r, zMm }) => zMm / 1000 - (window.__diorama as unknown as { drawnHeightM(x: number, y: number): number }).drawnHeightM(5 * (q + r / 2), r * 2.5 * Math.sqrt(3)),
     start?.node ?? { q: 0, r: 0, zMm: 0 },
   );
-  expect(aboveFloor).toBeGreaterThan(2);
-  await page.keyboard.press("Enter");
-  for (let i = 0; i < 3; i++) await page.keyboard.press("ArrowRight");
-  const tags = page.locator(".ghost-height-tag");
-  await expect(tags.first()).toBeVisible();
-  const tagMetres = (await tags.allTextContents()).map((t) => Number(t.replace("−", "-").replace(" m", "")));
-  console.log(`[earthworks e2e] ghost from the cutting floor: ${aboveFloor.toFixed(2)} m above the drawn floor; tags ${JSON.stringify(tagMetres)}`);
-  expect(tagMetres.some((v) => Math.abs(v - aboveFloor) <= 0.051)).toBe(true);
+  console.log(`[earthworks e2e] a free node on the cutting floor starts ${aboveFloor.toFixed(3)} m above the drawn floor`);
+  expect(Math.abs(aboveFloor)).toBeLessThan(0.05);
 
   // Undo: the natural terrain comes back exactly under where the curve was.
   await page.keyboard.press("Escape");

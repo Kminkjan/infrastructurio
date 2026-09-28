@@ -170,26 +170,26 @@ describe("earthworks and terrain bake output (a byte pin)", () => {
     // 5,406 refined), so the refactor itself moved no byte; with bridge cuts on, one deck within 0.6 m of the ground
     // there added 7 refined triangles. The terrain bakes (shading, splat) are unchanged.
     // Re-recorded again 2026-09-28 (D4 feel-check fixes), deliberately: the chains' earthworks now stop at the plane
-    // through each end where a bridge or a tunnel goes on (`ClipPlane`, a 2 : 1 headwall past it), so the approach
+    // through each end where a bridge or a tunnel goes on (`ClipPlane`, a 45° headwall past it), so the approach
     // cones no longer run under a bridge's first span or into the hill behind a portal. Refined LOD0 triangles
-    // 6,670 → 6,173; the deepest cut and fill 8.49 m and 8.75 m → 8.00 m and 7.86 m (only those cones went past the
-    // ±8 m band); 14 fewer scenery items cleared. Checked before re-recording: with the clip planes disabled, the rule
+    // 6,670 → 6,275; the deepest cut and fill 8.49 m and 8.75 m → 8.00 m and 7.86 m (only those cones went past the
+    // ±8 m band); 12 fewer scenery items cleared. Checked before re-recording: with the clip planes disabled, the rule
     // moved into `core/track/earthworks.ts` drew every hash of 3a4c2f5 exactly (the pieces, reaches and nearest points
     // are unchanged here too), so moving the rule into the core moved no byte.
     expect(hashes).toEqual({
       pieces: 327,
-      refined: 6173,
+      refined: 6275,
       withEarthworks: 37,
-      cleared: 292,
+      cleared: 294,
       maxCutFill: [7.997250366210935, 7.86400032043457],
-      lod0: "a7c7e15b 843396e3 d4567712 2b90c783 260da98b",
-      lod1: "11e2f543 dce88e16 08a6d71c 3c525296 c9019c6d",
-      heightfield0: "b7567503",
-      heightfield1: "b60990bf",
+      lod0: "50204995 ef2655d1 e3e3a27f 778ca5e3 d942eb22",
+      lod1: "d31316ee e2453d1e 196ab467 4ed5d1ee ccb98367",
+      heightfield0: "169bf062",
+      heightfield1: "2b01c99e",
       reach: "10a1303f",
       nearest: "ccf44728",
-      clearedFlags: "a0e1f7ab",
-      surfaces: "c62bb8a6",
+      clearedFlags: "4e0c0685",
+      surfaces: "592fc26b",
       shadingD11a: "ab72930b",
       shadingB: "aed09c41",
       splat: "d14a2fa6",

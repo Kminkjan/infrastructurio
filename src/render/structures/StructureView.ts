@@ -1,11 +1,11 @@
 import { BoxGeometry, BufferAttribute, BufferGeometry, Group, type Material, Matrix4, Mesh, MeshBasicMaterial, type Ray, Raycaster, Scene, Vector3 } from "three";
-import { centrelineIndex, sampleCentrelineEvery } from "../../core/geometry/sample";
+import { centrelineIndex, nearestOnCentreline, sampleCentrelineEvery } from "../../core/geometry/sample";
 import type { NetworkPiece, NetworkView, Terrain } from "../../core/sim/api";
 import type { AssetRegistry } from "../art/AssetRegistry";
 import { EARTHWORK_ATTRIBUTE, EARTHWORK_ITEM_SIZE } from "../art/shaderChunks/earthwork";
 import { palette } from "../art/palette";
 import { PICK_LAYER } from "../picking/layers";
-import { lodLattice, naturalHeightM } from "../terrain/earthworks";
+import { FORMATION_HALF_WIDTH_M, lodLattice, naturalHeightM } from "../terrain/earthworks";
 import type { WaterPlane } from "../terrain/heightfieldRay";
 import type { TerrainShading } from "../terrain/terrainShading";
 import { OverlayRibbons } from "../track/GhostView";
@@ -69,6 +69,11 @@ export interface StructureViewOptions {
   readonly budgetMs?: number;
   /** The ground piers and abutments stand on (the drawn, conformed surface); the natural ground when omitted. */
   readonly groundM?: (x: number, y: number) => number;
+  /**
+   * The other tracks' lowest cut envelope over a plan box, leaving out the chain clipped at node key `except`
+   * (`EarthworksView.cutEnvelopeIn`): hill plugs stay under it. None when omitted.
+   */
+  readonly cutEnvelopeIn?: (box: { minX: number; minY: number; maxX: number; maxY: number }, except: string) => (x: number, y: number) => number;
   /** False draws no structures (`?structures=0`, for before/after checks). */
   readonly enabled?: boolean;
 }
@@ -406,10 +411,12 @@ export class StructureView {
     return changed || this.queue.length > 0;
   }
 
-  /** A run's identity plus what its build reads: its ends and, for a bridge, the other tracks near it. */
+  /**
+   * A run's identity plus what its build reads: its ends and the other tracks near it (a bridge's piers and girders
+   * keep clear of them; a tunnel's wings stop short of them and its plugs stay under their cuttings).
+   */
   private signatureOf(run: StructureRun, network: NetworkView): QueuedRun {
     const ends = run.ends.join(",");
-    if (run.structure !== "bridge") return { run, signature: `${run.key}|${ends}`, neighbours: [] };
     const own = new Set(run.pieces.map((p) => p.piece.key));
     const box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
     for (const p of run.pieces) {
@@ -539,7 +546,7 @@ export class StructureView {
       const drawn = this.options.groundM;
       // The wings run to the ground drawn in front of the face (the approach's cutting ends at the portal plane since
       // the D4 feel-check fixes), so they fit the local cutting.
-      const wings = portalWings(this.options.terrain, frame, approach, drawn ? (x, y) => drawn(x, y) : undefined);
+      const wings = portalWings(this.options.terrain, frame, approach, drawn ? (x, y) => drawn(x, y) : undefined, this.otherFormations(run, end, P.x, P.y));
       // The face reaches under the ground in front: a bridge or a low approach needs it deeper.
       const front = naturalHeightM(this.options.terrain, this.lat, P.x - frame.tx * 3, P.y - frame.ty * 3);
       const depth = approach === "ground" ? 1.5 : Math.min(12.7, Math.max(1.5, P.z - (Number.isNaN(front) ? P.z : front) + 1.2));
@@ -554,7 +561,10 @@ export class StructureView {
       const rise = Math.max(0, skyTop - (Number.isNaN(behind) ? P.z : Math.min(behind, skyTop)));
       const depthM = Math.min(45, plugCapM, Math.max(10, MOUND_FLAT_M + MOUND_END_RUN * rise + PLUG_FADE_M + PLUG_EDGE_M));
       const halfWidthM = Math.min(45, Math.max(8, PORTAL_HALF_WIDTH_M + Math.max(wings.left, wings.right) + PLUG_FADE_M + PLUG_EDGE_M, MOUND_CROWN_HALF_M + MOUND_SIDE_RUN * rise + PLUG_FADE_M + PLUG_EDGE_M));
-      const plug = new HillPlug(this.options.terrain, this.shading, frame, wings, depthM, halfWidthM, drawn ? (x, y) => drawn(x, y) : undefined);
+      const node = run.nodes[end];
+      const reach = Math.hypot(depthM, halfWidthM);
+      const cut = this.options.cutEnvelopeIn?.({ minX: P.x - reach, minY: P.y - reach, maxX: P.x + reach, maxY: P.y + reach }, `${node.q},${node.r},${node.zMm}`);
+      const plug = new HillPlug(this.options.terrain, this.shading, frame, wings, depthM, halfWidthM, drawn ? (x, y) => drawn(x, y) : undefined, cut);
       plugs.push(plug);
       const pm = this.plugMesh(plug);
       if (pm) plugMeshes.push(pm);
@@ -563,6 +573,28 @@ export class StructureView {
     const mesh = this.meshOf(sink, `tunnel portals ${run.pieces.length} pieces`, this.tunnelGroup);
     const proxies = run.pieces.map((rp) => this.proxiesFor(rp.piece, PICK_LAYER.TUNNEL, -0.4, BORE_SPRING_V + BORE_HALF_M, BORE_HALF_M + 0.3)).flat();
     return { ...q, mesh, plugs, plugGround: plugs.map((p) => p.groundSignature()), plugMeshes, proxies, layout: undefined, feet: new Float64Array(0), counts, triangles: sink.triangleCount, topZ };
+  }
+
+  /**
+   * Whether a point lies on another track's formation (within FORMATION_HALF_WIDTH_M + 0.5 m of its centreline), for
+   * the tracks near a portal other than the run itself and the approach that meets it there: a wing wall stops short
+   * of them (it ran onto a neighbour's track 10 m away, 2026-09-28).
+   */
+  private otherFormations(run: StructureRun, end: 0 | 1, x: number, y: number): (x: number, y: number) => boolean {
+    const network = this.network;
+    if (!network) return () => false;
+    const node = run.nodes[end];
+    const own = new Set(run.pieces.map((p) => p.piece.key));
+    const at = new Set([...node.ports.a, ...node.ports.b].map((port) => network.pieces[port.piece]?.key));
+    const reach = PORTAL_HALF_WIDTH_M + 30;
+    const others = network.pieces
+      .filter((p) => !own.has(p.key) && !at.has(p.key))
+      .map((p) => centrelineIndex(p))
+      .filter((c) => !(c.maxX < x - reach || c.minX > x + reach || c.maxY < y - reach || c.minY > y + reach));
+    if (others.length === 0) return () => false;
+    const near = { d: 0, s: 0 };
+    const limit = FORMATION_HALF_WIDTH_M + 0.5;
+    return (px, py) => others.some((c) => nearestOnCentreline(c, px, py, near).d < limit);
   }
 
   private meshOf(sink: GeometrySink, name: string, parent: Group): Mesh | undefined {

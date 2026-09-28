@@ -148,7 +148,8 @@ test(`structure captures (${LABEL})`, async ({ page }) => {
   await page.keyboard.press("q");
   await page.waitForTimeout(1500);
 
-  // The ghosts: the Bridge tool mid-drag beside the river bridge, the Tunnel tool mid-drag over the hill.
+  // The ghosts: the Straight line tool (5; it replaced the Bridge and Tunnel tools on 2026-09-28) mid-drag beside the
+  // river bridge, its end raised six steps, and mid-drag over the hill, its end lowered eight.
   await lookAtNodeZ(page, ...at(RIVER, 18), 6);
   await page.keyboard.press("5");
   const [bq, br] = at(RIVER, 12);
@@ -163,7 +164,7 @@ test(`structure captures (${LABEL})`, async ({ page }) => {
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
   await lookAtNodeZ(page, ...at(TUNNEL, 30), 6);
-  await page.keyboard.press("6");
+  await page.keyboard.press("5");
   const [tq, tr] = at(TUNNEL, 26);
   await page.mouse.move(...(Object.values(await nodeScreen(page, tq + 6, tr)) as [number, number]));
   await page.mouse.down();

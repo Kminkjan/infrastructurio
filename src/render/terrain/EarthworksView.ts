@@ -2,7 +2,7 @@ import { type CentrelineIndex, centrelineIndex, nearestOnCentreline } from "../.
 import { type GroundView, type NetworkView, type Terrain, earthworkPieces, networkAdjacency, toWorld } from "../../core/sim/api";
 import type { SceneryClearance } from "../scenery/clearance";
 import { isPortalEnd, structureRuns } from "../structures/runs";
-import { ChunkPass, DrawnHeightfield, type EarthworkPiece, FORMATION_HALF_WIDTH_M, chunksTouching, nearestOnPiece, piecesTouching } from "./earthworks";
+import { ChunkPass, DrawnHeightfield, type EarthworkPiece, type Envelope, FORMATION_HALF_WIDTH_M, chunksTouching, envelopeAt, nearestOnPiece, piecesTouching } from "./earthworks";
 import { type buildEarthworkChunk, earthworkChunkSteps } from "./earthworkMesh";
 import type { TerrainLod } from "./offsetGrid";
 import { type MeshData, buildChunkData } from "./terrainGeometry";
@@ -215,6 +215,25 @@ export class EarthworksView {
     if (this.scenery) for (const c of this.clearing.values()) chunksTouching(this.options.terrain, 0, c, (x, y) => this.enqueue(`${STEP_SCENERY}:${x}:${y}`));
     this.sortQueue();
     if (this.queue.length > 0) this.options.requestFrame();
+  }
+
+  /**
+   * The lowest cut envelope (m) of the earthwork pieces reaching into a plan box, as a function of (x, y) (Infinity
+   * where none reaches), leaving out the chain whose fixed clip plane is at node key `except` (a portal's own
+   * approach, whose headwall the portal face stands in). The hill plug is capped by it (`plug.ts`).
+   */
+  cutEnvelopeIn(box: { minX: number; minY: number; maxX: number; maxY: number }, except: string): (x: number, y: number) => number {
+    const pieces = piecesTouching(this.pieces.values(), box).filter((p) => !p.planes.some((c) => c.fixed && c.key === except));
+    const near = { d: 0, s: 0 };
+    const e: Envelope = { u: 0, l: 0, d: 0 };
+    return (x, y) => {
+      let u = Number.POSITIVE_INFINITY;
+      for (const p of pieces) {
+        if (x < p.minX || x > p.maxX || y < p.minY || y > p.maxY) continue;
+        if (envelopeAt(p, p, x, y, null, near, e) && e.u < u) u = e.u;
+      }
+      return u;
+    };
   }
 
   /** A ground piece's current reach at LOD0 and LOD1 (settled beside its neighbours), or undefined (tests, checks). */
