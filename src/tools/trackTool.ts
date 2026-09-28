@@ -8,16 +8,17 @@ import {
   RADIUS_CLASSES_M,
   type RadiusClassM,
   type Result,
+  type Structure,
   type TrackPlan,
   canonicalKey,
   opposite,
   rotateHeading,
   stepOf,
 } from "../core/sim/api";
-import { buildTooltip, formatCounts, formatHeight, splitReason } from "./format";
+import { buildTooltip, formatCounts, formatHeight, formatStructures, splitReason } from "./format";
 import { nodesAt, pickAtNode } from "./picks";
 import { commandKey } from "./previewMemo";
-import type { GhostModel, Reduced, ScreenPoint, ToolCtx, ToolEffect, ToolEvent, ToolPick } from "./types";
+import type { GhostModel, Reduced, ScreenPoint, StructureMode, ToolCtx, ToolEffect, ToolEvent, ToolPick } from "./types";
 
 /**
  * The track tool (issue #67 "Tool and input"), a pure reducer:
@@ -98,9 +99,11 @@ export interface TrackToolState {
   readonly snapKey: string | null;
   /** A commit's "Built…" text, waiting to lead the announcement of the re-plan that follows it. */
   readonly built: string | null;
+  /** D4: Track builds with structure auto; the Bridge and Tunnel tools force one. */
+  readonly structure: StructureMode;
 }
 
-export function initialTrackState(): TrackToolState {
+export function initialTrackState(structure: StructureMode = "auto"): TrackToolState {
   return {
     phase: "idle",
     target: null,
@@ -118,6 +121,7 @@ export function initialTrackState(): TrackToolState {
     viewKey: null,
     snapKey: null,
     built: null,
+    structure,
   };
 }
 
@@ -131,7 +135,7 @@ function step(s: TrackToolState, e: ToolEvent, ctx: ToolCtx, out: ToolEffect[]):
   switch (e.type) {
     case "activate":
       // Precision starts off: the modifier may have been released while the tool was inactive.
-      return present({ ...initialTrackState(), radiusM: s.radiusM }, ctx, out);
+      return present({ ...initialTrackState(e.structure ?? "auto"), radiusM: s.radiusM }, ctx, out);
 
     case "deactivate":
       out.push({ type: "ghost", ghost: null }, { type: "tooltip", tooltip: null }, { type: "snap", snap: null }, { type: "highlight", keys: [] });
@@ -365,7 +369,7 @@ function present(s: TrackToolState, ctx: ToolCtx, out: ToolEffect[], lead: strin
   const end = plan.end;
   const ground = end ? ctx.groundZmm(end.node.q, end.node.r) : undefined;
   const endHeightMm = end ? end.node.zMm - (ground ?? end.node.zMm) : 0;
-  const command: Command | null = plan.fit === "none" ? null : { type: "build-track", pieces: plan.pieces, structure: "auto" };
+  const command: Command | null = plan.fit === "none" ? null : { type: "build-track", pieces: plan.pieces, structure: s.structure };
   const tipAnchor = s.cursor ? target.node : null;
   const viewKey = [
     ctx.network.rev,
@@ -378,9 +382,11 @@ function present(s: TrackToolState, ctx: ToolCtx, out: ToolEffect[], lead: strin
 
   const verdict = command ? ctx.preview(command) : null;
   const rejection = verdict && !verdict.ok ? verdict.reason : null;
-  const tooltip = buildTooltip({ plan, endHeightMm, rejection, precision: s.precision, anchor: tipAnchor });
+  const ghost = command ? ghostOf(plan, verdict, ctx.network, s.structure) : null;
+  const structure = ghost ? formatStructures(s.structure, ghost.pieces.map((p) => p.structure)) : null;
+  const tooltip = buildTooltip({ plan, endHeightMm, rejection, precision: s.precision, anchor: tipAnchor, structure });
   out.push(
-    { type: "ghost", ghost: command ? ghostOf(plan, verdict, ctx.network) : null },
+    { type: "ghost", ghost },
     { type: "tooltip", tooltip },
     { type: "highlight", keys: verdict && !verdict.ok ? existingKeys(ctx.network, verdict.highlight) : [] },
     { type: "announce", text: lead === null ? tooltip.lines.join(". ") : `${lead} ${tooltip.lines.join(". ")}` },
@@ -432,23 +438,32 @@ function planFor(s: TrackToolState, anchor: Anchor, target: ToolPick, ctx: ToolC
   return want === plan.end.node.zMm ? plan : ctx.planTrack(drag(want - from.zMm));
 }
 
-const keySets = new WeakMap<NetworkView, ReadonlySet<PieceKey>>();
+const keySets = new WeakMap<NetworkView, ReadonlyMap<PieceKey, Structure>>();
 
-function pieceKeys(network: NetworkView): ReadonlySet<PieceKey> {
+/** The network's pieces by key, with their structures. */
+function pieceKeys(network: NetworkView): ReadonlyMap<PieceKey, Structure> {
   let keys = keySets.get(network);
   if (!keys) {
-    keys = new Set(network.pieces.map((p) => p.key));
+    keys = new Map(network.pieces.map((p) => [p.key, p.structure]));
     keySets.set(network, keys);
   }
   return keys;
 }
 
-function ghostOf(plan: TrackPlan, verdict: Result | null, network: NetworkView): GhostModel {
+/**
+ * The ghost: each piece new or reused, with its structure as it would be built (a new piece's from the
+ * preview's `diff.added`, a reused piece's from the network, else the forced structure or ground).
+ */
+function ghostOf(plan: TrackPlan, verdict: Result | null, network: NetworkView, mode: StructureMode): GhostModel {
   const existing = pieceKeys(network);
+  const added = verdict?.ok ? new Map(verdict.diff.added.map((r) => [r.key, r.structure])) : undefined;
+  const fallback: Structure = mode === "auto" ? "ground" : mode;
   return {
     pieces: plan.pieces.map((spec) => {
       const key = canonicalKey(spec);
-      return { spec, status: key !== undefined && existing.has(key) ? "reused" : "new" };
+      const reused = key === undefined ? undefined : existing.get(key);
+      const structure = reused ?? (key === undefined ? undefined : added?.get(key)) ?? fallback;
+      return { spec, status: reused !== undefined ? "reused" : "new", structure };
     }),
     valid: verdict !== null && verdict.ok,
   };

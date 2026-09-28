@@ -3,6 +3,7 @@ import { type PieceSpec, resolvePiece } from "../../core/sim/api";
 import { palette } from "../art/palette";
 import { DASH_OFF_M, DASH_ON_M, RIBBON_LIFT_M, buildRibbons, clipFrames, dashIntervals, elevationMarks, heightTagText } from "./ghostGeometry";
 import { type TrackCentreline, sampleCentreline } from "./trackGeometry";
+import { GHOST_BORE_EDGE_M, GHOST_DECK_EDGE_M, GHOST_MARK_HALF_M, structureMarks } from "./GhostView";
 
 function line(spec: PieceSpec): TrackCentreline {
   const res = resolvePiece(spec);
@@ -71,5 +72,31 @@ describe("ghost geometry", () => {
     expect(heightTagText(2.54)).toBe("+2.5 m");
     expect(heightTagText(-1)).toBe("−1 m");
     expect(heightTagText(0.02)).toBe("0 m");
+  });
+
+  it("draws bands beside the track with their own width, offset and dash (D4)", () => {
+    const c = run(0)[0] as TrackCentreline;
+    const band = buildRibbons([{ centreline: c, color: palette.xray, halfWidthM: 0.2, offsetM: 3, liftM: 1 }], false);
+    // Heading east, right is south: world z = −y = +3 ± 0.2.
+    const zs = Array.from({ length: band.vertexCount }, (_, i) => band.positions[i * 3 + 2] ?? 0);
+    expect(Math.min(...zs)).toBeCloseTo(2.8, 6);
+    expect(Math.max(...zs)).toBeCloseTo(3.2, 6);
+    expect(band.positions[1]).toBeCloseTo(1, 6);
+    const dashed = buildRibbons([{ centreline: c, color: palette.xray, dash: [1, 1] }], false);
+    // 5 m at 1 on, 1 off: dashes at 0, 2, 4 (the last cut at the end).
+    expect(dashed.vertexCount).toBe(3 * 2 * 2);
+  });
+
+  it("marks a bridge ghost's deck edges and a tunnel ghost's dashed bore, and nothing for ground", () => {
+    const c = run(0)[0] as TrackCentreline;
+    const bridge = structureMarks([{ centreline: c, color: palette.ghostValid, structure: "bridge" }]);
+    expect(bridge.map((b) => [b.offsetM, b.halfWidthM, b.dash])).toEqual([
+      [GHOST_DECK_EDGE_M, GHOST_MARK_HALF_M, undefined],
+      [-GHOST_DECK_EDGE_M, GHOST_MARK_HALF_M, undefined],
+    ]);
+    const tunnel = structureMarks([{ centreline: c, color: palette.ghostInvalid, structure: "tunnel" }]);
+    expect(tunnel.map((b) => b.offsetM)).toEqual([GHOST_BORE_EDGE_M, -GHOST_BORE_EDGE_M]);
+    expect(tunnel.every((b) => b.dash !== undefined && b.color === palette.ghostInvalid)).toBe(true);
+    expect(structureMarks([{ centreline: c, color: palette.ghostValid, structure: "ground" }])).toEqual([]);
   });
 });

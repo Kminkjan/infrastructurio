@@ -11,7 +11,12 @@ highlight, undo flash, snap ring), `picking/trackPicker.ts`, three track materia
 wires them. Status 2026-09-27, render pass: `terrain/earthworks.ts` and `EarthworksView`
 (render-only cut and fill under ground track on refined 1.25 m triangles, so track never
 hides in a hill; sim terrain unchanged) and the terrain look variants (`terrain/terrainLook.ts`,
-the `relief` and `groundDetail` chunks; default `b`, faceted, the owner's choice). ADR 0009 (**Accepted**, owner, 2026-09-26)
+the `relief` and `groundDetail` chunks; default `b`, faceted, the owner's choice). Status 2026-09-28,
+D4 render (branch `codex/d4-structures-render`): `structures/` (bridge and tunnel runs, the
+structure-choice rule in `layout.ts`, six `AssetRegistry` kinds bent along each run, portals
+with hill plugs in the terrain material, `StructureView` with H/U and the DECK/TUNNEL pick
+proxies), `picking/layers.ts` and stacked picks for C, bridge track in its own batches, tunnel
+track not drawn, ballast skirts; look not judged. ADR 0009 (**Accepted**, owner, 2026-09-26)
 fixes the renderer, camera, coordinate convention, render-on-demand and React outside the
 frame loop; ADR 0013 (art pipeline) is Proposed. `three` is pinned at 0.185.1 (r185).
 Targets: [art direction](../../docs/art-direction.md), [architecture](../../docs/architecture.md).
@@ -99,7 +104,9 @@ never-rendered `pickScene` with layer bits TERRAIN, TRACK, DECK, TUNNEL, SIGNAL,
 DEPOT, TRAIN, filtered by the active tool; (3) track centreline within 10 px; (4) analytic
 heightfield ray march. Never raycast the visual meshes. D3 (`picking/trackPicker.ts`) does
 existing nodes within 14 px, then (3) and (4), measuring on screen at track height so elevated
-track picks where it is drawn; handles and the proxy scene arrive with R5.
+track picks where it is drawn. D4 adds (2) for DECK and TUNNEL (box proxies per piece in
+`StructureView.pickScene`, masked by `picking/layers.ts`) and stacked levels for C; handles
+arrive with R5.
 - **Occlusion aids are required:** H hides decks, U gives an underground x-ray, C cycles
   stacked hits, and an EntityList offers keyboard targets. ADR 0004's lesson: depth alone
   didn't solve occluded picking; a layer filter plus a keyboard list did.

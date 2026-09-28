@@ -155,4 +155,37 @@ describe("track view", () => {
     expect(t.view.stats.pieces).toBe(5);
     t.view.dispose();
   });
+
+  it("draws bridge track in its own batches, which H hides, and never draws track inside a tunnel", () => {
+    const t = setup(true);
+    t.sim.execute({ type: "build-track", pieces: straights(10, 5, 4), structure: "ground" });
+    t.sim.execute({ type: "build-track", pieces: straights(14, 5, 3), structure: "bridge" });
+    t.sim.execute({ type: "build-track", pieces: straights(17, 5, 5), structure: "tunnel" });
+    t.view.sync(t.sim.network());
+    expect(t.view.stats).toMatchObject({ pieces: 7, bridgePieces: 3, tunnelPieces: 5, pending: 0 });
+    const ground = layer(t.view, "track ballast") as BatchedMesh;
+    const bridge = layer(t.view, "bridge track ballast") as BatchedMesh;
+    const bridgeSleepers = layer(t.view, "bridge track sleepers") as BatchedMesh;
+    expect(ground.visible && bridge.visible && bridgeSleepers.visible).toBe(true);
+    t.view.setDecksHidden(true);
+    expect(bridge.visible || bridgeSleepers.visible).toBe(false);
+    expect(ground.visible).toBe(true);
+    // The far LOD still hides sleepers once H is off again.
+    t.view.setLod(1);
+    t.view.setDecksHidden(false);
+    expect(bridge.visible).toBe(true);
+    expect(bridgeSleepers.visible).toBe(false);
+    t.view.setLod(8);
+    expect(bridgeSleepers.visible).toBe(true);
+    // Undo the tunnel: nothing drawn changes; undo the bridge: its batches empty.
+    t.sim.execute({ type: "undo" });
+    t.view.sync(t.sim.network());
+    expect(t.view.stats).toMatchObject({ pieces: 7, tunnelPieces: 0 });
+    t.sim.execute({ type: "undo" });
+    t.view.sync(t.sim.network());
+    expect(t.view.stats).toMatchObject({ pieces: 4, bridgePieces: 0 });
+    expect(bridge.visible).toBe(false);
+    t.view.dispose();
+    t.materials.dispose();
+  });
 });

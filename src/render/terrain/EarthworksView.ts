@@ -1,5 +1,7 @@
-import type { NetworkView, Terrain } from "../../core/sim/api";
+import { type CentrelineIndex, centrelineIndex, nearestOnCentreline } from "../../core/geometry/sample";
+import { type NetworkView, type Terrain, toWorld } from "../../core/sim/api";
 import type { SceneryClearance } from "../scenery/clearance";
+import { isPortalEnd, structureRuns } from "../structures/runs";
 import {
   ChunkPass,
   DrawnHeightfield,
@@ -54,6 +56,23 @@ export const EARTHWORKS_BUDGET_MS = 8;
 export const SCENERY_CLEARANCE_M = FORMATION_HALF_WIDTH_M + 2;
 /** Scenery also clears where the drawn ground moved more than this. */
 export const SCENERY_MOVED_M = 0.1;
+/**
+ * Bridges and tunnels are never conformed (the earthworks move ground only for ground track), but scenery gives
+ * way to them too (D4): trees and props within SCENERY_CLEARANCE_M of a bridge's centreline would stand in its
+ * deck or piers, and within this radius of a portal node in its face and wings.
+ */
+export const PORTAL_SCENERY_CLEARANCE_M = 9;
+
+/** A bridge piece or a portal the scenery gives way to: a centreline or a disc, and its plan box. */
+interface Clearing {
+  readonly index: CentrelineIndex | null;
+  readonly x: number;
+  readonly y: number;
+  readonly minX: number;
+  readonly minY: number;
+  readonly maxX: number;
+  readonly maxY: number;
+}
 
 /** What the view needs of the terrain's chunk meshes (`TerrainView` has this shape). */
 export interface EarthworkChunkTarget {
@@ -96,6 +115,8 @@ export class EarthworksView {
   /** The drawn LOD1 surface (tests and checks). */
   readonly heightfieldLod1: DrawnHeightfield;
   private readonly pieces = new Map<string, EarthworkPiece>();
+  /** Bridges and portals scenery clears around (by `b:<key>` and `p:<node>`); never conformed. */
+  private readonly clearing = new Map<string, Clearing>();
   /** Pending steps as `${order}:${x}:${y}` (order: STEP_*), sorted so LOD0 goes first. */
   private readonly queue: string[] = [];
   private readonly queued = new Set<string>();
@@ -201,8 +222,9 @@ export class EarthworksView {
     this.current = undefined;
     this.plain.clear();
     for (const key of this.drawnWithEarthworks) this.enqueue(key);
-    // Scenery on chunks near pieces must be re-cleared too, even where the ground did not move.
+    // Scenery on chunks near pieces must be re-cleared too, even where the ground did not move (bridges and portals too).
     for (const p of this.pieces.values()) this.enqueueBox(p);
+    if (this.scenery) for (const c of this.clearing.values()) chunksTouching(this.options.terrain, 0, c, (x, y) => this.enqueue(`${STEP_SCENERY}:${x}:${y}`));
     this.sortQueue();
     if (this.queue.length > 0) this.options.requestFrame();
   }
@@ -213,11 +235,15 @@ export class EarthworksView {
     return p ? [p.reachM, p.lod1.reachM] : undefined;
   }
 
-  /** Whether earthworks claim plan (x, y) for scenery: on a formation, or where the drawn ground moved. */
-  clearsScenery(x: number, y: number, near: readonly EarthworkPiece[]): boolean {
+  /** Whether earthworks claim plan (x, y) for scenery: on a formation, under a bridge, at a portal, or where the drawn ground moved. */
+  clearsScenery(x: number, y: number, near: readonly EarthworkPiece[], clearing: readonly Clearing[] = []): boolean {
     for (const p of near) {
       if (x < p.minX || x > p.maxX || y < p.minY || y > p.maxY) continue;
       if (nearestOnPiece(p, x, y, this.near).d <= SCENERY_CLEARANCE_M) return true;
+    }
+    for (const c of clearing) {
+      if (x < c.minX || x > c.maxX || y < c.minY || y > c.maxY) continue;
+      if (c.index ? nearestOnCentreline(c.index, x, y, this.near).d <= SCENERY_CLEARANCE_M : Math.hypot(x - c.x, y - c.y) <= PORTAL_SCENERY_CLEARANCE_M) return true;
     }
     if (this.heightfield.triangles.size === 0) return false;
     const drawn = this.heightfield.heightAtM(x, y);
@@ -242,6 +268,7 @@ export class EarthworksView {
       removed = true;
     }
     if (added.length > 0 || removed) this.settle(added, removed);
+    this.syncClearing(network);
     this.rebuild = { chunks: 0, slices: 0, totalMs: 0, longestSliceMs: 0 };
     this.sortQueue();
   }
@@ -290,6 +317,44 @@ export class EarthworksView {
     }
   }
 
+  /** Bridges and portals: the scenery on the chunks of any that came or went is re-tested. */
+  private syncClearing(network: NetworkView): void {
+    const wanted = new Map<string, () => Clearing>();
+    const m = SCENERY_CLEARANCE_M;
+    for (const p of network.pieces) {
+      if (p.structure !== "bridge") continue;
+      wanted.set(`b:${p.key}`, () => {
+        const index = centrelineIndex(p);
+        return { index, x: 0, y: 0, minX: index.minX - m, minY: index.minY - m, maxX: index.maxX + m, maxY: index.maxY + m };
+      });
+    }
+    for (const run of structureRuns(network)) {
+      if (run.structure !== "tunnel") continue;
+      for (const end of [0, 1] as const) {
+        if (!isPortalEnd(this.options.terrain, run, end)) continue;
+        const n = run.nodes[end];
+        const { x, y } = toWorld(n);
+        const r = PORTAL_SCENERY_CLEARANCE_M;
+        wanted.set(`p:${n.q},${n.r},${n.zMm}`, () => ({ index: null, x, y, minX: x - r, minY: y - r, maxX: x + r, maxY: y + r }));
+      }
+    }
+    const t = this.options.terrain;
+    const touch = (c: Clearing): void => {
+      if (this.scenery) chunksTouching(t, 0, c, (x, y) => this.enqueue(`${STEP_SCENERY}:${x}:${y}`));
+    };
+    for (const [key, c] of this.clearing) {
+      if (wanted.has(key)) continue;
+      this.clearing.delete(key);
+      touch(c);
+    }
+    for (const [key, make] of wanted) {
+      if (this.clearing.has(key)) continue;
+      const c = make();
+      this.clearing.set(key, c);
+      touch(c);
+    }
+  }
+
   private sortQueue(): void {
     // LOD0 (the drawn surface at every zoom above Far, and picking), its scenery, then LOD1.
     this.queue.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
@@ -322,8 +387,10 @@ export class EarthworksView {
     const y = Number(yText);
     const terrain = this.options.terrain;
     if (step === STEP_SCENERY) {
-      const near = piecesTouching(this.pieces.values(), ChunkPass.chunkBox(terrain, 0, x, y));
-      this.scenery?.update(x, y, (px, py) => this.clearsScenery(px, py, near));
+      const box = ChunkPass.chunkBox(terrain, 0, x, y);
+      const near = piecesTouching(this.pieces.values(), box);
+      const clearing = [...this.clearing.values()].filter((c) => !(c.maxX < box.minX || c.minX > box.maxX || c.maxY < box.minY || c.minY > box.maxY));
+      this.scenery?.update(x, y, (px, py) => this.clearsScenery(px, py, near, clearing));
       return;
     }
     const lod: TerrainLod = step === STEP_LOD0 ? 0 : 1;

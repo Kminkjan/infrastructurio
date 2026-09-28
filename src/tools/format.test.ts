@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { type TrackPlan, createSim } from "../core/sim/api";
-import { HINT_LINE, buildTooltip, formatGrade, formatHeight, gradeLevel, splitReason } from "./format";
+import { HINT_LINE, buildTooltip, formatGrade, formatHeight, formatStructures, gradeLevel, splitReason } from "./format";
 import { planPointOfNode } from "./picks";
 
 function plan(overrides: Partial<TrackPlan> = {}): TrackPlan {
@@ -94,5 +94,15 @@ describe("tooltip text", () => {
 
   it("splits a message without a fix into a reason only", () => {
     expect(splitReason({ message: "Nothing to undo." })).toEqual({ reason: "Nothing to undo", fix: null });
+  });
+
+  it("names the structure when a plan is not all ground (D4)", () => {
+    expect(formatStructures("auto", ["ground", "ground"])).toBeNull();
+    expect(formatStructures("bridge", ["bridge", "bridge"])).toBe("Structure: bridge");
+    expect(formatStructures("tunnel", ["tunnel"])).toBe("Structure: tunnel");
+    expect(formatStructures("auto", ["ground", "bridge", "tunnel", "bridge"])).toBe("Structure: 2 bridge, 1 tunnel, 1 ground");
+    // A forced mode over pieces that all exist as ground still says so.
+    expect(formatStructures("bridge", ["ground"])).toBe("Structure: ground");
+    expect(formatStructures("auto", [])).toBeNull();
   });
 });

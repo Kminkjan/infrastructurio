@@ -1495,6 +1495,45 @@ below sets D4's height behaviour and accepts no ADR.
   - that curve samples decide identically across JavaScript engines, or timings on the gate
     hardware.
 
+## Findings (2026-09-28, D4 structures render)
+
+Recorded on branch `codex/d4-structures-render`, code at `b26dda5` (from `81779af`), the render
+half of D4 ([#68](https://github.com/Kminkjan/infrastructurio/issues/68)); the core half (grades,
+structure inference, the new reason codes, an auto-grade planner) is a parallel lane. Measurements
+are automated (Vitest 4.1.10, Node 26.7.0, macOS 26.6.2, Apple M5 Pro) unless labelled agent
+(Playwright, headless Chrome, same machine). The status of this ADR stays Proposed.
+- **Bridges and tunnels are never conformed.** The earthworks-lite rule already skipped
+  non-ground pieces; a test now builds the same run as a bridge and as a tunnel and finds every
+  chunk byte-identical to the natural terrain. Scenery clears within 5 m of a bridge's centreline
+  (as for ground track) and within 9 m of a portal node; undo restores it.
+- **Structure layout is render's.** Bridge runs are maximal chains of bridge pieces along a
+  section; the span layout reads the drawn ground, the drawn water and the other tracks' sampled
+  centrelines, and keeps every pier's footprint 3 m in plan from any track passing more than 2 m
+  under the deck (a property test over 150 random crossings). The rule is in
+  [art direction](../art-direction.md#structures-d4-render-2026-09-28). A run's signature (its
+  pieces, what lies beyond its ends, the other pieces within 12 m) decides a rebuild, so an
+  incremental view equals a fresh one (tested).
+- **Piers stand on the drawn ground.** A pier's foot lies 1.2 m under the lowest drawn ground of
+  its footprint; when the earthworks of a revision land, runs whose feet would show are rebuilt.
+- **Portals and the hill plug.** A ground approach's cutting ends in a rounded end cap around the
+  portal node (the earthworks-lite rule). The portal's face and wings stand in the plane through
+  the node, the wings running out until their 1 : 1.5 coping meets the cutting in front; behind
+  it a render-only plug on the 1.25 m sub-lattice fills the end cap up to a 1 : 1.5 slope from the
+  face top, raises a mound where the hill is lower than the face, never lies below the drawn
+  ground, and rounds its min and max over 0.6 m. Picking marches it with the drawn surface.
+- **Ballast skirts** on ground track only: the shoulders continue to 2.92 m out and 0.62 m under
+  the track height, inside the 3 m formation, so they change nothing where the drawn ground is
+  the bed (not measured on the plan population).
+- **Observed (agent captures), not fixed:** an approach embankment's rounded end runs far down a
+  steep valley side beside a bridge's abutment (an abutment cone longer than a real one); clipping
+  the conform at structure ends would change `earthworks.ts` and its byte pin, so it was left.
+- **The D3 planner lays every node on the ground plus a ramped offset,** so the Bridge tool ramps
+  its deck up from the bank and a tunnel follows the hill unless its first end is lowered (the e2e
+  lowers it 8 m and chains at that depth). Level decks and bores need the core lane's auto-grade
+  planner; the captures laid them through the dev hook's sim.
+- **Not established:** the owner's reading; how the core lane's inferred structures and grade
+  rule change these plans; timings on the gate hardware.
+
 ## Revisit when
 
 - The D3 feel check finds construction unsatisfying for reasons that planner tuning, chained
@@ -1567,3 +1606,7 @@ below sets D4's height behaviour and accepts no ADR.
   `Drag.heightMode` and `Drag.structure`, the height fit and the alternatives measured, the
   diorama measurement, open point 4, performance, changed and failing tests); status unchanged,
   still Proposed.
+- 2026-09-28: D4 structures render findings added (bridges and tunnels never conformed, scenery
+  cleared around them, render's span layout with piers clear of other tracks, piers on the drawn
+  ground, the portal and hill plug over the approach cutting's end, ballast skirts, the abutment
+  cone observed, the D3 planner's ramped decks); status unchanged, still Proposed.

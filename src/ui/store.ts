@@ -8,12 +8,25 @@
  * layer depends on react and its own store only.
  */
 
-export type HudTool = "select" | "track";
+export type HudTool = "select" | "track" | "bridge" | "tunnel";
+
+/** The track-family tools: Track (auto structure), Bridge and Tunnel (forced). */
+export function isTrackTool(tool: HudTool): tool is "track" | "bridge" | "tunnel" {
+  return tool === "track" || tool === "bridge" || tool === "tunnel";
+}
+
+/** The occlusion aids' state (presentation only): H hides decks, U shows the underground x-ray. */
+export interface HudViews {
+  readonly decksHidden: boolean;
+  readonly xray: boolean;
+}
 
 export type HudGradeLevel = "green" | "amber" | "red";
 
 export interface HudTooltip {
   readonly counts: string;
+  /** D4: what the plan builds when it is not all ground ("Structure: bridge"). */
+  readonly structure?: string | null;
   readonly metrics: {
     readonly length: string;
     readonly grade: string;
@@ -42,6 +55,7 @@ export interface HudState {
   readonly status: string;
   readonly canUndo: boolean;
   readonly canRedo: boolean;
+  readonly views: HudViews;
 }
 
 export interface HudStore {
@@ -58,6 +72,7 @@ export const INITIAL_HUD_STATE: HudState = Object.freeze({
   status: "",
   canUndo: false,
   canRedo: false,
+  views: Object.freeze({ decksHidden: false, xray: false }),
 });
 
 export function createHudStore(initial: HudState = INITIAL_HUD_STATE): HudStore {

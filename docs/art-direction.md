@@ -116,6 +116,14 @@ at start-up (`src/ui` never imports render).
 on it). The table now has 73 tokens, 74 with `forestFloor`. They were chosen in-house and
 are not yet judged at a look gate. See [Terrain and water](#terrain-and-water).
 
+**D4 structures (2026-09-28):** six in-house tokens join the table (79 tokens, 80 with
+`forestFloor`), none judged at a look gate. World (muted): **masonry `#A59D8C`**, **masonry
+dark `#857E70`** (soffits, plinths), **masonry light `#C5BDA9`** (dressed stone: copings,
+voussoirs, string courses), **steel `#3B4541`** (trusses and girders, near loco but lighter so
+thin members read) and **tunnel mouth `#242520`** (the dark bore). Information: **x-ray
+`#9EB6F2`** (the underground x-ray and hidden decks' outlines). See
+[Structures (D4 render)](#structures-d4-render-2026-09-28).
+
 | Group | Colours |
 |---|---|
 | grass | `#8FA66B`, light `#A9BA7E`, shade `#6E8752`, meadow `#C2BE7C` |
@@ -123,6 +131,7 @@ are not yet judged at a look gate. See [Terrain and water](#terrain-and-water).
 | ground | soil `#A88F6A`, dirt road `#B8A07A`, cobbles `#A39C90`/`#8E877B`, rock `#9A9486`, forest floor `#71704F` (D11a, in-house), earthwork face `#9E8A6C` and bed `#7B705E` (earthworks-lite, in-house) |
 | fields | rye `#C9B26B`, hay `#BFB27A`, crop `#9DAE6A`, fallow `#A38B62` |
 | track | ballast `#8C8578`/`#7A7368`, sleepers `#5A4636`, rail top `#B7B3AA`, sides `#55524D` |
+| structures (D4, in-house) | masonry `#A59D8C`, dark `#857E70`, light `#C5BDA9`; steel `#3B4541`; tunnel mouth `#242520` |
 | walls | stucco `#E9DFC8`, ochre `#E3CFA6`, blush `#D9C3B0`, sage `#C9D3C5`, lime white `#F1ECE0`, brick `#9C5A44`, timber `#8A6E55`/`#6C5A48` |
 | roofs | tile `#C0643F`/`#B45A3A`/`#CD7650`, slate `#5E6166`, shingle `#7D6B5A` |
 | water | `#6F9AA0`, deep `#4D7A84`, foam `#D8E3DC` |
@@ -130,7 +139,7 @@ are not yet judged at a look gate. See [Terrain and water](#terrain-and-water).
 | air | haze `#DCDCCB`, steam `#F4F2EC` → `#CFCAC0`, smoke `#B9B4AA` |
 | light and grid | sky `#D6E4EC`, ground bounce `#6B6A4E`, sun `#FFE8C2`, lattice line `#F2F0E6` |
 | UI | parchment `#F3EDE0`, border `#D8CCB4`, ink `#3B3A36`, brass `#B08D57`, signal red `#C8453A`, green `#5E9C5A`, amber `#D9A13B` (D3) |
-| build states | ghost valid `#FFFFFF`, invalid `#E0584C` (dashed), reused `#7FD1E8`, snap `#8FD694` |
+| build states | ghost valid `#FFFFFF`, invalid `#E0584C` (dashed), reused `#7FD1E8`, snap `#8FD694`, x-ray `#9EB6F2` (D4, in-house) |
 | block overlay | `#F2C94C`, `#4FC3D9`, `#D65DB1`, `#F08A4B`, `#8C7AE6`, `#F4F4F4`, plus a colour-blind-safe set; one-way blocks always get chevrons |
 
 - **World groups** (grass through air) are muted. **Information groups** (build states,
@@ -657,9 +666,9 @@ slice named.
 | Item | Owner slice |
 |---|---|
 | Shadow radius per preset: 3 (recipe) vs 2 (Medium) | D11b |
-| Masonry and structural-steel palette tokens; bridge type over land above 20 m | D4 |
+| Masonry and structural-steel palette tokens; bridge type over land above 20 m (2026-09-28: set in code by D4's render half, truss on masonry piers; not judged, see [Structures (D4 render)](#structures-d4-render-2026-09-28)) | D4 |
 | A palette token for the chain signal's partial aspect; the dot → arm switch-over ppm; the colour-blind overlay values; the minimum ribbon width | D7 |
-| Scenery clearing along track corridors (a default since earthworks-lite, 2026-09-27: 5 m, see [Trees and scenery](#trees-and-scenery); buildings still unhandled) | D3/D4 |
+| Scenery clearing along track corridors (a default since earthworks-lite, 2026-09-27: 5 m, see [Trees and scenery](#trees-and-scenery); buildings still unhandled; 2026-09-28: bridges clear the same 5 m, portals 9 m) | D3/D4 |
 | Moiré check on sleepers at Default (blocked until D3 track exists; the per-tree budget was set in D11a: 60–120 / 24–30) | D11a |
 | Chimney smoke and shore foam (deferred in D11a: smoke anchors exist, nothing is drawn yet) | D11b (proposed) |
 | The sun's screen direction: D1's sun casts shadows right and slightly up the screen, while this page says lower right | Look Gate A (owner) |
@@ -935,3 +944,113 @@ legibility; the mid laptop, real DPR 2 and the Low preset. The soft patch edges 
 look `b`; their contrast is low (8% and 7%), and the tufts and relief carry the crispness.
 Whether cut faces should show earth at all, and whether embankment tops should show a shoulder,
 are open to the owner.
+
+## Structures (D4 render, 2026-09-28)
+
+**Status (2026-09-28, agent):** the render half of D4
+([#68](https://github.com/Kminkjan/infrastructurio/issues/68)), built on branch
+`codex/d4-structures-render` from `81779af`, code at `b26dda5`. **Not judged:** the owner reads
+it, and nothing here is a Look Gate result. The [Structures](#structures) section above stays
+as written; this records how the code builds it. Code:
+[`render/structures/`](../src/render/structures/) (the rule in `layout.ts`, the forms in
+`assets.ts`, the plug in `plug.ts`, the view in `StructureView.ts`).
+
+**The choice rule** (render only: the core stores only that a piece is a bridge or a tunnel).
+A bridge run is a maximal chain of bridge pieces along a section. Along it the renderer samples
+the ground, the drawn water and the other tracks passing more than 2 m under the deck, then:
+- **Supports:** an abutment at each end (a tunnel's portal where the run enters one); piers
+  first where obstacles end (just outside each stretch where other tracks forbid them, on dry
+  ground at each bank, and where the deck crosses 20 m above the ground), then evenly between:
+  spans near 12 m (8–16 m) over land up to 20 m high, near 40 m above it, one truss over water
+  up to 80 m (else river piers with cutwaters), one clear span wherever tracks cross.
+- **Piers never stand on other tracks or in their clearance:** no point of a pier's footprint
+  (1.8 × 6.5 m, plus 1.3 m cutwaters in water) comes within 3 m in plan of another track's
+  centreline (a property test over 150 random crossings).
+- **Span type,** first match wins, as above: over water a steel Warren truss; a clear span over
+  30 m a truss; over another track a plate girder; **over land more than 20 m high a truss on
+  masonry piers (D4 settles this open item)**; otherwise a stone arch viaduct, semicircular where
+  it fits, segmental where the deck is low, a solid wall within about a metre of the ground. A
+  truss span under 25 m merges into a neighbouring truss while the result stays within 80 m, so
+  a river valley reads as viaduct approaches with one long truss.
+
+**Forms** (generic 1900 Russian-Empire Baltic railway types, simplified; nothing from another
+game): arches with a 0.55 m voussoir ring of alternating dressed and plain stones and a
+keystone, spandrel walls, coped parapets and a string course; a through Warren truss (depth
+span/6, 6.2–9 m) with inclined end posts, top struts, X bracing and portal struts; a through
+plate girder (1.9–2.6 m deep) with flanges and stiffeners; battered piers (1 : 24) with a
+plinth, an impost cap and string courses on tall ones; abutments with newel posts and quoins; a
+portal with an arched face, pilasters, cornice, parapet and keystone, wing walls whose coping
+falls at 1 : 1.5 until it meets the ground in front, and a dark bore 4.5 m deep with the rails
+running in. Each part is an `AssetRegistry` kind (`bridge-arch`, `bridge-truss`,
+`bridge-girder`, `bridge-pier`, `bridge-abutment`, `tunnel-portal`) with walls, trim and metal
+slots, a footprint and a budget; spans are bent along the run, so curved viaducts follow the
+track. One mesh per run in the shared `built` material.
+
+**Tunnels.** Track inside a tunnel is not drawn. Each end that meets daylight (ground, a bridge,
+or a buffer under less than 12 m of ground) gets a portal and a **hill plug**: ground in the
+terrain's own material behind the face that fills the approach cutting's rounded end up to a
+1 : 1.5 slope from the face top, raises a ridge-shaped mound over a shallow bore, and never lies
+below the drawn ground, so the hill reads as closed over the bore.
+
+**Occlusion aids and construction feedback.** H hides every bridge (structure and track) and
+draws dashed x-ray outlines of the hidden decks; U draws the tunnels through the ground as
+see-through x-ray ribbons with dashed bore outlines; C steps through the stacked picks under the
+pointer (the front level, what lies behind it, then the ground). A chip over the toolbar names
+the aids in effect. The ghost adds structure marks in its own colour (solid deck edges at ±3 m
+for a bridge, dashed bore edges at ±2.6 m for a tunnel), and the tooltip adds a structure line
+("Structure: bridge", or counts when a plan mixes). Rest views are unchanged.
+
+**Earthworks, skirts, scenery.** Bridges and tunnels are never conformed (tested). Ground track
+gets **ballast skirts**: the shoulders run on at their own slope to 2.92 m out and 0.62 m under
+the track height, inside the 3 m formation, so they show only where the drawn ground falls away
+from the ballast (with `?earthworks=0`, on the natural leave-alone band, at the far LOD, at a
+structure's end). Trees and props clear within 5 m of a bridge's centreline and 9 m of a portal.
+
+**Agent observations** (headless Chrome through Playwright, 1280 × 800 at DPR 1, Apple M5 Pro,
+ANGLE Metal; `CAPTURE=1 npx playwright test --project=capture structures`, images in the
+gitignored `test-results/structures/after/`; the decks and the tunnel were laid through the dev
+hook's sim, since the D3 planner lays nodes on the ground; these are agent notes, not a look
+verdict):
+- **Viaduct** (`viaduct-close`, `-default`, `-region`, `-close-yaw1`): 21 arch spans of about
+  12 m across the valley by the lake (deck 27 m over a 10.7 m floor), piers with a mid-height
+  string course, a solid first span and flattened last spans near the ground, newel posts at the
+  ends. At Region it reads as a row of arches.
+- **Girder** (`girder-close`, `-default`): a 14.9 m plate girder where a valley-side track passes
+  under, on piers raised to the steel seat either side.
+- **Truss** (`truss-close`, `-default`, `-region`): the river valley bridge (deck 21.9 m over the
+  water) as three arches, one 65.5 m truss on bank piers, and two arches; its shadow reads on the
+  water.
+- **Portals** (`portal-west-close`, `-zoom`, `-close-yaw2`, `portal-east-close`, `-zoom`,
+  `-close-yaw3`): the arched face, wings and dark bore with the rails running in; the plug reads
+  as the hillside over the deep west portal and as a grassed ridge over the shallow east one.
+- **Aids and ghosts** (`aid-h-default`, `aid-u-mid`, `aid-u-default`, `ghost-bridge-default`,
+  `ghost-tunnel-default`): the dashed hidden-deck outline over the track below, the tunnel
+  ribbon through the hill, and the ghosts' deck and bore marks.
+- **Defects seen, not fixed:** the approach embankment's rounded end (the abutment cone) runs far
+  down a steep valley side at a bridge end (the river bridge's north end); seen from behind, a
+  shallow portal's plug still shows a faint ragged shading line where its flank meets the
+  approach cutting; the Warren truss's members alias to faint lines at Region.
+- No page errors or warnings.
+
+**Frame cost** (agent development readings on the machine above; never cite them against the
+[acceptance gates](evidence/m4/2026-09-26-acceptance-gates.md)). Mean ms per frame over 60
+back-to-back renders closed by a one-pixel `readPixels` after 120 warm-up renders, reduced
+motion, two runs each, the same scene with and without structures (`?structures=0`):
+
+| View | Without | With | Draw calls | Triangles |
+|---|---|---|---|---|
+| Viaduct, Default | 0.532–0.540 | 0.535–0.555 | 89 → 94 | 773k → 790k |
+| River bridge, Default | 0.677 | 0.672–0.673 | 78 → 80 | 1,165k → 1,171k |
+| Tunnel, Default | 0.623–0.633 | 0.622–0.625 | 80 → 87 | 905k → 924k |
+| Viaduct, Region | 0.725–0.733 | 0.730–0.743 | 133 → 142 | 644k → 664k |
+
+Rebuilds (Node, `StructureView.test.ts`, three runs, five builds per site): the 54-piece
+viaduct 2.9–3.6 ms median (12–13 ms cold), the 27-piece river bridge 1.1–1.3 ms, the 49-piece
+tunnel 6.8–7.2 ms (mostly its two plugs), a 10-piece bridge edit 0.5–0.6 ms median, p95
+0.8–1.6 ms. A run builds whole within one slice, so a cold long run can overrun the 8 ms slice.
+The initial JS is 308.02 kB gzip.
+
+**Open (not established here):** how the owner reads any of it (Look Gates A and B);
+legibility; the mid laptop, real DPR 2 and the Low preset; LOD1 forms for the far band (the
+registry returns LOD0's). Whether a mound over a shallow portal or a deeper portal should be the
+answer is the core lane's (auto structures keep tunnel ends near 4 m of cover).

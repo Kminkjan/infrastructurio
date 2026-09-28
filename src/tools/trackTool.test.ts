@@ -553,3 +553,54 @@ describe("track tool: height, precision and keyboard", () => {
     expect(t.state.phase).toBe("idle");
   });
 });
+
+describe("track tool: Bridge and Tunnel modes (D4)", () => {
+  it("builds with the forced structure, and the ghost and tooltip name it", () => {
+    for (const structure of ["bridge", "tunnel"] as const) {
+      const t = session({ flat: true });
+      t.send({ type: "activate", structure });
+      expect(t.state.structure).toBe(structure);
+      t.down(10, 10);
+      const fx = t.move(14, 10);
+      const ghost = ghostOf(fx);
+      expect(ghost?.pieces.map((p) => p.structure)).toEqual([structure, structure, structure, structure]);
+      const tip = tooltipOf(fx);
+      expect(tip?.structure).toBe(`Structure: ${structure}`);
+      expect(tip?.lines[1]).toBe(`Structure: ${structure}`);
+      const done = t.up(14, 10);
+      const exec = last(done, "execute");
+      expect(exec?.command).toMatchObject({ type: "build-track", structure });
+      expect(t.sim.network().pieces.every((p) => p.structure === structure)).toBe(true);
+    }
+  });
+
+  it("reads each new piece's structure from the preview's diff, and a reused piece's from the network", () => {
+    const t = session({ flat: true });
+    // Ground track first (Track mode, auto), then a Bridge drag that runs back over it and on.
+    t.drag([10, 10], [13, 10]);
+    t.send({ type: "escape" });
+    t.send({ type: "escape" });
+    t.send({ type: "deactivate" });
+    t.send({ type: "activate", structure: "bridge" });
+    t.down(10, 10);
+    const fx = t.move(16, 10);
+    const ghost = ghostOf(fx);
+    expect(ghost?.pieces.map((p) => `${p.status}:${p.structure}`)).toEqual(["reused:ground", "reused:ground", "reused:ground", "new:bridge", "new:bridge", "new:bridge"]);
+    expect(tooltipOf(fx)?.structure).toBe("Structure: 3 bridge, 3 ground");
+  });
+
+  it("keeps the Track tool's tooltip as it was for all-ground plans, and starts each activation in its own mode", () => {
+    const t = session({ flat: true });
+    t.down(10, 10);
+    const tip = tooltipOf(t.move(14, 10));
+    expect(tip?.structure).toBeNull();
+    expect(tip?.lines[1]).toMatch(/^Length /);
+    expect(ghostOf(t.all)?.pieces.every((p) => p.structure === "ground")).toBe(true);
+    t.send({ type: "deactivate" });
+    expect(t.state.structure).toBe("auto");
+    t.send({ type: "activate", structure: "tunnel" });
+    t.send({ type: "deactivate" });
+    t.send({ type: "activate" });
+    expect(t.state.structure).toBe("auto");
+  });
+});

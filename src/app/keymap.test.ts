@@ -24,10 +24,48 @@ describe("key routing", () => {
     expect(classifyKey(key("z", "KeyW", { ctrlKey: true }), select)).toEqual({ kind: "undo" });
   });
 
-  it("selects Track on 1 and routes Esc to the tool", () => {
-    expect(classifyKey(key("1", "Digit1"), select)).toEqual({ kind: "select-track" });
-    expect(classifyKey(key("1", "Numpad1"), track)).toEqual({ kind: "select-track" });
+  it("selects Track on 1, Bridge on 5 and Tunnel on 6, and routes Esc to the tool", () => {
+    expect(classifyKey(key("1", "Digit1"), select)).toEqual({ kind: "select-tool", tool: "track" });
+    expect(classifyKey(key("1", "Numpad1"), track)).toEqual({ kind: "select-tool", tool: "track" });
+    expect(classifyKey(key("5", "Digit5"), select)).toEqual({ kind: "select-tool", tool: "bridge" });
+    expect(classifyKey(key("6", "Numpad6"), track)).toEqual({ kind: "select-tool", tool: "tunnel" });
+    // AZERTY types "&" on the top-row 1 key: the physical key still selects; Shift gives the digit itself.
+    expect(classifyKey(key("&", "Digit1"), select)).toEqual({ kind: "select-tool", tool: "track" });
+    expect(classifyKey(key("6", "Digit6", { shiftKey: true }), select)).toEqual({ kind: "select-tool", tool: "tunnel" });
+    // …but its 6 key types "-", the camera's zoom-out, which stays the camera's.
+    expect(classifyKey(key("-", "Digit6"), select)).toEqual({ kind: "camera" });
+    // 2–4 and 7 stay unbound until their tools exist; modified digits are not tools.
+    for (const d of ["2", "3", "4", "7"]) expect(classifyKey(key(d, `Digit${d}`), select)).toEqual({ kind: "camera" });
+    expect(classifyKey(key("5", "Digit5", { ctrlKey: true }), select)).toEqual({ kind: "camera" });
+    expect(classifyKey(key("%", "Digit5", { shiftKey: true }), select)).toEqual({ kind: "camera" });
     expect(classifyKey(key("Escape", "Escape"), track)).toEqual({ kind: "escape" });
+  });
+
+  it("toggles the occlusion aids on plain H and U in any tool, and cycles picks on C with a track tool", () => {
+    for (const ctx of [select, track]) {
+      expect(classifyKey(key("h", "KeyH"), ctx)).toEqual({ kind: "toggle-decks" });
+      expect(classifyKey(key("u", "KeyU"), ctx)).toEqual({ kind: "toggle-xray" });
+    }
+    expect(classifyKey(key("c", "KeyC"), track)).toEqual({ kind: "cycle-pick" });
+    expect(classifyKey(key("c", "KeyC"), select)).toEqual({ kind: "camera" });
+    // With a modifier they belong to the browser (Ctrl+H history, Ctrl+C copy, ⌥ is precision on macOS), and Shift is not plain.
+    expect(classifyKey(key("h", "KeyH", { ctrlKey: true }), track)).toEqual({ kind: "camera" });
+    expect(classifyKey(key("c", "KeyC", { metaKey: true }), track)).toEqual({ kind: "camera" });
+    expect(classifyKey(key("˙", "KeyH", { altKey: true }), precise)).toEqual({ kind: "camera" });
+    expect(classifyKey(key("U", "KeyU", { shiftKey: true }), select)).toEqual({ kind: "camera" });
+  });
+
+  it("matches the aids by character, lets the camera's physical keys win, and falls back to the physical key without Latin letters", () => {
+    // Dvorak: the key at KeyJ types "h".
+    expect(classifyKey(key("h", "KeyJ"), select)).toEqual({ kind: "toggle-decks" });
+    // Workman types "h" on the D key: the camera keeps panning.
+    expect(classifyKey(key("h", "KeyD"), select)).toEqual({ kind: "camera" });
+    // A Latin layout that types another letter at KeyH does not get H there.
+    expect(classifyKey(key("d", "KeyH"), select)).toEqual({ kind: "camera" });
+    // Russian ЙЦУКЕН: KeyH types "р", KeyU "г".
+    expect(classifyKey(key("р", "KeyH"), select)).toEqual({ kind: "toggle-decks" });
+    expect(classifyKey(key("г", "KeyU"), select)).toEqual({ kind: "toggle-xray" });
+    expect(classifyKey(key("с", "KeyC"), track)).toEqual({ kind: "cycle-pick" });
   });
 
   it("gives the arrows to the lattice cursor only while Track is active; WASD always pans", () => {

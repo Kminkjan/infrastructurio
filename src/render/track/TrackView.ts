@@ -14,6 +14,11 @@ import { type TrackLod, trackLodForPpm } from "./trackLod";
  * frame, so a large rebuild spreads over frames instead of stalling one.
  * Diffing keys against the current view, never replaying `Result.diff`s,
  * lets the view heal itself after undo, redo or a full rebuild.
+ *
+ * D4: ground track and bridge track sit in separate batch sets, so H (hide
+ * decks) hides the track on bridges with their structures; ground track gets
+ * ballast skirts. Track inside a tunnel is not drawn at all (the underground
+ * x-ray shows tunnels, `StructureView`).
  */
 
 /** Longest a frame spends building track before it yields. */
@@ -33,7 +38,11 @@ export interface TrackViewOptions {
 export interface TrackViewStats {
   /** The network revision fully applied, or −1. */
   readonly appliedRev: number;
+  /** Pieces drawn (ground and bridge). */
   readonly pieces: number;
+  readonly bridgePieces: number;
+  /** Tunnel pieces, never drawn here. */
+  readonly tunnelPieces: number;
   readonly pending: number;
   /** Frames the last rebuild took, and the longest single slice (ms). */
   readonly lastRebuildSlices: number;
@@ -41,16 +50,25 @@ export interface TrackViewStats {
   readonly batch: "batched" | "chunked";
 }
 
+type TrackLayer = "ground" | "bridge";
+
+interface LayerBatches {
+  readonly ballast: TrackBatch;
+  readonly sleepers: TrackBatch;
+  readonly rails: TrackBatch;
+}
+
 export class TrackView {
   readonly group = new Group();
-  private readonly ballast: TrackBatch;
-  private readonly sleepers: TrackBatch;
-  private readonly rails: TrackBatch;
+  private readonly layers: Record<TrackLayer, LayerBatches>;
   private readonly batches: readonly TrackBatch[];
-  private readonly built = new Set<string>();
+  /** Built pieces and the layer each sits in. */
+  private readonly built = new Map<string, TrackLayer>();
   private pending: NetworkPiece[] = [];
+  private tunnelPieces = 0;
   private targetRev = -1;
   private lod: TrackLod = "near";
+  private decksHidden = false;
   private slices = 0;
   private longestSliceMs = 0;
   private readonly budgetMs: number;
@@ -58,22 +76,29 @@ export class TrackView {
   constructor(private readonly options: TrackViewOptions) {
     this.group.name = "track";
     const { materials, multiDraw } = options;
-    this.ballast = createTrackBatch(materials.ballast, "track ballast", multiDraw);
-    this.sleepers = createTrackBatch(materials.sleepers, "track sleepers", multiDraw);
-    this.rails = createTrackBatch(materials.rails, "track rails", multiDraw);
-    this.batches = [this.ballast, this.sleepers, this.rails];
+    const layer = (prefix: string): LayerBatches => ({
+      ballast: createTrackBatch(materials.ballast, `${prefix}ballast`, multiDraw),
+      sleepers: createTrackBatch(materials.sleepers, `${prefix}sleepers`, multiDraw),
+      rails: createTrackBatch(materials.rails, `${prefix}rails`, multiDraw),
+    });
+    this.layers = { ground: layer("track "), bridge: layer("bridge track ") };
+    this.batches = [...Object.values(this.layers.ground), ...Object.values(this.layers.bridge)];
     for (const b of this.batches) this.group.add(b.object);
     this.budgetMs = options.budgetMs ?? TRACK_REBUILD_BUDGET_MS;
   }
 
   get stats(): TrackViewStats {
+    let bridgePieces = 0;
+    for (const layer of this.built.values()) if (layer === "bridge") bridgePieces += 1;
     return {
       appliedRev: this.pending.length === 0 ? this.targetRev : -1,
       pieces: this.built.size,
+      bridgePieces,
+      tunnelPieces: this.tunnelPieces,
       pending: this.pending.length,
       lastRebuildSlices: this.slices,
       longestSliceMs: this.longestSliceMs,
-      batch: this.ballast.kind,
+      batch: this.layers.ground.ballast.kind,
     };
   }
 
@@ -90,15 +115,20 @@ export class TrackView {
     let changed = false;
     if (network.rev !== this.targetRev) {
       this.targetRev = network.rev;
-      const keys = new Set<string>();
-      for (const p of network.pieces) keys.add(p.key);
-      for (const key of this.built) {
-        if (keys.has(key)) continue;
-        for (const b of this.batches) b.remove(key);
+      // Every drawn piece and the layer it belongs in; tunnel pieces are not drawn.
+      const wanted = new Map<string, TrackLayer>();
+      this.tunnelPieces = 0;
+      for (const p of network.pieces) {
+        if (p.structure === "tunnel") this.tunnelPieces += 1;
+        else wanted.set(p.key, layerOf(p));
+      }
+      for (const [key, layer] of this.built) {
+        if (wanted.get(key) === layer) continue;
+        for (const b of Object.values(this.layers[layer])) b.remove(key);
         this.built.delete(key);
         changed = true;
       }
-      this.pending = network.pieces.filter((p) => !this.built.has(p.key));
+      this.pending = network.pieces.filter((p) => p.structure !== "tunnel" && !this.built.has(p.key));
       this.slices = 0;
       this.longestSliceMs = 0;
     }
@@ -126,8 +156,28 @@ export class TrackView {
     const lod = trackLodForPpm(ppm);
     if (lod === this.lod) return;
     this.lod = lod;
-    this.sleepers.setShown(lod === "near");
+    this.syncShown();
     this.options.materials.stripe.uTrackStripe.value = lod === "far" ? 1 : 0;
+  }
+
+  /** H: hides the track on bridges (their structures hide in `StructureView`). */
+  setDecksHidden(hidden: boolean): void {
+    if (hidden === this.decksHidden) return;
+    this.decksHidden = hidden;
+    this.syncShown();
+  }
+
+  get bridgeTrackShown(): boolean {
+    return !this.decksHidden;
+  }
+
+  private syncShown(): void {
+    for (const [name, layer] of Object.entries(this.layers) as [TrackLayer, LayerBatches][]) {
+      const on = name === "ground" || !this.decksHidden;
+      layer.ballast.setShown(on);
+      layer.rails.setShown(on);
+      layer.sleepers.setShown(on && this.lod === "near");
+    }
   }
 
   get currentLod(): TrackLod {
@@ -136,7 +186,7 @@ export class TrackView {
 
   /** Drops every piece; the next `sync` rebuilds from its view (palette change, context restore). */
   invalidate(): void {
-    for (const key of this.built) for (const b of this.batches) b.remove(key);
+    for (const [key, layer] of this.built) for (const b of Object.values(this.layers[layer])) b.remove(key);
     for (const b of this.batches) b.flush();
     this.built.clear();
     this.pending = [];
@@ -151,10 +201,16 @@ export class TrackView {
   }
 
   private add(piece: NetworkPiece): void {
-    const meshes = buildTrackMeshes({ prims: piece.prims, z0M: piece.z0Mm / 1000, z1M: piece.z1Mm / 1000 });
-    this.ballast.add(piece.key, meshes.ballast);
-    this.sleepers.add(piece.key, meshes.sleepers);
-    this.rails.add(piece.key, meshes.rails);
-    this.built.add(piece.key);
+    const layer = layerOf(piece);
+    const meshes = buildTrackMeshes({ prims: piece.prims, z0M: piece.z0Mm / 1000, z1M: piece.z1Mm / 1000 }, { skirts: layer === "ground" });
+    const batches = this.layers[layer];
+    batches.ballast.add(piece.key, meshes.ballast);
+    batches.sleepers.add(piece.key, meshes.sleepers);
+    batches.rails.add(piece.key, meshes.rails);
+    this.built.set(piece.key, layer);
   }
+}
+
+function layerOf(piece: NetworkPiece): TrackLayer {
+  return piece.structure === "bridge" ? "bridge" : "ground";
 }

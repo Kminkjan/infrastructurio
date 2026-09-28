@@ -142,3 +142,39 @@ export function sameGeometry(x: BufferGeometry, y: BufferGeometry): boolean {
   }
   return true;
 }
+
+/**
+ * Triangles of recorded convex solids (`StructureBuilder.solids`: a triangle range each) that face
+ * toward the centroid of their own solid's vertices. Like `convexInwardFacing`, it never reads the
+ * inside point the builder was handed.
+ */
+export function solidsFacingIn(g: BufferGeometry, ranges: readonly { readonly start: number; readonly end: number }[]): number {
+  const a = new Vector3();
+  const b = new Vector3();
+  const c = new Vector3();
+  const face = new Vector3();
+  const centre = new Vector3();
+  const centroid = new Vector3();
+  let bad = 0;
+  for (const r of ranges) {
+    centre.set(0, 0, 0);
+    for (let t = r.start; t < r.end; t++) for (let k = 0; k < 3; k++) centre.add(corner(g, t, k, a));
+    centre.divideScalar(3 * (r.end - r.start));
+    for (let t = r.start; t < r.end; t++) {
+      corner(g, t, 0, a);
+      corner(g, t, 1, b);
+      corner(g, t, 2, c);
+      centroid.copy(a).add(b).add(c).divideScalar(3);
+      face.subVectors(b, a).cross(c.sub(a));
+      if (face.dot(centroid.sub(centre)) <= 0) bad += 1;
+    }
+  }
+  return bad;
+}
+
+/** Whether every position of a geometry is finite. */
+export function allFinite(g: BufferGeometry): boolean {
+  const p = g.getAttribute("position").array as ArrayLike<number>;
+  for (let i = 0; i < p.length; i++) if (!Number.isFinite(p[i] ?? Number.NaN)) return false;
+  return true;
+}

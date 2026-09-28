@@ -6,7 +6,7 @@ import { makeTerrain } from "../../../tests/support/makeTerrain";
 import { steepestDrawnFace } from "../../../tests/support/drawnFaces";
 import { type ClearableLayer, SceneryClearance } from "../scenery/clearance";
 import { EARTHWORK_ATTRIBUTE, EARTHWORK_ITEM_SIZE } from "../art/shaderChunks/earthwork";
-import { type EarthworkChunkTarget, EarthworksView, SCENERY_CLEARANCE_M } from "./EarthworksView";
+import { type EarthworkChunkTarget, EarthworksView, PORTAL_SCENERY_CLEARANCE_M, SCENERY_CLEARANCE_M } from "./EarthworksView";
 import { TerrainView } from "./TerrainView";
 import { SIDE_SLOPE_RUN } from "./earthworks";
 import type { EarthworkMeshData } from "./earthworkMesh";
@@ -314,6 +314,34 @@ describe("earthworks view", () => {
     s.sim.execute({ type: "undo" });
     s.earthworks.sync(s.sim.network());
     expect(layer.cleared).toEqual([false, false, false, false]);
+  });
+
+  it("never conforms bridges or tunnels, but clears scenery under a bridge and around a portal (D4)", () => {
+    const y0 = 30 * 2.5 * Math.sqrt(3);
+    const points = [
+      { x: 280, y: y0 }, // on the run
+      { x: 280, y: y0 + SCENERY_CLEARANCE_M - 0.5 }, // beside it
+      { x: 320, y: y0 + 9 }, // on the ridge, off the corridor
+      { x: 250 - 4, y: y0 }, // just beyond the run's west end (a portal, when it is a tunnel)
+      { x: 250 - PORTAL_SCENERY_CLEARANCE_M - 1, y: y0 + 3 }, // beyond the portal's reach
+    ];
+    const terrain = makeTerrain(130, 70, (_q, _r, col) => 200 + Math.max(0, 60 - Math.abs(col - 64) * 4));
+    for (const structure of ["bridge", "tunnel"] as const) {
+      const layer = new FakeLayer(points);
+      const s = ridgeSetup({ scenery: new SceneryClearance(terrain, [layer]) });
+      const natural = snapshotChunks(s.view, s.terrain);
+      expect(s.sim.execute({ type: "build-track", pieces: s.run, structure }).ok).toBe(true);
+      s.earthworks.sync(s.sim.network());
+      expect(s.earthworks.stats).toMatchObject({ pieces: 0, chunksWithEarthworks: 0, refinedTriangles: 0 });
+      const after = snapshotChunks(s.view, s.terrain);
+      for (const [key, arrays] of natural) arrays.forEach((a, i) => expect(after.get(key)?.[i], `${structure} ${key}`).toEqual(a));
+      // A bridge clears its corridor (4 m past its end is where its abutment stands); a tunnel only the ground around
+      // its portals (both ends open to daylight here).
+      expect(layer.cleared, structure).toEqual(structure === "bridge" ? [true, true, false, true, false] : [false, false, false, true, false]);
+      s.sim.execute({ type: "undo" });
+      s.earthworks.sync(s.sim.network());
+      expect(layer.cleared.every((c) => !c)).toBe(true);
+    }
   });
 
   it("measures the rebuild of 10-piece edits and of a 500-piece network on the diorama (a dev measurement)", async ({ annotate }) => {
