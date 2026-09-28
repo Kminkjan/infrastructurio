@@ -1220,6 +1220,81 @@ The status of this ADR stays Proposed.
     in the [acceptance gates](../evidence/m4/2026-09-26-acceptance-gates.md)) stays at risk.
 - **Not established:** the owner's reading; the look gates; timings on the gate hardware.
 
+## Findings (2026-09-28, earthworks re-review fixes)
+
+Recorded on branch `codex/render-earthworks-terrain`, code at `26ae87f` (from `8f79894`, draft PR
+[#83](https://github.com/Kminkjan/infrastructurio/pull/83)). The trigger was a targeted re-review of the
+PR: four confirmed findings and one plausible one, relayed to the implementing agent. Each confirmed
+finding has a regression test that fails against `8f79894`'s modules on the defect itself and passes now.
+Measurements are automated (Vitest 4.1.10, Node 26.7.0, macOS 26.6.2, Apple M5 Pro) unless labelled agent
+(Playwright, headless Chrome, same machine). The conform rule, "cuts win" included, is unchanged. The status
+of this ADR stays Proposed.
+- **A second, higher ground track** ([`earthworks.ts`](../../src/render/terrain/earthworks.ts)
+  `settleReaches`).
+  - A reach was sized from the natural relief alone. Where a higher neighbour's fill overrode this track's
+    cut, the cut stopped at that reach while the fill went on, so the drawn ground jumped up to the fill.
+  - A reach now also clears its neighbours at the cutoff. At plan distance R the piece's cut is at least
+    its lowest bed plus the side slope's rise there. Every neighbour's fill reaching that line must stay
+    0.6 m (the smooth clamp's band) under it, and every neighbour's cut that far over the piece's fill.
+    Neighbour envelopes are bounded from bed samples every 0.5 m.
+  - A piece keeps its natural reach wherever every neighbour clears it. Otherwise it takes the least
+    0.25 m multiple above that reach which clears them. The grid makes the candidates a finite set, so
+    settling ends and gives the least fixed point whatever the order.
+  - `EarthworksView` re-derives only the pieces beside an edit. After a removal, every piece a neighbour
+    had raised starts again from its natural reach. A test compares it with a fresh view after each of 16
+    builds, undos and redos: the same reaches and bytes.
+  - Tests: on flat ground, a second run 8.66–17.32 m away and 5–10 m higher drew faces with slopes of
+    2.16–6.50 at LOD0 and 1.39–3.55 at LOD1. Now none is steeper than 0.77 (1 : 1.5 plus 15 %).
+  - The review proposed folding each neighbour's whole bed range into the relief. Tried first, that
+    raised 155 of the byte pin's 411 LOD0 reaches (by up to 41 m), took 116 ms to settle 2,188 pieces,
+    and changed the pin. The cutoff check replaced it.
+  - On diorama networks the settled reaches change no drawn height on the 411-piece byte pin or on a
+    505-piece network. On a 2,188-piece ground-following network (300 plans), 16 of 23,801 refined LOD0
+    triangles change; the steepest face among them was 2.89 before and is 0.77 after. LOD1 is unchanged
+    there.
+- **The chained ghost** ([`GhostView.ts`](../../src/render/track/GhostView.ts), `main.ts`).
+  - A commit sets the chained ghost before the time-sliced earthworks land, and an unchanged plan was
+    never measured again. `refreshGround` measures the drop lines and tags again once the conformed LOD0
+    surface of a revision is drawn (`EarthworksView.surfaceRev`).
+  - Agent e2e, frames held so the commit and the continuation's ghost land before the sync: the start
+    tag reads "+6 m", then "0 m" once the embankment is drawn, and drop-line vertices go 8 → 6. With
+    `8f79894`'s wiring the tag stayed "+6 m" (8 → 8).
+- **The ghost over water** ([`heightfieldRay.ts`](../../src/render/terrain/heightfieldRay.ts)).
+  - The ghost's ground now reads the water level only over the triangles the water mesh draws
+    (`waterMeshCovers`, shared with `buildWaterData`). A dry cutting's floor 1.5 m under the water level,
+    30 rings from water, reads 8.5 m, where it read 10 m. A cutting within the mesh's three rings of a lake
+    still shows the water drawn over it.
+  - Clamping only where the natural ground lies under water was rejected: it would measure from a flooded
+    cutting's floor under drawn water.
+- **The 120 m cap.**
+  - A capped piece steepens its side slope over the last 10 m (`CAP_FADE_M`) by the rise that clears the
+    ground and its neighbours at the cap. Test: a 20-piece run 90 m over flat ground. The steepest 5 cm
+    step had a slope of 12.27 (a wall a sub-triangle wide); now it stays under 4.
+  - The chunk pass and its mesh now run as slices: one piece, 8,192 touched sub-vertices, or 8 (pass) or
+    4 (mesh) LOD rows. The view resumes a chunk across frames and swaps it in only once whole.
+  - The capped run takes 8 steps over 7 slices of 8 ms, the longest 9.42 ms (one run; the overshoot is one
+    slice of work). Before, one of its chunks took 15.7 ms of pass and 12.5 ms of mesh in a single slice.
+- **Reach inflation on diagonal pieces: skipped.**
+  - Tried: skipping nodes farther than the reach plus a cell from the centreline. It changes 108 of the
+    411 pin reaches (p90 ratio 1.07, max 1.57), keeps every drawn height on three networks (3,104 pieces),
+    and cuts evaluated sub-vertices by 7 % at LOD0 and 13 % at LOD1.
+  - It was not kept. It changes the byte pin (the earthwork attribute at both LODs, and the reach and
+    nearest hashes) without fixing a defect. On ground steeper than the side slope, heights beyond the
+    tighter reach are not guaranteed to stay.
+- **Coverage.** Nearest centreline points on all 12 headings, with arc centres and sweep edges; the seam
+  attribute over 40 plans (was 3); incremental views against fresh ones.
+- **Byte pin** (`earthworksGolden.test.ts`): every hash as at `8f79894`.
+- **Captures (agent):** look `b`'s eleven render-iteration stills (reduced motion, 1280×800) are
+  byte-identical PNGs at `8f79894` and `26ae87f`.
+- **Rebuild cost** (dev measurements, not gates; eight alternating runs each, load average 6–7).
+  - 10-piece edits (40 per run): p95 6.60–10.43 ms (median over runs 6.76) → 6.77–7.45 ms (7.02);
+    median 1.99–2.43 → 2.19–2.54 ms. Undo is unchanged (median 0.15–0.18 ms).
+  - The 505-piece network: a full rebuild of 60–74 ms either way; its longest 8 ms slice 9.99–12.25 →
+    8.16–8.48 ms. Gate B8 (provisional, authoritative only in the
+    [acceptance gates](../evidence/m4/2026-09-26-acceptance-gates.md)) stays at risk.
+- **Not established:** the owner's reading of the changed cases; the look gates; timings on the gate
+  hardware; the `?terrain=d11a` captures, which were not re-shot.
+
 ## Revisit when
 
 - The D3 feel check finds construction unsatisfying for reasons that planner tuning, chained
@@ -1282,3 +1357,8 @@ The status of this ADR stays Proposed.
   LOD1 reach; seam corners carry the colour attribute in both chunks; the ghost measures
   against the drawn surface; single sources and a byte pin; rebuild costs before and after);
   status unchanged, still Proposed.
+- 2026-09-28: earthworks re-review findings added (reaches settled beside neighbours, the
+  chained ghost measured again once the earthworks land, the ghost over water only where the
+  water is drawn, the capped reach faded and chunks spread over slices, the diagonal reach
+  change skipped, coverage and rebuild costs before and after); status unchanged, still
+  Proposed.
