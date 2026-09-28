@@ -2,6 +2,7 @@ import type { NodeRef, Piece, Structure } from "../geometry/piece";
 import { sampleCentrelineEvery } from "../geometry/sample";
 import { type Heading, SQRT3, isPrimary, rotateHeading, stepOf } from "../lattice";
 import { type Terrain, heightDmAt, isWaterAt } from "../terrain";
+import { type GroundQuery, nodeGroundMm } from "./ground";
 
 /**
  * Terrain under a piece, structure inference and the rule-4 checks
@@ -29,6 +30,19 @@ import { type Terrain, heightDmAt, isWaterAt } from "../terrain";
  * Curve samples are floats, decided once when a command runs and stored as the
  * piece's structure (saves never re-validate), as for clearance: only cases at
  * an exact threshold could differ between engines.
+ *
+ * **Effective ground** (D4 feel-check fixes, 2026-09-28). With the world's
+ * effective ground (`ground.ts`), h is the terrain as the committed track's
+ * earthworks shape it, so a piece beside an existing cutting is judged against
+ * the cutting's floor and slopes, as they are drawn, not the natural hill
+ * that is no longer there. A piece whose box meets no earthwork reach keeps
+ * the exact samples above, bit for bit; one that meets one is sampled every
+ * 0.5 m along its centreline whatever its kind (the conformed surface bends
+ * between nodes), with the exact effective ground at its nodes. Water keeps
+ * the natural terrain: a sample is wet where the natural terrain lies under
+ * the water level, and h there is the natural bed (a fill under water is only
+ * drawn). The ends of committed pieces at the nodes a command joins count as
+ * clipped (`ground.ts`), as the track will draw them.
  *
  * **Water.** A sample lies over water when the terrain there is below the
  * water level (inside the waterline, where the water surface covers the bed).
@@ -191,8 +205,15 @@ export function pieceCrossesWater(t: Terrain, piece: Piece): boolean {
   return false;
 }
 
-/** The terrain under a piece (see the module comment for where it samples). */
-export function pieceGround(t: Terrain, piece: Piece): PieceGround {
+/**
+ * The terrain under a piece (see the module comment for where it samples): the effective ground when `ground` is
+ * given and its earthworks reach the piece, else the natural terrain.
+ */
+export function pieceGround(t: Terrain, piece: Piece, ground: GroundQuery | null = null, clip: ReadonlySet<string> | null = null): PieceGround {
+  if (ground) {
+    const b = piece.boundsM;
+    if (ground.meets(b.minX, b.minY, b.maxX, b.maxY)) return effectiveGround(t, piece, ground, clip);
+  }
   const [a, b] = piece.ends;
   const waterMm = t.waterLevelDm * 100;
   const h0 = nodeTerrainMm(t, a.node) ?? Number.NaN;
@@ -222,6 +243,38 @@ export function pieceGround(t: Terrain, piece: Piece): PieceGround {
     });
   }
   const wet = hMm.map((h) => h < waterMm);
+  return { f, hMm, wet, anyWet: wet.some((w) => w) };
+}
+
+/** `pieceGround` over the effective ground: samples every 0.5 m of centreline, the nodes exact (see the module comment). */
+function effectiveGround(t: Terrain, piece: Piece, ground: GroundQuery, clip: ReadonlySet<string> | null): PieceGround {
+  const [a, b] = piece.ends;
+  const waterMm = t.waterLevelDm * 100;
+  const node = (n: NodeRef): number => {
+    const natural = nodeTerrainMm(t, n);
+    if (natural === undefined) return Number.NaN;
+    return natural < waterMm ? natural : (ground.nodeEarthMm(n.q, n.r, clip) ?? natural);
+  };
+  const points = sampleCentrelineEvery(piece, STRUCTURE_SAMPLE_STEP_M);
+  const total = points[points.length - 1]?.sM ?? 0;
+  const f: number[] = [];
+  const hMm: number[] = [];
+  const wet: boolean[] = [];
+  points.forEach((p, i) => {
+    const last = i === points.length - 1;
+    f.push(last || total <= 0 ? (i === 0 ? 0 : 1) : p.sM / total);
+    if (i === 0 || last) {
+      const n = i === 0 ? a.node : b.node;
+      const natural = nodeTerrainMm(t, n) ?? Number.NaN;
+      hMm.push(node(n));
+      wet.push(natural < waterMm);
+      return;
+    }
+    const natural = terrainMmAtPoint(t, p.x, p.y);
+    const isWet = natural < waterMm;
+    wet.push(isWet);
+    hMm.push(isWet || Number.isNaN(natural) ? natural : ground.heightM(p.x, p.y, clip) * 1000);
+  });
   return { f, hMm, wet, anyWet: wet.some((w) => w) };
 }
 
@@ -387,19 +440,27 @@ function bridgeDip(
   return worst;
 }
 
-/** Whether a node of a tunnel is a portal: the track within the ground band there (cover ≤ 8 m). */
-export function isPortal(t: Terrain, n: NodeRef): boolean {
-  const h = nodeTerrainMm(t, n);
+/** Whether a node of a tunnel is a portal: the track within the ground band there (cover ≤ 8 m), over the effective ground when given. */
+export function isPortal(t: Terrain, n: NodeRef, ground: GroundQuery | null = null, clip: ReadonlySet<string> | null = null): boolean {
+  const h = nodeCoverGroundMm(t, n, ground, clip);
   return h !== undefined && h - n.zMm <= GROUND_BAND_MM;
+}
+
+/** Rule 4's ground at a node: the natural bed under water, else the effective ground (when given) or the terrain. */
+function nodeCoverGroundMm(t: Terrain, n: NodeRef, ground: GroundQuery | null, clip: ReadonlySet<string> | null): number | undefined {
+  const natural = nodeTerrainMm(t, n);
+  if (natural === undefined || natural < t.waterLevelDm * 100) return natural;
+  return nodeGroundMm(t, n, ground, clip);
 }
 
 /**
  * Whether a node of a bridge is an abutment: on dry land (the terrain there at or above the water level) with the
  * track within the ground band, −8 m ≤ z − h ≤ 8 m.
  */
-export function isAbutment(t: Terrain, n: NodeRef): boolean {
-  const h = nodeTerrainMm(t, n);
-  if (h === undefined || h < t.waterLevelDm * 100) return false;
+export function isAbutment(t: Terrain, n: NodeRef, ground: GroundQuery | null = null, clip: ReadonlySet<string> | null = null): boolean {
+  const natural = nodeTerrainMm(t, n);
+  if (natural === undefined || natural < t.waterLevelDm * 100) return false;
+  const h = nodeGroundMm(t, n, ground, clip) ?? natural;
   const d = n.zMm - h;
   return d <= GROUND_BAND_MM && d >= -GROUND_BAND_MM;
 }

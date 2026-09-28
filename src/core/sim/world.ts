@@ -10,6 +10,7 @@ import {
   emptyAuthored,
   isEmptyDiff,
 } from "../track/authored";
+import { EffectiveGround, type GroundView } from "../track/ground";
 import { EMPTY_HISTORY, type History, recordEdit, stepHistory } from "../track/history";
 import { type Drag, type TrackPlan, planTrack } from "../track/planner";
 import {
@@ -86,12 +87,19 @@ export interface World {
   /** Reads the authored state, never changes it. */
   plan(drag: Drag): TrackPlan;
   network(): NetworkView;
+  /** The revision's earthworks (`track/ground.ts`): the same object until an edit changes the track. */
+  ground(): GroundView;
+  /** The effective ground at a lattice node in integer mm (the water surface over a lower bed); undefined off the map. */
+  groundMm(q: number, r: number): number | undefined;
 }
 
 export function createWorld(terrain: Terrain, init?: WorldInit): World {
   let authored: AuthoredState = init ? authoredFromRecords(init.records, init.rev ?? 0) : emptyAuthored();
   let history: History = init?.history ?? EMPTY_HISTORY;
   const index: TrackIndex = createTrackIndex(authored.pieces.values());
+  // The effective ground (D4 feel-check fixes, 2026-09-28): the committed track's earthworks, which the planner,
+  // validation and the renderer read, kept in step with each commit.
+  const ground = new EffectiveGround(terrain, authored.pieces.values(), { nodes: index.nodes, pieces: authored.pieces });
   let view: NetworkView | undefined;
 
   function commitDiff(diff: Diff): void {
@@ -101,15 +109,25 @@ export function createWorld(terrain: Terrain, init?: WorldInit): World {
       const piece = before.pieces.get(r.key);
       if (piece) indexRemove(index, piece);
     }
+    const added = [];
+    const removed = [];
+    for (const r of diff.removed) {
+      const piece = before.pieces.get(r.key);
+      if (piece) removed.push(piece);
+    }
     for (const r of diff.added) {
       const piece = authored.pieces.get(r.key);
-      if (piece) indexAdd(index, piece);
+      if (piece) {
+        indexAdd(index, piece);
+        added.push(piece);
+      }
     }
+    ground.apply(removed, added, { nodes: index.nodes, pieces: authored.pieces });
   }
 
   function run(cmd: Command, commit: boolean): Result {
     assertCommandShape(cmd);
-    const ctx: TrackContext = { terrain, authored, index };
+    const ctx: TrackContext = { terrain, authored, index, ground };
     let accepted: Accepted;
     let next: History;
     switch (cmd.type) {
@@ -155,7 +173,14 @@ export function createWorld(terrain: Terrain, init?: WorldInit): World {
     return view;
   }
 
-  return Object.freeze({ terrain, run, plan: (drag: Drag) => planTrack({ terrain, authored, index }, drag), network });
+  return Object.freeze({
+    terrain,
+    run,
+    plan: (drag: Drag) => planTrack({ terrain, authored, index, ground }, drag),
+    network,
+    ground: () => ground.view(authored.rev),
+    groundMm: (q: number, r: number) => ground.nodeMm(q, r),
+  });
 }
 
 /** Throws a TypeError naming the fault when a command breaks the shape contract (see `Command`). */

@@ -133,6 +133,46 @@ export interface CentrelineIndex {
   readonly maxY: number;
 }
 
+/**
+ * A centreline's two ends as frames: (x, y, tx, ty) at arc length 0, then at the far end, where (tx, ty) is the
+ * unit tangent pointing out of the piece (backwards at the start, forwards at the end). The earthworks use them to
+ * stop a ground piece's cut and fill at the plane through an end where a bridge or a tunnel continues (D4
+ * feel-check fixes, 2026-09-28). An arc's tangent is square to its radius.
+ */
+export function centrelineEnds(piece: HasPrims): Float64Array {
+  const out = new Float64Array(8);
+  const prims = piece.prims;
+  const first = prims[0];
+  const last = prims[prims.length - 1];
+  if (!first || !last) return out;
+  const frame = (p: RenderPrim, atEnd: boolean, k: number): void => {
+    if (p.kind === "line") {
+      const dx = p.x1 - p.x0;
+      const dy = p.y1 - p.y0;
+      const len = Math.hypot(dx, dy);
+      const sign = atEnd ? 1 : -1;
+      out[k] = atEnd ? p.x1 : p.x0;
+      out[k + 1] = atEnd ? p.y1 : p.y0;
+      out[k + 2] = len > 0 ? (sign * dx) / len : 0;
+      out[k + 3] = len > 0 ? (sign * dy) / len : 0;
+      return;
+    }
+    const a = atEnd ? p.startRad + p.sweepRad : p.startRad;
+    const rx = Math.cos(a);
+    const ry = Math.sin(a);
+    out[k] = p.cx + p.radiusM * rx;
+    out[k + 1] = p.cy + p.radiusM * ry;
+    // Travel along a counter-clockwise sweep is (−ry, rx), along a clockwise one (ry, −rx); at the start, out of the
+    // piece is against the travel.
+    const along = (p.sweepRad >= 0 ? 1 : -1) * (atEnd ? 1 : -1);
+    out[k + 2] = -ry * along;
+    out[k + 3] = rx * along;
+  };
+  frame(first, false, 0);
+  frame(last, true, 4);
+  return out;
+}
+
 export function centrelineIndex(piece: HasPrims): CentrelineIndex {
   const prims = piece.prims;
   const primStartM = new Float64Array(prims.length);

@@ -130,9 +130,9 @@ describe("earthworks view", () => {
   it("conforms the chunks a build touches, and undo gives back the natural terrain exactly", () => {
     const s = ridgeSetup();
     const natural = snapshotChunks(s.view, s.terrain);
-    expect(s.earthworks.sync(s.sim.network())).toBe(false);
+    expect(s.earthworks.sync(s.sim.network(), s.sim.ground())).toBe(false);
     expect(s.sim.execute(build(s.run)).ok).toBe(true);
-    expect(s.earthworks.sync(s.sim.network())).toBe(true);
+    expect(s.earthworks.sync(s.sim.network(), s.sim.ground())).toBe(true);
     const built = s.earthworks.stats;
     expect(built).toMatchObject({ appliedRev: 1, pieces: 30, pendingChunks: 0 });
     expect(built.chunksWithEarthworks).toBeGreaterThanOrEqual(2);
@@ -148,7 +148,7 @@ describe("earthworks view", () => {
     expect(changed.length).toBe(built.chunksWithEarthworks);
 
     s.sim.execute({ type: "undo" });
-    s.earthworks.sync(s.sim.network());
+    s.earthworks.sync(s.sim.network(), s.sim.ground());
     expect(s.earthworks.stats).toMatchObject({ appliedRev: 2, pieces: 0, chunksWithEarthworks: 0, refinedTriangles: 0 });
     const restored = snapshotChunks(s.view, s.terrain);
     for (const [key, arrays] of natural) {
@@ -157,7 +157,7 @@ describe("earthworks view", () => {
     }
     // Redo brings the same earthworks back.
     s.sim.execute({ type: "redo" });
-    s.earthworks.sync(s.sim.network());
+    s.earthworks.sync(s.sim.network(), s.sim.ground());
     expect(s.earthworks.stats.refinedTriangles).toBe(built.refinedTriangles);
   });
 
@@ -217,10 +217,11 @@ describe("earthworks view", () => {
     const reachesOfA: number[] = [];
     for (const [i, step] of steps.entries()) {
       expect(sim.execute(step).ok, `step ${i}`).toBe(true);
-      earthworks.sync(sim.network());
+      earthworks.sync(sim.network(), sim.ground());
       expect(earthworks.busy).toBe(false);
       const freshView = new RecordingTarget(shading);
       const fresh = new EarthworksView({ terrain, target: freshView, requestFrame: () => {}, now: () => 0, budgetMs: Infinity });
+      // The fresh view derives the pieces from the whole network (`earthworkPieces`); the first reads the core's incremental ones.
       fresh.sync(sim.network());
       for (const p of sim.network().pieces) expect(earthworks.reachOf(p.key), `step ${i} reach of ${p.key}`).toEqual(fresh.reachOf(p.key));
       // Every chunk either view has drawn: the same bytes (a chunk a view never drew is its natural chunk).
@@ -248,11 +249,11 @@ describe("earthworks view", () => {
   it("time-slices a rebuild at the budget, at least one step per frame", () => {
     const s = ridgeSetup({ budgetMs: 8, clockStepMs: 5 });
     s.sim.execute(build(s.run));
-    s.earthworks.sync(s.sim.network());
+    s.earthworks.sync(s.sim.network(), s.sim.ground());
     expect(s.earthworks.busy).toBe(true);
     expect(s.frames).toBe(1);
     let guard = 0;
-    while (s.earthworks.busy && guard++ < 50) s.earthworks.sync(s.sim.network());
+    while (s.earthworks.busy && guard++ < 50) s.earthworks.sync(s.sim.network(), s.sim.ground());
     expect(s.earthworks.busy).toBe(false);
     expect(s.earthworks.stats.lastRebuild.slices).toBeGreaterThan(1);
     expect(s.earthworks.stats.appliedRev).toBe(1);
@@ -270,14 +271,14 @@ describe("earthworks view", () => {
     expect(sim.execute(build(run)).ok).toBe(true);
     const whole = new TerrainView(terrain, material, material);
     const once = new EarthworksView({ terrain, target: whole, requestFrame: () => {}, now: () => 0, budgetMs: Infinity });
-    once.sync(sim.network());
+    once.sync(sim.network(), sim.ground());
     const steps = once.stats.lastRebuild.chunks;
     // A clock that advances 1 ms per reading: each 8 ms slice does at most eight slices of work.
     let clock = 0;
     const sliced = new TerrainView(terrain, material, material);
     const earthworks = new EarthworksView({ terrain, target: sliced, requestFrame: () => {}, now: () => (clock += 1), budgetMs: 8 });
     let frames = 0;
-    while (frames++ < 5000 && (earthworks.sync(sim.network()) || earthworks.busy));
+    while (frames++ < 5000 && (earthworks.sync(sim.network(), sim.ground()) || earthworks.busy));
     expect(earthworks.busy).toBe(false);
     expect(earthworks.stats.lastRebuild.slices).toBeGreaterThan(2 * steps);
     const a = snapshotChunks(whole, terrain);
@@ -287,7 +288,7 @@ describe("earthworks view", () => {
     const wall = new TerrainView(terrain, material, material);
     const timed = new EarthworksView({ terrain, target: wall, requestFrame: () => {}, now: () => performance.now() });
     let wallFrames = 0;
-    while (wallFrames++ < 5000 && (timed.sync(sim.network()) || timed.busy));
+    while (wallFrames++ < 5000 && (timed.sync(sim.network(), sim.ground()) || timed.busy));
     const r = timed.stats.lastRebuild;
     await annotate(`capped 20-piece run: ${steps} steps, ${r.slices} slices of 8 ms, longest ${r.longestSliceMs.toFixed(2)} ms, total ${r.totalMs.toFixed(1)} ms`);
     for (const v of [whole, sliced, wall]) v.dispose();
@@ -296,7 +297,7 @@ describe("earthworks view", () => {
   it("does nothing when disabled (the natural terrain, for before/after checks)", () => {
     const s = ridgeSetup({ enabled: false });
     s.sim.execute(build(s.run));
-    expect(s.earthworks.sync(s.sim.network())).toBe(false);
+    expect(s.earthworks.sync(s.sim.network(), s.sim.ground())).toBe(false);
     expect(s.earthworks.stats.chunksWithEarthworks).toBe(0);
   });
 
@@ -313,12 +314,12 @@ describe("earthworks view", () => {
     const terrain = makeTerrain(130, 70, (_q, _r, col) => 200 + Math.max(0, 60 - Math.abs(col - 64) * 4));
     const s = ridgeSetup({ scenery: new SceneryClearance(terrain, [layer]) });
     s.sim.execute(build(s.run));
-    s.earthworks.sync(s.sim.network());
+    s.earthworks.sync(s.sim.network(), s.sim.ground());
     expect(layer.cleared).toEqual([true, true, true, false]);
     expect(layer.commits).toBeGreaterThan(0);
     expect(s.earthworks.stats.clearedScenery).toBe(3);
     s.sim.execute({ type: "undo" });
-    s.earthworks.sync(s.sim.network());
+    s.earthworks.sync(s.sim.network(), s.sim.ground());
     expect(layer.cleared).toEqual([false, false, false, false]);
   });
 
@@ -344,7 +345,7 @@ describe("earthworks view", () => {
       const pieces = s.run.map((p) => ({ ...p, from: { ...p.from, zMm }, z1Mm: zMm }));
       const built = s.sim.execute({ type: "build-track", pieces, structure });
       expect(built.ok, JSON.stringify(built)).toBe(true);
-      s.earthworks.sync(s.sim.network());
+      s.earthworks.sync(s.sim.network(), s.sim.ground());
       expect(s.earthworks.stats).toMatchObject({ pieces: 0, chunksWithEarthworks: 0, refinedTriangles: 0 });
       const after = snapshotChunks(s.view, s.terrain);
       for (const [key, arrays] of natural) arrays.forEach((a, i) => expect(after.get(key)?.[i], `${structure} ${key}`).toEqual(a));
@@ -352,7 +353,7 @@ describe("earthworks view", () => {
       // its portals (both ends open to daylight here).
       expect(layer.cleared, structure).toEqual(structure === "bridge" ? [true, true, false, true, false] : [false, false, false, true, false]);
       s.sim.execute({ type: "undo" });
-      s.earthworks.sync(s.sim.network());
+      s.earthworks.sync(s.sim.network(), s.sim.ground());
       expect(layer.cleared.every((c) => !c)).toBe(true);
     }
   });
@@ -365,7 +366,7 @@ describe("earthworks view", () => {
     const pieces = s.run.map((p) => ({ ...p, from: { ...p.from, zMm: 25_000 }, z1Mm: 25_000 }));
     const built = s.sim.execute({ type: "build-track", pieces, structure: "bridge" });
     expect(built.ok, JSON.stringify(built)).toBe(true);
-    s.earthworks.sync(s.sim.network());
+    s.earthworks.sync(s.sim.network(), s.sim.ground());
     // Only the pieces near the crest take the cut: the rest of the deck stands clear of the ground.
     const taken = s.earthworks.stats.pieces;
     expect(taken).toBeGreaterThan(0);
@@ -388,7 +389,7 @@ describe("earthworks view", () => {
     expect(cut).toBeGreaterThan(0);
     // Undo gives back the natural terrain exactly.
     s.sim.execute({ type: "undo" });
-    s.earthworks.sync(s.sim.network());
+    s.earthworks.sync(s.sim.network(), s.sim.ground());
     const restored = snapshotChunks(s.view, s.terrain);
     for (const [key, arrays] of natural) arrays.forEach((a, i) => expect(restored.get(key)?.[i], key).toEqual(a));
   });
@@ -406,7 +407,7 @@ describe("earthworks view", () => {
     const undos: number[] = [];
     const time = () => {
       const t0 = clock();
-      earthworks.sync(sim.network());
+      earthworks.sync(sim.network(), sim.ground());
       return clock() - t0;
     };
     for (const plan of plans.filter((p) => p.pieces.length >= 8 && p.pieces.length <= 12).slice(0, 40)) {
@@ -426,14 +427,14 @@ describe("earthworks view", () => {
     }
     const fresh = new EarthworksView({ terrain, target: view, requestFrame: () => {}, now: clock, budgetMs: Infinity });
     const t0 = clock();
-    fresh.sync(network.network());
+    fresh.sync(network.network(), network.ground());
     const fullMs = clock() - t0;
     const full = fresh.stats;
     // The same with the 8 ms slices the app uses.
     const sliced = new EarthworksView({ terrain, target: view, requestFrame: () => {}, now: clock });
     let frames = 0;
     do {
-      sliced.sync(network.network());
+      sliced.sync(network.network(), network.ground());
       frames += 1;
     } while (sliced.busy && frames < 1000);
 

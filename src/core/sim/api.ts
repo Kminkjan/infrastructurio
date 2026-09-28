@@ -1,5 +1,6 @@
 import { type TerrainParams, generateTerrain } from "../terrain";
 import type { Drag, TrackPlan } from "../track/planner";
+import type { GroundView } from "../track/ground";
 import { type Command, type NetworkView, type Result, createWorld } from "./world";
 
 /**
@@ -17,6 +18,48 @@ export type { Counts, Reason, ReasonCode, Ref, RuleFamily, StructureChoice } fro
 export { MAX_GRADE_PERMILLE, MAX_PIECES, REASON_CODES, RULE_ORDER } from "../track/validate";
 export { ABUTMENT_DIP_MM, ABUTMENT_ZONE_MM, GROUND_BAND_MM, PORTAL_ZONE_MM, TUNNEL_COVER_MM, WATER_CLEARANCE_MM, waterDeckMm } from "../track/structure";
 export { HISTORY_DEPTH } from "../track/history";
+// The earthworks rule and the effective ground (D4 feel-check fixes, 2026-09-28): the renderer meshes what the core
+// judges against.
+export type { GroundView } from "../track/ground";
+export type { ChainAdjacency, ChainStep, ChainTopology, ClipPlane, EarthworkLod, EarthworkPiece, Envelope, PieceInput, PieceReach } from "../track/earthworks";
+export {
+  BED_BELOW_TRACK_M,
+  CAP_FADE_M,
+  CREST_ROUND_M,
+  DAYLIGHT_ROUND_M,
+  EARTHWORK_MIN_M,
+  FORMATION_HALF_WIDTH_M,
+  HEADWALL_RISE,
+  LOD1_SCAN_MARGIN_M,
+  MAX_REACH_M,
+  NEIGHBOUR_SAMPLE_M,
+  NO_PLANES,
+  REACH_STEP_M,
+  SIDE_SLOPE_RUN,
+  bedAt,
+  chainPlanes,
+  conformRule,
+  conformedHeightM,
+  conforms,
+  cutsUnderDeck,
+  earthworkPiece,
+  earthworkPieces,
+  envelopeAt,
+  mayNeighbour,
+  naturalHeightAtM,
+  networkAdjacency,
+  nearestOnPiece,
+  pointCutReachM,
+  reachAt,
+  riseAt,
+  settleReaches,
+  settledPiece,
+  slopeRiseM,
+  smoothMin,
+  takesEarthworks,
+  withPlanes,
+  withReach,
+} from "../track/earthworks";
 export type { Drag, HeightMode, PlanFit, PlanPointMm, TrackPlan } from "../track/planner";
 export { DEFAULT_RADIUS_CAP_M, MAGNET_RANGE_NODES } from "../track/planner";
 export type { Diff, PieceRecord } from "../track/authored";
@@ -88,6 +131,16 @@ export interface Sim {
   execute(cmd: Command): Result;
   /** Cached per network revision: the same frozen object until an edit changes the track. */
   network(): NetworkView;
+  /**
+   * The revision's earthworks (D4 feel-check fixes, 2026-09-28): the settled pieces the renderer meshes, the same
+   * object until an edit changes the track. The planner and validation judge against the same surface.
+   */
+  ground(): GroundView;
+  /**
+   * The effective ground at lattice node (q, r) in integer mm: the terrain as the track's earthworks shape it, or
+   * the water surface over a lower bed; undefined off the map. The track tool starts free nodes there.
+   */
+  groundMm(q: number, r: number): number | undefined;
 }
 
 export function createSim(scenario: Scenario): Sim {
@@ -100,5 +153,7 @@ export function createSim(scenario: Scenario): Sim {
     preview: (cmd: Command) => world.run(cmd, false),
     execute: (cmd: Command) => world.run(cmd, true),
     network: () => world.network(),
+    ground: () => world.ground(),
+    groundMm: (q: number, r: number) => world.groundMm(q, r),
   });
 }

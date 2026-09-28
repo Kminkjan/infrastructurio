@@ -205,18 +205,28 @@ export interface Drag {
    *   the ground at the end node as far as 35‰ reaches. `dzMm` then only names
    *   the end height the tool would want, which is used to find a buffer end
    *   under the pointer; a snapped port still fixes the end.
+   * - "straight" (the Straight line tool; owner decision 2026-09-28, "One
+   *   'Straight line' tool"): one steady grade from `from.zMm` to the end at
+   *   `from.zMm + dzMm`, moved to the nearest height 35‰ reaches from the start
+   *   (a snapped port keeps its height). The ground is ignored; structure
+   *   inference then makes bridges over valleys and water and tunnels through
+   *   hills. See `straightProfile`.
    */
   readonly heightMode?: HeightMode;
   /**
    * The structure the build will carry (D4, additive; omitted means "auto"):
-   * the Bridge and Tunnel tools force one, and the planner validates its
-   * candidates with it. It does not change the heights.
+   * the planner validates its candidates with it. It does not change the
+   * heights. No tool forces one since the Bridge and Tunnel tools gave way to
+   * the Straight line tool (2026-09-28); the field stays for replays and tests.
    */
   readonly structure?: StructureChoice;
 }
 
-/** How a drag's heights are chosen (D4): "fixed" end height, or "auto" (the planner chooses a free end too). */
-export type HeightMode = "auto" | "fixed";
+/**
+ * How a drag's heights are chosen: "fixed" end height, "auto" (the planner chooses a free end too; D4), or
+ * "straight" (one steady grade to the end, ignoring the ground; the D4 feel-check fixes, 2026-09-28).
+ */
+export type HeightMode = "auto" | "fixed" | "straight";
 
 export type PlanFit = "none" | "straight" | "one-bend" | "shift" | "two-bend";
 
@@ -836,15 +846,19 @@ function isExisting(ctx: PlannerContext, spec: PieceSpec): boolean {
 
 /**
  * The ground under each node of a path, integer mm (`groundMmAt`: the
- * terrain, or the water surface over a lower bed). A node off the map takes
+ * terrain, or the water surface over a lower bed; since the D4 feel-check
+ * fixes, 2026-09-28, in "auto" and "straight" modes the effective ground,
+ * `ground.ts`: the terrain as the committed track's earthworks shape it, with
+ * the buffer ends on the path clipped). A node off the map takes
  * the ground of the last on-map node before it, or of the first one after it
  * when none comes before; a path entirely off the map takes the start's own
  * height. So a plan that leaves the map still gets deterministic heights,
  * with no jump where it crosses the edge, for `preview` to reject with
  * `out-of-bounds`.
  */
-function groundAlong(ctx: PlannerContext, from: NodeRef, qs: readonly number[], rs: readonly number[]): number[] {
-  const known = qs.map((q, i) => groundMmAt(ctx.terrain, { q, r: rs[i] ?? 0 }));
+function groundAlong(ctx: PlannerContext, from: NodeRef, qs: readonly number[], rs: readonly number[], clip: ReadonlySet<string> | null, effective: boolean): number[] {
+  const ground = effective ? ctx.ground : undefined;
+  const known = qs.map((q, i) => (ground ? ground.nodeMm(q, rs[i] ?? 0, clip) : groundMmAt(ctx.terrain, { q, r: rs[i] ?? 0 })));
   let last = known.find((g) => g !== undefined) ?? from.zMm;
   return known.map((g) => {
     last = g ?? last;
@@ -883,7 +897,7 @@ function straightWet(ctx: PlannerContext, q: number, r: number, h: Heading, dq: 
   return ha !== undefined && hb !== undefined && ha + hb < 2 * t.waterLevelDm;
 }
 
-function pathOf(ctx: PlannerContext, from: NodeRef, shapes: readonly Shape[]): Path {
+function pathOf(ctx: PlannerContext, from: NodeRef, shapes: readonly Shape[], clip: ReadonlySet<string> | null, effective: boolean): Path {
   const n = shapes.length;
   const qs: number[] = [from.q];
   const rs: number[] = [from.r];
@@ -910,7 +924,7 @@ function pathOf(ctx: PlannerContext, from: NodeRef, shapes: readonly Shape[]): P
     floor[i] = deck;
     floor[i + 1] = deck;
   });
-  return { n, qs, rs, lens, g: groundAlong(ctx, from, qs, rs), maxRise, reach, floor };
+  return { n, qs, rs, lens, g: groundAlong(ctx, from, qs, rs, clip, effective), maxRise, reach, floor };
 }
 
 /** A path position's breakpoint for the convex fit, without its heap's lazy shift. */
@@ -1179,6 +1193,8 @@ interface Heights {
   readonly structure: StructureChoice;
   /** Whether a free end may pin to an existing node's height (vertical magnetism: off in precision mode). */
   readonly endPins: boolean;
+  /** Whether `endZMm` is a snapped port's height, which the straight mode never moves. */
+  readonly endPort?: boolean;
 }
 
 /**
@@ -1205,8 +1221,28 @@ interface Heights {
  * deterministic.
  */
 function profileOf(ctx: PlannerContext, from: NodeRef, heights: Heights, shapes: readonly Shape[]): number[] {
-  const path = pathOf(ctx, from, shapes);
+  // The committed nodes on the drag's path (its start, a snapped port, track it retraces or extends): their chains'
+  // buffer ends count as clipped, as validation clips the nodes a command joins (`ground.ts`).
+  let clip: Set<string> | null = null;
+  if (ctx.ground && ctx.index.nodes.size > 0) {
+    let q = from.q;
+    let r = from.r;
+    const visit = (): void => {
+      for (const z of heightsAt(ctx.index, q, r)) (clip ??= new Set()).add(`${q},${r},${z}`);
+    };
+    visit();
+    for (const s of shapes) {
+      q += s.dq;
+      r += s.dr;
+      visit();
+    }
+  }
+  // "fixed" keeps D3's profile, a lift above the natural terrain ramped between pins: under existing track the
+  // effective ground is that track's own formation, which would zero every pin's offset. Auto-grade and straight
+  // lines follow the effective ground; validation always judges against it.
+  const path = pathOf(ctx, from, shapes, heights.mode === "fixed" ? null : clip, heights.mode !== "fixed");
   const { n } = path;
+  if (heights.mode === "straight") return straightProfile(path, from.zMm, heights);
   const fixed = new Map<number, number>([[0, from.zMm]]);
   if (heights.endZMm !== null) fixed.set(n, heights.endZMm);
   let z = solveHeights(path, fixed, heights.mode);
@@ -1256,6 +1292,24 @@ function profileOf(ctx: PlannerContext, from: NodeRef, heights: Heights, shapes:
     p = i;
     z = solveHeights(path, fixed, heights.mode);
   }
+  return z;
+}
+
+/**
+ * The straight mode's profile (owner decision 2026-09-28, "One 'Straight line' tool"): one steady grade from the
+ * start to the end, whatever the ground does, apportioned by length (largest remainder, as `rampSegment`). The end
+ * is the drag's (the ground at the end node plus the height steps, from the tool) moved to the nearest height 35‰
+ * reaches from the start, so a straight line is never too steep; a snapped port keeps its own height, and a port
+ * out of reach gives a ramp that `preview` rejects as `grade-too-steep`. No pins, no water floors: bridges and
+ * tunnels come from structure inference.
+ */
+function straightProfile(path: Path, z0: number, heights: Heights): number[] {
+  const { n } = path;
+  const reach = path.reach[n] ?? 0;
+  const wanted = heights.endZMm ?? (path.g[n] ?? z0);
+  const end = heights.endPort ? wanted : clamp(wanted, z0 - reach, z0 + reach);
+  const z: number[] = Array.from({ length: n + 1 }, () => 0);
+  rampSegment(path, 0, n, z0, end, z);
   return z;
 }
 
@@ -1655,7 +1709,7 @@ function planToPort(ctx: PlannerContext, drag: Drag, from: NodeRef, port: Port, 
   const d0 = startHeading(ctx, from, drag.fromHeading, planOf(port.node.q, port.node.r));
   const candidates = [...singleBend(d0, delta, port.heading, rules), ...twoBendFits(d0, delta, port.heading, rules)];
   if (candidates.length === 0) return undefined;
-  return finish(ctx, choose(ctx, from, { ...heights, endZMm: port.node.zMm }, candidates), snapped);
+  return finish(ctx, choose(ctx, from, { ...heights, endZMm: port.node.zMm, endPort: true }, candidates), snapped);
 }
 
 function assertDrag(drag: Drag): void {
@@ -1667,8 +1721,8 @@ function assertDrag(drag: Drag): void {
   }
   if (!Number.isSafeInteger(drag.dzMm)) throw new TypeError(`drag.dzMm must be a safe integer, not ${String(drag.dzMm)}`);
   if (drag.radiusCapM !== undefined && !isRadiusClass(drag.radiusCapM)) throw new TypeError(`drag.radiusCapM ${String(drag.radiusCapM)} is not a radius class`);
-  if (drag.heightMode !== undefined && drag.heightMode !== "auto" && drag.heightMode !== "fixed") {
-    throw new TypeError(`drag.heightMode ${String(drag.heightMode)} is not "auto" or "fixed"`);
+  if (drag.heightMode !== undefined && drag.heightMode !== "auto" && drag.heightMode !== "fixed" && drag.heightMode !== "straight") {
+    throw new TypeError(`drag.heightMode ${String(drag.heightMode)} is not "auto", "fixed" or "straight"`);
   }
   if (drag.structure !== undefined) structureChoice(drag.structure);
   const precision = drag.precision;

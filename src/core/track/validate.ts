@@ -16,6 +16,7 @@ import { type Heading, opposite } from "../lattice";
 import { type Terrain, offsetOfNode, terrainBoundsM } from "../terrain";
 import { divFloor } from "../util/int";
 import { type AuthoredState, type Diff, type PieceRecord, makeDiff, recordOf } from "./authored";
+import type { GroundQuery } from "./ground";
 import {
   ABUTMENT_DIP_MM,
   ABUTMENT_ZONE_MM,
@@ -45,7 +46,9 @@ import {
  * outcome. Grade (rule 3) and terrain/structure (rule 4) arrived in D4.
  *
  * The grade, terrain and structure rules judge the pieces a command adds; a
- * reused piece keeps its structure and was judged when it was built. Under
+ * reused piece keeps its structure and was judged when it was built. Rule 4
+ * judges against the effective ground (`ground.ts`, D4 feel-check fixes
+ * 2026-09-28): the terrain as the committed track's earthworks shape it. Under
  * structure `auto` each added piece gets the structure inferred from the
  * terrain under it (`structure.ts`) before rule 4 checks it; a forced
  * structure (the Bridge and Tunnel tools) applies to every added piece.
@@ -159,6 +162,12 @@ export interface TrackContext {
   readonly terrain: Terrain;
   readonly authored: AuthoredState;
   readonly index: TrackIndex;
+  /**
+   * The effective ground (`ground.ts`: the terrain as the committed track's earthworks shape it), which rule 4 and
+   * the planner judge against since the D4 feel-check fixes (2026-09-28). The world always passes it; a bare context
+   * (unit tests) judges against the natural terrain.
+   */
+  readonly ground?: GroundQuery;
 }
 
 /**
@@ -557,7 +566,20 @@ function structureMessage(fault: StructureFault, noun: string): string {
 function terrainStructure(ctx: TrackContext, p: Prepared): Rejection | null {
   if (p.added.length === 0) return null;
   const { terrain } = ctx;
-  const grounds: PieceGround[] = p.added.map((piece) => pieceGround(terrain, piece));
+  const ground = ctx.ground ?? null;
+  // The committed nodes this command joins: the earthworks of the pieces ending there count as clipped (`ground.ts`).
+  let clip: Set<string> | null = null;
+  if (ground) {
+    for (const piece of p.added) {
+      for (const end of piece.ends) {
+        const k = nodeKey(end.node);
+        if (!ctx.index.nodes.has(k)) continue;
+        clip ??= new Set();
+        clip.add(k);
+      }
+    }
+  }
+  const grounds: PieceGround[] = p.added.map((piece) => pieceGround(terrain, piece, ground, clip));
   const choice = p.choice;
   if (choice !== null) {
     p.added.forEach((piece, i) => {
@@ -602,7 +624,7 @@ function terrainStructure(ctx: TrackContext, p: Prepared): Rejection | null {
   const reachFrom = (node: NodeRef, from: Piece, acc: number): number => {
     const bridge = from.structure === "bridge";
     if (acc > (bridge ? ABUTMENT_ZONE_MM : PORTAL_ZONE_MM)) return Number.POSITIVE_INFINITY;
-    if (bridge ? isAbutment(terrain, node) : isPortal(terrain, node)) return acc;
+    if (bridge ? isAbutment(terrain, node, ground, clip) : isPortal(terrain, node, ground, clip)) return acc;
     const next = others(node, from.key);
     const only = next.length === 1 ? next[0] : undefined;
     if (!only || only.structure !== from.structure) return Number.POSITIVE_INFINITY;

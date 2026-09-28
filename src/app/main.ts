@@ -449,7 +449,7 @@ scheduler.onFrame((frame) => {
   const syncStart = performance.now();
   const network = sim.network();
   trackView.sync(network);
-  earthworks.sync(network, Math.max(1, 8 - (performance.now() - syncStart)));
+  earthworks.sync(network, sim.ground(), Math.max(1, 8 - (performance.now() - syncStart)));
   if (structures.sync(network, Math.max(1, 8 - (performance.now() - syncStart)))) shadowBox.maxY = Math.max(box.maxY, structures.stats.topZ);
   // Once the conformed LOD0 surface of a revision is drawn, the ghost measures its marks again: a commit sets the
   // chained ghost before the earthworks land (PR #83 re-review), and this frame draws the refreshed marks. Piers

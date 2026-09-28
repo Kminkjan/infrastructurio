@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { makeTerrain } from "../../tests/support/makeTerrain";
-import { type Drag, type Sim, type Terrain, generateTerrain, groundMmAt, waterDeckMm } from "../core/sim/api";
+import { type Drag, type Sim, type Terrain, generateTerrain, waterDeckMm } from "../core/sim/api";
 import { createWorld } from "../core/sim/world";
 import { HINT_LINE, formatHeight } from "./format";
 import { pickAtNode } from "./picks";
@@ -20,6 +20,8 @@ function simOn(terrain: Terrain): Sim {
     preview: (cmd) => w.run(cmd, false),
     execute: (cmd) => w.run(cmd, true),
     network: () => w.network(),
+    ground: () => w.ground(),
+    groundMm: (q, r) => w.groundMm(q, r),
   };
 }
 
@@ -43,7 +45,8 @@ function session({ flat = false, terrain: given }: { flat?: boolean; terrain?: T
     },
     () => sim.network().rev,
   );
-  const groundZmm = (q: number, r: number): number | undefined => groundMmAt(terrain, { q, r });
+  // The app's ground: the sim's effective ground (the terrain as the track's earthworks shape it; D4 feel-check fixes).
+  const groundZmm = (q: number, r: number): number | undefined => sim.groundMm(q, r);
   const ctx = (): ToolCtx => ({
     network: sim.network(),
     planTrack: (drag) => {
@@ -414,12 +417,15 @@ describe("track tool: height, precision and keyboard", () => {
 
   it("takes an existing node's height when the plan ends on it within half a step", () => {
     const t = session({ flat: true });
-    // A run on flat ground rising one step (0 → 1000 mm) over six pieces: (12, 12) sits near 333 mm.
-    t.down(10, 12);
-    t.move(16, 12);
-    t.send({ type: "height", delta: 1 });
-    t.up(16, 12);
-    t.send({ type: "escape" });
+    // A deck on flat ground rising one step (0 → 1000 mm) over six pieces: (12, 12) sits near 333 mm. A bridge, so the
+    // ground under it stays the terrain (a ground run's formation would be the effective ground there, and the end
+    // on the ground would take the run's height even in precision; D4 feel-check fixes).
+    const rises = [167, 167, 167, 167, 166, 166];
+    const deck = rises.map((dz, i) => {
+      const z0 = rises.slice(0, i).reduce((a, b) => a + b, 0);
+      return { kind: "straight", from: { q: 10 + i, r: 12, zMm: z0 }, heading: 0, z1Mm: z0 + dz } as const;
+    });
+    expect(t.sim.execute({ type: "build-track", pieces: deck, structure: "bridge" }).ok).toBe(true);
     const node = t.sim.network().nodes.find((n) => n.q === 12 && n.r === 12)?.zMm ?? Number.NaN;
     expect(Math.abs(node - 333)).toBeLessThanOrEqual(1);
     // From the ground, a plan ending on that node: within half a 1000 mm step of 0, so it takes the node's height.
@@ -466,13 +472,15 @@ describe("track tool: height, precision and keyboard", () => {
     // On flat ground, and 35 m long so one 1 m step stays within 35‰ (until D4: 20 m on the seeded map, which the
     // grade rule now rejects).
     const t = session({ flat: true });
+    // The ground before the build: afterwards the effective ground at the end is the new track's own formation.
+    const ground = t.groundZmm(17, 10) ?? 0;
     t.down(10, 10);
     t.move(17, 10);
     t.send({ type: "height", delta: 1 });
     t.up(17, 10);
     expect(t.state.heightSteps).toBe(1);
     const end = t.sim.network().nodes.find((n) => n.q === 17 && n.r === 10);
-    expect(end?.zMm).toBe((t.groundZmm(17, 10) ?? 0) + STEP_MM);
+    expect(end?.zMm).toBe(ground + STEP_MM);
   });
 
   it("maps precision mode, the radius wheel and Q/E onto the drag", () => {

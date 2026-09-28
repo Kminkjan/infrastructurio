@@ -1,23 +1,8 @@
 import { type CentrelineIndex, centrelineIndex, nearestOnCentreline } from "../../core/geometry/sample";
-import { type NetworkView, type Terrain, toWorld } from "../../core/sim/api";
+import { type GroundView, type NetworkView, type Terrain, earthworkPieces, networkAdjacency, toWorld } from "../../core/sim/api";
 import type { SceneryClearance } from "../scenery/clearance";
 import { isPortalEnd, structureRuns } from "../structures/runs";
-import {
-  ChunkPass,
-  DrawnHeightfield,
-  type EarthworkPiece,
-  FORMATION_HALF_WIDTH_M,
-  chunksTouching,
-  conforms,
-  cutsUnderDeck,
-  earthworkPiece,
-  MAX_REACH_M,
-  mayNeighbour,
-  nearestOnPiece,
-  piecesTouching,
-  settleReaches,
-  settledPiece,
-} from "./earthworks";
+import { ChunkPass, DrawnHeightfield, type EarthworkPiece, FORMATION_HALF_WIDTH_M, chunksTouching, nearestOnPiece, piecesTouching } from "./earthworks";
 import { type buildEarthworkChunk, earthworkChunkSteps } from "./earthworkMesh";
 import type { TerrainLod } from "./offsetGrid";
 import { type MeshData, buildChunkData } from "./terrainGeometry";
@@ -26,10 +11,12 @@ import type { TerrainShading } from "./terrainShading";
 /**
  * Keeps the terrain's earthworks in step with `NetworkView` snapshots
  * (architecture "Per-frame order", step 3, beside `TrackView`). On a new
- * revision it diffs ground pieces by key and settles the reaches beside the
- * edit (a piece's reach depends on its neighbours' beds, PR #83 re-review);
- * the reach boxes of pieces that left, arrived or changed reach mark the
- * terrain chunks (both LODs) to rebuild, LOD0 first. Each rebuild runs the
+ * revision it takes the core's settled earthwork pieces (`sim.ground()`, since
+ * the D4 feel-check fixes, 2026-09-28: the core settles the reaches beside
+ * each edit and clips the chains at bridges and tunnels, and judges new track
+ * against the same surface) and diffs them by object: the reach boxes of
+ * pieces that left, arrived or changed mark the terrain chunks (both LODs) to
+ * rebuild, LOD0 first. Each rebuild runs the
  * chunk pass over every current piece near the chunk, so a chunk is always
  * rebuilt from scratch: undo gives back the natural chunk exactly, and the
  * incremental result equals a fresh view's. Rebuilds are time-sliced like the
@@ -116,8 +103,6 @@ export class EarthworksView {
   /** The drawn LOD1 surface (tests and checks). */
   readonly heightfieldLod1: DrawnHeightfield;
   private readonly pieces = new Map<string, EarthworkPiece>();
-  /** Whether a bridge piece takes a cut (`cutsUnderDeck`), by key: the terrain never changes, so each is decided once. */
-  private readonly bridgeCuts = new Map<string, boolean>();
   /** Bridges and portals scenery clears around (by `b:<key>` and `p:<node>`); never conformed. */
   private readonly clearing = new Map<string, Clearing>();
   /** Pending steps as `${order}:${x}:${y}` (order: STEP_*), sorted so LOD0 goes first. */
@@ -182,13 +167,13 @@ export class EarthworksView {
    * Brings the earthworks toward `network`. Call once per frame; it costs a
    * revision compare when nothing changed. Returns true when the scene changed.
    */
-  sync(network: NetworkView, budgetMs = this.budgetMs): boolean {
+  sync(network: NetworkView, ground?: GroundView, budgetMs = this.budgetMs): boolean {
     if (!this.enabled) return false;
     if (network.rev !== this.targetRev) {
       this.targetRev = network.rev;
       // A step in flight may read pieces the revision replaced: it starts again (its key stays queued).
       this.current = undefined;
-      this.applyRevision(network);
+      this.applyRevision(network, ground && ground.rev === network.rev ? ground : undefined);
     }
     if (this.queue.length === 0) return false;
     const now = this.options.now;
@@ -254,82 +239,36 @@ export class EarthworksView {
     return Math.abs(drawn - natural) > SCENERY_MOVED_M;
   }
 
-  /** Whether the conform takes a network piece: ground always, a bridge where the ground comes near its deck (D4 M2). */
-  private takes(p: NetworkView["pieces"][number]): boolean {
-    if (conforms(p)) return true;
-    if (p.structure !== "bridge") return false;
-    let cut = this.bridgeCuts.get(p.key);
-    if (cut === undefined) {
-      cut = cutsUnderDeck(this.options.terrain, p);
-      this.bridgeCuts.set(p.key, cut);
-    }
-    return cut;
-  }
-
-  private applyRevision(network: NetworkView): void {
-    const terrain = this.options.terrain;
-    const next = new Set<string>();
-    const added: EarthworkPiece[] = [];
-    for (const p of network.pieces) {
-      if (!this.takes(p)) continue;
-      next.add(p.key);
-      if (!this.pieces.has(p.key)) added.push(earthworkPiece(terrain, p));
-    }
-    let removed = false;
+  /**
+   * Takes the revision's earthwork pieces: the core's (`ground`), or, for a caller without a sim (tests), the same
+   * rule applied to the whole network afresh, keeping the pieces that did not change. A piece that left, arrived or
+   * changed (its reach, cap rise or clip planes) queues the chunks of its old and new boxes.
+   */
+  private applyRevision(network: NetworkView, ground: GroundView | undefined): void {
+    const next = ground?.pieces ?? this.fresh(network);
     for (const [key, piece] of this.pieces) {
-      if (next.has(key)) continue;
-      this.pieces.delete(key);
+      if (next.get(key) === piece) continue;
       this.enqueueBox(piece);
-      removed = true;
+      if (!next.has(key)) this.pieces.delete(key);
     }
-    if (added.length > 0 || removed) this.settle(added, removed);
+    for (const [key, piece] of next) {
+      if (this.pieces.get(key) === piece) continue;
+      this.pieces.set(key, piece);
+      this.enqueueBox(piece);
+    }
     this.syncClearing(network);
     this.rebuild = { chunks: 0, slices: 0, totalMs: 0, longestSliceMs: 0 };
     this.sortQueue();
   }
 
-  /**
-   * Re-derives the reaches beside the edit (`settleReaches`: a piece's reach depends on its neighbours' beds) and
-   * queues the chunks of every piece whose reach changed, old and new box, plus the added pieces'. After a removal
-   * every piece a neighbour had raised starts again from its natural reach, so the result equals a fresh settle.
-   */
-  private settle(added: readonly EarthworkPiece[], removed: boolean): void {
-    const kept = this.pieces.size;
-    const list = [...this.pieces.values(), ...added];
-    const reach0 = Float64Array.from(list, (p) => p.reachM);
-    const reach1 = Float64Array.from(list, (p) => p.lod1.reachM);
-    const work: number[] = [];
-    for (let i = 0; i < kept; i++) {
-      const p = list[i];
-      if (!p) continue;
-      if (removed && (p.reachM !== p.naturalReachM[0] || p.lod1.reachM !== p.naturalReachM[1])) {
-        reach0[i] = p.naturalReachM[0];
-        reach1[i] = p.naturalReachM[1];
-        work.push(i);
-        continue;
-      }
-      // A piece whose box meets an arrival's may fold in its beds.
-      for (const a of added) {
-        if (mayNeighbour(p, a)) {
-          work.push(i);
-          break;
-        }
-      }
+  /** The rule over the whole network, reusing each current piece whose settled form is the same. */
+  private fresh(network: NetworkView): ReadonlyMap<string, EarthworkPiece> {
+    const out = new Map<string, EarthworkPiece>();
+    for (const p of earthworkPieces(this.options.terrain, network.pieces, networkAdjacency(network))) {
+      const old = this.pieces.get(p.key);
+      out.set(p.key, old && sameSettled(old, p) ? old : p);
     }
-    for (let i = kept; i < list.length; i++) work.push(i);
-    settleReaches(this.options.terrain, list, reach0, reach1, work);
-    for (let i = 0; i < list.length; i++) {
-      const p = list[i];
-      if (!p) continue;
-      // A capped piece's cap rise depends on its neighbours even when its reach stays at the cap.
-      const capped = (reach0[i] ?? 0) >= MAX_REACH_M || (reach1[i] ?? 0) >= MAX_REACH_M || p.capRiseM > 0 || p.lod1.capRiseM > 0;
-      if (i < kept && !capped && reach0[i] === p.reachM && reach1[i] === p.lod1.reachM) continue;
-      const settled = settledPiece(this.options.terrain, list, reach0, reach1, i) ?? p;
-      if (i < kept && settled === p) continue;
-      if (i < kept) this.enqueueBox(p);
-      this.pieces.set(p.key, settled);
-      this.enqueueBox(settled);
-    }
+    return out;
   }
 
   /** Bridges and portals: the scenery on the chunks of any that came or went is re-tested. */
@@ -432,4 +371,14 @@ export class EarthworksView {
     this.maxFillM = Math.max(this.maxFillM, pass.stats.maxFillM);
     (lod === 0 ? this.heightfield : this.heightfieldLod1).setChunk(pass);
   }
+}
+
+/** Whether two preparations of one piece draw the same: equal reaches, cap rises and clip planes. */
+function sameSettled(a: EarthworkPiece, b: EarthworkPiece): boolean {
+  if (a.reachM !== b.reachM || a.lod1.reachM !== b.lod1.reachM || a.capRiseM !== b.capRiseM || a.lod1.capRiseM !== b.lod1.capRiseM) return false;
+  if (a.planes.length !== b.planes.length) return false;
+  return a.planes.every((p, i) => {
+    const q = b.planes[i];
+    return q !== undefined && p.x === q.x && p.y === q.y && p.tx === q.tx && p.ty === q.ty && p.fixed === q.fixed && p.key === q.key;
+  });
 }

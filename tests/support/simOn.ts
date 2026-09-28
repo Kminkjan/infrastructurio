@@ -15,6 +15,8 @@ export function simOn(terrain: Terrain): Sim {
     preview: (cmd) => w.run(cmd, false),
     execute: (cmd) => w.run(cmd, true),
     network: () => w.network(),
+    ground: () => w.ground(),
+    groundMm: (q, r) => w.groundMm(q, r),
   };
 }
 

@@ -164,26 +164,32 @@ describe("earthworks and terrain bake output (a byte pin)", () => {
     // Re-recorded 2026-09-28 for D4 (owner decision "M2"), deliberately: the pinned network changed, not the conform.
     // The 40 plans are auto-graded under D4's rules, so some pieces are bridges and tunnels the conform leaves alone
     // (411 ground pieces until D4, when every plan followed the ground and nothing was judged); since M2 the band is
-    // ±8 m (cuts and fills to 8.5 m and 8.7 m here, 4.3 m and 6.5 m until D4) and a drag on water starts at the deck
-    // height. The bridges near the ground now take a cut (`cutsUnderDeck`). Checked before re-recording: under the D4
-    // core half's rules (±4 m, no dip at abutments, no deck start) this code with bridge cuts disabled drew every hash
-    // of the merged head c21e941 exactly (299 pieces, 5,406 refined), so the refactor itself moved no byte; with bridge
-    // cuts on, one deck within 0.6 m of the ground there added 7 refined triangles. The terrain bakes (shading, splat)
-    // are unchanged.
+    // ±8 m and a drag on water starts at the deck height. The bridges near the ground now take a cut
+    // (`cutsUnderDeck`). Checked before re-recording: under the D4 core half's rules (±4 m, no dip at abutments, no
+    // deck start) this code with bridge cuts disabled drew every hash of the merged head c21e941 exactly (299 pieces,
+    // 5,406 refined), so the refactor itself moved no byte; with bridge cuts on, one deck within 0.6 m of the ground
+    // there added 7 refined triangles. The terrain bakes (shading, splat) are unchanged.
+    // Re-recorded again 2026-09-28 (D4 feel-check fixes), deliberately: the chains' earthworks now stop at the plane
+    // through each end where a bridge or a tunnel goes on (`ClipPlane`, a 2 : 1 headwall past it), so the approach
+    // cones no longer run under a bridge's first span or into the hill behind a portal. Refined LOD0 triangles
+    // 6,670 → 6,173; the deepest cut and fill 8.49 m and 8.75 m → 8.00 m and 7.86 m (only those cones went past the
+    // ±8 m band); 14 fewer scenery items cleared. Checked before re-recording: with the clip planes disabled, the rule
+    // moved into `core/track/earthworks.ts` drew every hash of 3a4c2f5 exactly (the pieces, reaches and nearest points
+    // are unchanged here too), so moving the rule into the core moved no byte.
     expect(hashes).toEqual({
       pieces: 327,
-      refined: 6670,
+      refined: 6173,
       withEarthworks: 37,
-      cleared: 306,
-      maxCutFill: [8.487522315979003, 8.74652214050293],
-      lod0: "2da0e401 15b116a5 b7f5f408 3881496b 4a198c0d",
-      lod1: "d7e135fa e2e48d8b 6d22e4f6 1b7daadb 09b7907d",
-      heightfield0: "6447579c",
-      heightfield1: "af9d8f19",
+      cleared: 292,
+      maxCutFill: [7.997250366210935, 7.86400032043457],
+      lod0: "a7c7e15b 843396e3 d4567712 2b90c783 260da98b",
+      lod1: "11e2f543 dce88e16 08a6d71c 3c525296 c9019c6d",
+      heightfield0: "b7567503",
+      heightfield1: "b60990bf",
       reach: "10a1303f",
       nearest: "ccf44728",
-      clearedFlags: "8174592b",
-      surfaces: "6f39970e",
+      clearedFlags: "a0e1f7ab",
+      surfaces: "c62bb8a6",
       shadingD11a: "ab72930b",
       shadingB: "aed09c41",
       splat: "d14a2fa6",
