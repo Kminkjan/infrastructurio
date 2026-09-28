@@ -26,6 +26,14 @@ export interface RibbonPiece {
   readonly centreline: TrackCentreline;
   /** A palette value. */
   readonly color: number;
+  /** Half width of this ribbon (default RIBBON_HALF_WIDTH_M). */
+  readonly halfWidthM?: number;
+  /** Lateral offset of its centre, metres to the right of travel (default 0): a band beside the track. */
+  readonly offsetM?: number;
+  /** Height above the track height (default RIBBON_LIFT_M). */
+  readonly liftM?: number;
+  /** Its own dash pattern (on, off metres along the piece), whatever `buildRibbons`' `dashed` says. */
+  readonly dash?: readonly [number, number];
 }
 
 export interface RibbonData {
@@ -74,14 +82,17 @@ export function buildRibbons(pieces: readonly RibbonPiece[], dashed: boolean): R
   const idx: number[] = [];
   let count = 0;
   let offset = 0;
-  const strip = (frames: readonly TrackFrame[]): void => {
+  const strip = (frames: readonly TrackFrame[], half: number, shift: number, lift: number): void => {
     let prev = -1;
     for (const f of frames) {
       const lx = -f.ty;
       const ly = f.tx;
-      const z = f.z + RIBBON_LIFT_M;
-      pos.push(f.x + lx * RIBBON_HALF_WIDTH_M, z, -(f.y + ly * RIBBON_HALF_WIDTH_M));
-      pos.push(f.x - lx * RIBBON_HALF_WIDTH_M, z, -(f.y - ly * RIBBON_HALF_WIDTH_M));
+      const z = f.z + lift;
+      // The band's centre sits `shift` to the right of travel, that is −shift along the left normal.
+      const cx = f.x - lx * shift;
+      const cy = f.y - ly * shift;
+      pos.push(cx + lx * half, z, -(cy + ly * half));
+      pos.push(cx - lx * half, z, -(cy - ly * half));
       for (let k = 0; k < 2; k++) col.push(scratch.r, scratch.g, scratch.b);
       const left = count;
       count += 2;
@@ -92,16 +103,22 @@ export function buildRibbons(pieces: readonly RibbonPiece[], dashed: boolean): R
   };
   for (const piece of pieces) {
     scratch.setHex(piece.color);
+    const half = piece.halfWidthM ?? RIBBON_HALF_WIDTH_M;
+    const shift = piece.offsetM ?? 0;
+    const lift = piece.liftM ?? RIBBON_LIFT_M;
     const frames = sampleCentreline(piece.centreline, RIBBON_MAX_SAGITTA_M);
     const length = frames[frames.length - 1]?.sM ?? 0;
-    if (!dashed) strip(frames);
+    if (piece.dash) {
+      const [on, off] = piece.dash;
+      for (const [from, to] of dashIntervals(length, on, off)) strip(clipFrames(frames, from, to), half, shift, lift);
+    } else if (!dashed) strip(frames, half, shift, lift);
     else {
       const period = DASH_ON_M + DASH_OFF_M;
       const first = Math.floor(offset / period) * period;
       for (let s = first; s < offset + length; s += period) {
         const from = Math.max(s, offset) - offset;
         const to = Math.min(s + DASH_ON_M, offset + length) - offset;
-        if (to > from) strip(clipFrames(frames, from, to));
+        if (to > from) strip(clipFrames(frames, from, to), half, shift, lift);
       }
     }
     offset += length;

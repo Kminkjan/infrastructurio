@@ -1,5 +1,5 @@
-import { type Counts, type NodeRef, type PieceSpec, type Reason, type TrackPlan, resolvePiece } from "../core/sim/api";
-import type { GradeLevel, TooltipMetrics, TooltipModel } from "./types";
+import { type Counts, type NodeRef, type PieceSpec, type Reason, type Structure, type TrackPlan, resolvePiece } from "../core/sim/api";
+import type { GradeLevel, StructureMode, TooltipMetrics, TooltipModel } from "./types";
 
 /**
  * Tooltip text (issue #67 "Presentation"). Display units (m, %) appear only
@@ -104,6 +104,21 @@ export function splitReason(reason: Pick<Reason, "message">): { reason: string; 
   return { reason: text.slice(0, at), fix: fix.charAt(0).toUpperCase() + fix.slice(1) };
 }
 
+/**
+ * The tooltip's structure line (D4): "Structure: bridge" when every piece shares one structure, counts
+ * when they mix ("Structure: 2 bridge, 1 tunnel, 3 ground", zeros left out), and nothing for a Track
+ * plan that is all ground (the D3 tooltip, unchanged).
+ */
+export function formatStructures(mode: StructureMode, structures: readonly Structure[]): string | null {
+  if (structures.length === 0) return null;
+  const counts: Record<Structure, number> = { bridge: 0, tunnel: 0, ground: 0 };
+  for (const s of structures) counts[s] += 1;
+  if (counts.ground === structures.length && mode === "auto") return null;
+  const kinds = (["bridge", "tunnel", "ground"] as const).filter((k) => counts[k] > 0);
+  if (kinds.length === 1) return `Structure: ${kinds[0]}`;
+  return `Structure: ${kinds.map((k) => `${counts[k]} ${k}`).join(", ")}`;
+}
+
 export interface TooltipInput {
   readonly plan: TrackPlan;
   /** End height above the terrain at the plan's end, integer mm. */
@@ -112,17 +127,21 @@ export interface TooltipInput {
   readonly rejection: Pick<Reason, "message"> | null;
   readonly precision: boolean;
   readonly anchor: NodeRef | null;
+  /** The structure line (`formatStructures`), or null. */
+  readonly structure?: string | null;
 }
 
 export function buildTooltip(input: TooltipInput): TooltipModel {
   const { plan } = input;
   const empty = plan.fit === "none";
   const counts = formatCounts(plan.counts);
+  const structure = empty ? null : (input.structure ?? null);
   const metrics = empty ? null : formatMetrics(plan, input.endHeightMm);
   const invalid = input.rejection ? splitReason(input.rejection) : null;
   const note = empty ? plan.note : null;
   const precision = input.precision ? `Precision: ${plan.label} · ${PRECISION_CONTROLS}` : null;
   const lines: string[] = [counts];
+  if (structure) lines.push(structure);
   if (metrics) lines.push(metricsLine(metrics));
   if (note) lines.push(note);
   if (invalid) {
@@ -131,5 +150,5 @@ export function buildTooltip(input: TooltipInput): TooltipModel {
   }
   if (precision) lines.push(precision);
   lines.push(HINT_LINE);
-  return { counts, metrics, note, invalid, precision, hint: HINT_LINE, lines, anchor: input.anchor };
+  return { counts, structure, metrics, note, invalid, precision, hint: HINT_LINE, lines, anchor: input.anchor };
 }

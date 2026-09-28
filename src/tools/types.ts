@@ -9,6 +9,7 @@ import type {
   PlanPointMm,
   RadiusClassM,
   Result,
+  Structure,
   TrackPlan,
 } from "../core/sim/api";
 
@@ -52,8 +53,15 @@ export interface ToolPick {
   readonly pieceKey?: PieceKey;
 }
 
+/**
+ * What a track-family tool builds (architecture "Tools": Bridge and Tunnel are the track tool with the
+ * structure forced; Track uses Auto, where the core infers each piece's structure).
+ */
+export type StructureMode = "auto" | Exclude<Structure, "ground">;
+
 export type ToolEvent =
-  | { readonly type: "activate" }
+  /** The tool took over; `structure` picks the Track (auto, the default), Bridge or Tunnel mode. */
+  | { readonly type: "activate"; readonly structure?: StructureMode }
   | { readonly type: "deactivate" }
   /** The pointer moved; `pick` is null off the map. */
   | { readonly type: "pointer-move"; readonly pick: ToolPick | null; readonly screen: ScreenPoint }
@@ -86,6 +94,12 @@ export type GhostStatus = "new" | "reused";
 export interface GhostPiece {
   readonly spec: PieceSpec;
   readonly status: GhostStatus;
+  /**
+   * The piece's structure as it would be built: a new piece's from the preview's `diff.added` (the core's
+   * resolved structure, so Auto shows what inference chose), a reused piece's from the network, and the
+   * forced structure (or ground) when the preview rejected the plan.
+   */
+  readonly structure: Structure;
 }
 
 /** The planned track as the ghost draws it; `valid` false draws every piece red and dashed. */
@@ -119,6 +133,8 @@ export interface TooltipMetrics {
  */
 export interface TooltipModel {
   readonly counts: string;
+  /** What the plan builds when it is not all ground: "Structure: bridge", "Structure: 2 bridge, 3 ground"; else null. */
+  readonly structure: string | null;
   readonly metrics: TooltipMetrics | null;
   /** The planner's note when nothing fits (for example "Drag farther to lay track"). */
   readonly note: string | null;

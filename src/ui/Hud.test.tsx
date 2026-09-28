@@ -62,4 +62,24 @@ describe("HUD markup", () => {
     // No colour literal reaches the markup: the palette arrives as CSS custom properties.
     expect(html).not.toMatch(/#[0-9a-fA-F]{6}\b/);
   });
+
+  it("offers Track, Bridge and Tunnel with their keys, presses the active one, and names the occlusion aids in effect (D4)", () => {
+    const store = createHudStore({ ...INITIAL_HUD_STATE, tool: "bridge", views: { decksHidden: true, xray: true } });
+    const html = renderToStaticMarkup(<Hud store={store} actions={{ selectTool: () => {}, undo: () => {}, redo: () => {} }} />);
+    const buttons = [...html.matchAll(/<button[^>]*aria-pressed="(true|false)"[^>]*aria-keyshortcuts="(\d)"[^>]*>([A-Za-z]+)<kbd>/g)].map((m) => [m[3], m[2], m[1]]);
+    expect(buttons).toEqual([
+      ["Track", "1", "false"],
+      ["Bridge", "5", "true"],
+      ["Tunnel", "6", "false"],
+    ]);
+    expect(html).toContain('data-testid="view-chip" aria-hidden="true">Decks hidden (H) · Underground x-ray (U)<');
+    const plain = renderToStaticMarkup(<Hud store={createHudStore()} actions={{ selectTool: () => {}, undo: () => {}, redo: () => {} }} />);
+    expect(plain).not.toContain("view-chip");
+  });
+
+  it("adds the structure line under the counts when the plan is not all ground", () => {
+    const html = renderToStaticMarkup(<TooltipPanel tip={{ ...tip, structure: "Structure: bridge" }} />);
+    expect(html).toContain('<div class="line counts">Pieces: 8 new, 2 reused</div><div class="line structure">Structure: bridge</div>');
+    expect(renderToStaticMarkup(<TooltipPanel tip={tip} />)).not.toContain("line structure");
+  });
 });

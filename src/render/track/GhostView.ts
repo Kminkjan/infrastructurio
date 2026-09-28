@@ -8,7 +8,7 @@ import {
   MeshBasicMaterial,
   Vector3,
 } from "three";
-import { type NetworkPiece, type NetworkView, type PieceKey, type PieceSpec, pieceFromKey, resolvePiece } from "../../core/sim/api";
+import { type NetworkPiece, type NetworkView, type PieceKey, type PieceSpec, type Structure, pieceFromKey, resolvePiece } from "../../core/sim/api";
 import { cssColor, palette } from "../art/palette";
 import { type IsoView, worldToScreen } from "../camera/isoMath";
 import { simToWorld } from "../coords";
@@ -115,8 +115,37 @@ export function centrelineOfKey(key: PieceKey): TrackCentreline | undefined {
 
 /** What the ghost draws (the track tool's `GhostModel` has this shape). */
 export interface GhostInput {
-  readonly pieces: readonly { readonly spec: PieceSpec; readonly status: "new" | "reused" }[];
+  readonly pieces: readonly { readonly spec: PieceSpec; readonly status: "new" | "reused"; readonly structure?: Structure }[];
   readonly valid: boolean;
+}
+
+/**
+ * The ghost's structure marks (D4), in the piece's ghost colour: a bridge shows its deck's edges (solid
+ * bands at the parapets' outer faces, ±3 m), a tunnel its bore (dashed bands at ±2.6 m, 1.2 m on and
+ * 0.8 m off). They draw in their own two passes, stronger see-through than the ribbon's, so a tunnel's
+ * outline reads through the hill it will run under.
+ */
+export const GHOST_DECK_EDGE_M = 3;
+export const GHOST_BORE_EDGE_M = 2.6;
+export const GHOST_MARK_HALF_M = 0.16;
+export const GHOST_BORE_DASH: readonly [number, number] = [1.2, 0.8];
+
+export function structureMarks(pieces: readonly { readonly centreline: TrackCentreline; readonly color: number; readonly structure: Structure }[]): RibbonPiece[] {
+  const out: RibbonPiece[] = [];
+  for (const p of pieces) {
+    if (p.structure === "ground") continue;
+    const edge = p.structure === "bridge" ? GHOST_DECK_EDGE_M : GHOST_BORE_EDGE_M;
+    for (const side of [1, -1]) {
+      out.push({
+        centreline: p.centreline,
+        color: p.color,
+        halfWidthM: GHOST_MARK_HALF_M,
+        offsetM: side * edge,
+        ...(p.structure === "tunnel" ? { dash: GHOST_BORE_DASH } : {}),
+      });
+    }
+  }
+  return out;
 }
 
 const tagWorld = new Vector3();
@@ -125,6 +154,7 @@ const tagScreen = { x: 0, y: 0 };
 export class GhostView {
   readonly group = new Group();
   private readonly ribbons = new OverlayRibbons("ghost ribbons");
+  private readonly marks = new OverlayRibbons("ghost structure marks", 0.85, 0.55);
   private dropGeometry = new BufferGeometry();
   private readonly dropMaterial: LineBasicMaterial;
   private readonly drops: LineSegments;
@@ -155,7 +185,7 @@ export class GhostView {
     this.drops.renderOrder = DEPTH_ORDER;
     this.drops.frustumCulled = false;
     this.drops.visible = false;
-    this.group.add(this.ribbons.group, this.drops);
+    this.group.add(this.ribbons.group, this.drops, this.marks.group);
     this.tags = [0, 1].map(() => {
       const el = document.createElement("div");
       el.setAttribute("aria-hidden", "true");
@@ -186,22 +216,28 @@ export class GhostView {
     return this.ribbons.group.visible;
   }
 
+  /** Whether structure marks show (a bridge's deck edges or a tunnel's bore), for checks. */
+  get marksVisible(): boolean {
+    return this.marks.group.visible;
+  }
+
   /** Shows a plan, or hides the ghost for null. */
   set(ghost: GhostInput | null): void {
     const pieces: RibbonPiece[] = [];
     const lines: TrackCentreline[] = [];
+    const structured: { centreline: TrackCentreline; color: number; structure: Structure }[] = [];
     if (ghost) {
       for (const p of ghost.pieces) {
         const c = centrelineOfSpec(p.spec);
         if (!c) continue;
         lines.push(c);
-        pieces.push({
-          centreline: c,
-          color: !ghost.valid ? palette.ghostInvalid : p.status === "reused" ? palette.ghostReused : palette.ghostValid,
-        });
+        const color = !ghost.valid ? palette.ghostInvalid : p.status === "reused" ? palette.ghostReused : palette.ghostValid;
+        pieces.push({ centreline: c, color });
+        structured.push({ centreline: c, color, structure: p.structure ?? "ground" });
       }
     }
     this.ribbons.set(pieces, ghost !== null && !ghost.valid);
+    this.marks.set(structureMarks(structured));
     this.lines = lines;
     this.measure();
   }
@@ -267,6 +303,7 @@ export class GhostView {
 
   dispose(): void {
     this.ribbons.dispose();
+    this.marks.dispose();
     this.dropGeometry.dispose();
     this.dropMaterial.dispose();
     for (const el of this.tags) el.remove();
