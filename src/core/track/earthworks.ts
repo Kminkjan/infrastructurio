@@ -3,6 +3,7 @@ import { centrelineEnds, centrelineIndex, nearestOnCentreline, sampleCentrelineE
 import type { RenderPrim } from "../geometry/templates";
 import { LATTICE_SPACING_M, SQRT3 } from "../lattice";
 import type { Terrain } from "../terrain";
+import { portalRetainV } from "./portal";
 
 /**
  * Earthworks: the cuttings and embankments under ground track, one rule the
@@ -57,6 +58,27 @@ import type { Terrain } from "../terrain";
  * whatever the command continues with, a structure clips there and ground
  * track's own section covers the cone (`ground.ts`). Clipping only raises U and
  * lowers L (or drops a piece), so every reach bound below still holds.
+ *
+ * **Portals retain the hill** (D4 second feel-check fixes, 2026-09-28). The
+ * headwall above started at the track bed, so behind every portal face the
+ * effective ground lay 3–5 m under the hill (the diagnosis of the owner's
+ * second feel check: 4.83 and 5.18 m of cover behind the faces of a tunnel whose
+ * hill stood 8.10 and 8.05 m over the track), and later drags, the tool's start
+ * height and rule 4 were judged against a pit the player could not see. Past a
+ * tunnel end's plane (`ClipPlane.tunnel`) the cut envelope now starts at the
+ * portal's retained skyline instead, then rises at the same 45°: with z the
+ * track height at the portal node and u the point's foot on the plane measured
+ * across the track, U = max(bed + e(d), z + R(u)) + HEADWALL_RISE · t, where
+ * R(u) = 7.65 m (the face top 7.4 m + 0.25 m) over |u| ≤ 4.2 m, falling 1 : 1.5
+ * beyond (the wing coping line; `portal.ts`). Where the approach's own section
+ * is higher (beyond the wing ends) nothing changes, bit for bit; bridge and
+ * buffer planes are unchanged; and the fill envelope is unchanged. So behind a
+ * face the effective ground is the natural hill, trimmed at 45° above the
+ * parapet where the hill stands higher. The rule applies in `"ground"` mode
+ * (`EnvelopeMode`), which the effective ground uses; the default `"underlay"`
+ * mode keeps the earlier envelope, which the renderer's terrain mesh draws under
+ * the portal (a 1.25 m mesh cannot draw a 7.65 m step at the face without grass
+ * wedges in front of it), until the renderer opts in.
  *
  * **Bridges: a cut only** (D4, owner decision 2026-09-28 "M2": a deck may sit
  * up to 2 m below the terrain within 15 m of an abutment). A bridge piece whose
@@ -162,8 +184,9 @@ export interface EarthworkPiece extends PieceReach {
 
 /**
  * A chain end's clip plane: the end node (x, y), the unit normal (tx, ty) pointing out of the chain (the side past
- * the plane has t > 0), the node's key ("q,r,zMm"; "" when unknown), and whether it always clips (a bridge or tunnel
- * goes on there) or only for a query naming `key` (a buffer end).
+ * the plane has t > 0), the node's key ("q,r,zMm"; "" when unknown), whether it always clips (a bridge or tunnel
+ * goes on there) or only for a query naming `key` (a buffer end), whether a tunnel goes on there (its portal
+ * retains the hill in `"ground"` mode; see the module comment), and the track height at the node (m).
  */
 export interface ClipPlane {
   readonly key: string;
@@ -172,7 +195,16 @@ export interface ClipPlane {
   readonly tx: number;
   readonly ty: number;
   readonly fixed: boolean;
+  readonly tunnel: boolean;
+  readonly zM: number;
 }
+
+/**
+ * How `envelopeAt` treats a tunnel end: `"ground"`, the core's rule (the portal retains the hill; the effective
+ * ground, `ground.ts`), or `"underlay"`, the earlier 45° headwall from the track bed that the renderer's terrain
+ * mesh still draws behind a portal (see the module comment).
+ */
+export type EnvelopeMode = "ground" | "underlay";
 
 /** The renderer's terrain LODs: 0 (the 5 m lattice) and 1 (10 m), whose reach scans the relief wider. */
 export type EarthworkLod = 0 | 1;
@@ -285,7 +317,17 @@ function samePlanes(a: readonly ClipPlane[], b: readonly ClipPlane[]): boolean {
   if (a.length !== b.length) return false;
   return a.every((p, i) => {
     const q = b[i];
-    return q !== undefined && p.key === q.key && p.x === q.x && p.y === q.y && p.tx === q.tx && p.ty === q.ty && p.fixed === q.fixed;
+    return (
+      q !== undefined &&
+      p.key === q.key &&
+      p.x === q.x &&
+      p.y === q.y &&
+      p.tx === q.tx &&
+      p.ty === q.ty &&
+      p.fixed === q.fixed &&
+      p.tunnel === q.tunnel &&
+      p.zM === q.zM
+    );
   });
 }
 
@@ -315,7 +357,7 @@ export interface ChainAdjacency {
  * pieces of its own structure that take earthworks (`pieces`), up to MAX_REACH_M, the first node where the
  * structure changes gives a fixed plane and a buffer end a query plane; a junction, a piece of the same structure
  * without earthworks (a deck clear of the ground) or the distance ends the walk without one. Each plane lies at the
- * last earthwork piece's end, square to the track there.
+ * last earthwork piece's end, square to the track there, and a fixed one where a tunnel goes on is a tunnel plane.
  */
 export function chainPlanes(p: EarthworkPiece, pieces: ReadonlyMap<string, EarthworkPiece>, adj: ChainAdjacency): readonly ClipPlane[] {
   const structure = adj.structure(p.key);
@@ -331,7 +373,16 @@ export function chainPlanes(p: EarthworkPiece, pieces: ReadonlyMap<string, Earth
       if (next === "buffer" || s !== structure) {
         const k = curEnd === 0 ? 0 : 4;
         const e = cur.ends;
-        (out ??= []).push({ key: adj.nodeKey(cur.key, curEnd), x: e[k] ?? 0, y: e[k + 1] ?? 0, tx: e[k + 2] ?? 0, ty: e[k + 3] ?? 0, fixed: next !== "buffer" });
+        (out ??= []).push({
+          key: adj.nodeKey(cur.key, curEnd),
+          x: e[k] ?? 0,
+          y: e[k + 1] ?? 0,
+          tx: e[k + 2] ?? 0,
+          ty: e[k + 3] ?? 0,
+          fixed: next !== "buffer",
+          tunnel: s === "tunnel",
+          zM: (curEnd === 0 ? cur.z0M : cur.z1M) + BED_BELOW_TRACK_M,
+        });
         break;
       }
       const q = pieces.get(next.key);
@@ -718,7 +769,8 @@ export interface Envelope {
  * (45°), so a cutting or embankment ends in a headwall behind a portal face or an abutment instead of a cone reaching
  * on under the structure. Tried first: 2 : 1, whose crest met the hill in a crease sharper than one 1.25 m
  * sub-triangle and drew a sawtooth behind the wings; and the side slopes' 1 : 1.5, which ate 12 m into the hill
- * behind a portal, so a tunnel piece laid later from the portal saw its cover gone and a portal of its own.
+ * behind a portal, so a tunnel piece laid later from the portal saw its cover gone and a portal of its own. Behind a
+ * tunnel portal, in `"ground"` mode, the cut rises at the same rate from the portal's retained skyline instead.
  */
 export const HEADWALL_RISE = 1;
 
@@ -726,14 +778,25 @@ export const HEADWALL_RISE = 1;
  * Piece `p`'s envelopes at plan (x, y) with its reach `r` at one LOD, written to `out`: false beyond the reach (the
  * piece moves nothing there). Past a fixed clip plane, by t (the farthest one the point lies beyond), the envelopes
  * are the piece's own at the point's foot on the plane, U raised and L lowered by HEADWALL_RISE · t (see the module
- * comment). Past a buffer end's plane that `clipKeys` names (a query for a command continuing from that end,
- * `ground.ts`), the piece moves nothing at all: the command is judged as if the chain ended at the plane, whatever
- * it continues with. `near` is scratch for the nearest centreline point.
+ * comment); in `"ground"` mode, past a tunnel plane, U starts no lower than the portal's retained skyline at the
+ * foot (`portalRetainV`; "Portals retain the hill"). Past a buffer end's plane that `clipKeys` names (a query for a
+ * command continuing from that end, `ground.ts`), the piece moves nothing at all: the command is judged as if the
+ * chain ended at the plane, whatever it continues with. `near` is scratch for the nearest centreline point.
  */
-export function envelopeAt(p: EarthworkPiece, r: PieceReach, x: number, y: number, clipKeys: ReadonlySet<string> | null, near: { d: number; s: number }, out: Envelope): boolean {
+export function envelopeAt(
+  p: EarthworkPiece,
+  r: PieceReach,
+  x: number,
+  y: number,
+  clipKeys: ReadonlySet<string> | null,
+  near: { d: number; s: number },
+  out: Envelope,
+  mode: EnvelopeMode = "underlay",
+): boolean {
   let t = 0;
   let px = x;
   let py = y;
+  let plane: ClipPlane | null = null;
   const planes = p.planes;
   for (let i = 0; i < planes.length; i++) {
     const c = planes[i];
@@ -747,32 +810,50 @@ export function envelopeAt(p: EarthworkPiece, r: PieceReach, x: number, y: numbe
     t = tc;
     px = x - tc * c.tx;
     py = y - tc * c.ty;
+    plane = c;
   }
   const n = nearestOnCentreline(p, px, py, near);
   if (n.d >= r.reachM) return false;
   const bed = bedAt(p, n.s);
-  const rise = (r.capRiseM === 0 ? slopeRiseM(n.d) : riseAt(r, n.d)) + (t > 0 ? HEADWALL_RISE * t : 0);
+  const section = r.capRiseM === 0 ? slopeRiseM(n.d) : riseAt(r, n.d);
+  const rise = section + (t > 0 ? HEADWALL_RISE * t : 0);
   out.d = t > 0 ? n.d + t : n.d;
   out.u = bed + rise;
   out.l = p.cutOnly ? Number.NEGATIVE_INFINITY : bed - rise;
+  if (mode === "ground" && plane !== null && plane.tunnel) {
+    // The foot's offset along the plane, across the track: the plane's direction is its normal turned a quarter.
+    const across = (px - plane.x) * -plane.ty + (py - plane.y) * plane.tx;
+    const skyline = plane.zM + portalRetainV(across);
+    // Only where the skyline stands over the approach's own section; elsewhere the envelope stays bit for bit.
+    if (skyline > bed + section) out.u = skyline + HEADWALL_RISE * t;
+  }
   return true;
 }
 
 /**
  * The analytic conformed height at plan (x, y) over natural height `natural`
- * (NaN off the map) for `pieces`, with their reach at `lod` and the query
- * planes in `clipKeys` clipping too. The effective ground (`ground.ts`) evaluates it at
- * points; the renderer's chunk pass evaluates the same envelopes on its
- * sub-lattice.
+ * (NaN off the map) for `pieces`, with their reach at `lod`, the query
+ * planes in `clipKeys` clipping too, and tunnel ends as `mode` treats them
+ * (`EnvelopeMode`). The effective ground (`ground.ts`) evaluates the same
+ * envelopes at points in `"ground"` mode; the renderer's chunk pass evaluates
+ * them on its sub-lattice in `"underlay"` mode.
  */
-export function conformedHeightM(pieces: Iterable<EarthworkPiece>, x: number, y: number, natural: number, lod: EarthworkLod = 0, clipKeys: ReadonlySet<string> | null = null): number {
+export function conformedHeightM(
+  pieces: Iterable<EarthworkPiece>,
+  x: number,
+  y: number,
+  natural: number,
+  lod: EarthworkLod = 0,
+  clipKeys: ReadonlySet<string> | null = null,
+  mode: EnvelopeMode = "underlay",
+): number {
   let u = Infinity;
   let l = -Infinity;
   const e = scratchEnvelope;
   for (const p of pieces) {
     const r = reachAt(p, lod);
     if (x < r.minX || x > r.maxX || y < r.minY || y > r.maxY) continue;
-    if (!envelopeAt(p, r, x, y, clipKeys, scratchNear, e)) continue;
+    if (!envelopeAt(p, r, x, y, clipKeys, scratchNear, e, mode)) continue;
     if (e.u < u) u = e.u;
     if (e.l > l) l = e.l;
   }

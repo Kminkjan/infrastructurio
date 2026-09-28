@@ -52,6 +52,12 @@ import {
  * own section covers the cone), so a chained drag sees the ground a single
  * drag would. Pieces are found through a grid of their reach boxes. Node
  * results without a clip are cached until the next edit.
+ *
+ * **Portals** (D4 second feel-check fixes, 2026-09-28). The envelopes are
+ * evaluated in `"ground"` mode (`earthworks.ts`, "Portals retain the hill"):
+ * behind a tunnel portal the effective ground is the natural hill up to the
+ * portal's retained skyline, trimmed at 45° above it, not the 3–5 m pit the
+ * headwall from the track bed carved there before.
  */
 
 /** A network revision's settled earthwork pieces, for the renderer to mesh (a new map per revision; never mutate it). */
@@ -197,7 +203,7 @@ export class EffectiveGround implements GroundQuery {
     let l = -Infinity;
     const e = this.envelope;
     for (const p of near) {
-      if (!envelopeAt(p, p, x, y, clip, this.near, e)) continue;
+      if (!envelopeAt(p, p, x, y, clip, this.near, e, "ground")) continue;
       if (e.u < u) u = e.u;
       if (e.l > l) l = e.l;
     }

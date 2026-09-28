@@ -21,7 +21,7 @@ export { HISTORY_DEPTH } from "../track/history";
 // The earthworks rule and the effective ground (D4 feel-check fixes, 2026-09-28): the renderer meshes what the core
 // judges against.
 export type { GroundView } from "../track/ground";
-export type { ChainAdjacency, ChainStep, ChainTopology, ClipPlane, EarthworkLod, EarthworkPiece, Envelope, PieceInput, PieceReach } from "../track/earthworks";
+export type { ChainAdjacency, ChainStep, ChainTopology, ClipPlane, EarthworkLod, EarthworkPiece, Envelope, EnvelopeMode, PieceInput, PieceReach } from "../track/earthworks";
 export {
   BED_BELOW_TRACK_M,
   CAP_FADE_M,
@@ -60,6 +60,9 @@ export {
   withPlanes,
   withReach,
 } from "../track/earthworks";
+// The portal's outline (D4 second feel-check fixes, 2026-09-28): the earthworks rule retains the hill behind a
+// tunnel portal up to `portalRetainV`, and the renderer draws its portal and hill plug from the same numbers.
+export { PORTAL_HALF_WIDTH_M, PORTAL_RETAIN_ABOVE_TOP_M, PORTAL_TOP_V, PORTAL_WING_RUN, portalRetainV, portalSkylineV } from "../track/portal";
 export type { Drag, HeightMode, PlanFit, PlanPointMm, TrackPlan } from "../track/planner";
 export { DEFAULT_RADIUS_CAP_M, MAGNET_RANGE_NODES } from "../track/planner";
 export type { Diff, PieceRecord } from "../track/authored";
