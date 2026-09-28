@@ -3,7 +3,6 @@ import { autoGradeSamples, describeAutoGrade, measureAutoGrade } from "../../../
 import { forAll, pick } from "../../../tests/support/forall";
 import { diorama } from "../../../tests/support/groundPlans";
 import { makeTerrain } from "../../../tests/support/makeTerrain";
-import { simOn } from "../../../tests/support/simOn";
 import { type NodeRef, type PieceSpec, resolvePiece } from "../geometry/piece";
 import { type Heading, HEADINGS, SQRT3, stepLengthMm, stepOf } from "../lattice";
 import type { Command, Result } from "../sim/api";
