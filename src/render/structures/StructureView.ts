@@ -1,6 +1,6 @@
 import { BoxGeometry, BufferAttribute, BufferGeometry, Group, type Material, Matrix4, Mesh, MeshBasicMaterial, type Ray, Raycaster, Scene, Vector3 } from "three";
 import { centrelineIndex, nearestOnCentreline, sampleCentrelineEvery } from "../../core/geometry/sample";
-import type { NetworkPiece, NetworkView, Terrain } from "../../core/sim/api";
+import type { GroundQuery, NetworkPiece, NetworkView, Terrain } from "../../core/sim/api";
 import type { AssetRegistry } from "../art/AssetRegistry";
 import { EARTHWORK_ATTRIBUTE, EARTHWORK_ITEM_SIZE } from "../art/shaderChunks/earthwork";
 import { palette } from "../art/palette";
@@ -24,11 +24,13 @@ import {
   portalVariant,
   spanVariant,
   unpackArch,
+  unpackPortal,
 } from "./assets";
-import { BORE_HALF_M, BORE_SPRING_V, DECK_HALF_M, FOOT_SINK_M, PARAPET_TOP_V, PORTAL_HALF_WIDTH_M } from "./dimensions";
+import { BORE_HALF_M, BORE_SPRING_V, DECK_HALF_M, FOOT_SINK_M, PARAPET_TOP_V, PORTAL_HALF_WIDTH_M, PORTAL_MAX_WING_M, PORTAL_WING_SPLAY_SIN } from "./dimensions";
 import { type BridgeLayout, type LayoutEnv, layoutBridge } from "./layout";
 import { GeometrySink, bend, place } from "./place";
-import { HillPlug, MOUND_CROWN_HALF_M, MOUND_END_RUN, MOUND_FLAT_M, MOUND_SIDE_RUN, PLUG_EDGE_M, PLUG_FADE_M, type PortalApproach, type PortalFrame, PLUG_UNDER_COPING_M, portalWings } from "./plug";
+import { HillPlug, PlugSurface, type PortalApproach, type PortalFrame, portalWings } from "./plug";
+import { BACKFILL_REACH_S_M, BACKFILL_REACH_U_M, type PortalWings, WING_PIER_ALONG_M, wingAcross } from "./portalOutline";
 import { type PathPoint, RunPath } from "./runPath";
 import { type StructureRun, isPortalEnd, structureRuns } from "./runs";
 
@@ -67,13 +69,29 @@ export interface StructureViewOptions {
   readonly requestFrame: () => void;
   readonly now: () => number;
   readonly budgetMs?: number;
-  /** The ground piers and abutments stand on (the drawn, conformed surface); the natural ground when omitted. */
+  /**
+   * The ground as the terrain mesh draws it (the conformed surface; behind a tunnel portal the underlay under its
+   * plug): piers and abutments stand on it, wings see it in front of them, plugs draw only over it. The natural
+   * ground when omitted.
+   */
   readonly groundM?: (x: number, y: number) => number;
   /**
-   * The other tracks' lowest cut envelope over a plan box, leaving out the chain clipped at node key `except`
-   * (`EarthworksView.cutEnvelopeIn`): hill plugs stay under it. None when omitted.
+   * The core's effective ground over a plan box (`EarthworksView.effectiveIn`): behind a tunnel portal the hill the
+   * portal retains, which the plug draws. The drawn ground when omitted.
    */
-  readonly cutEnvelopeIn?: (box: { minX: number; minY: number; maxX: number; maxY: number }, except: string) => (x: number, y: number) => number;
+  readonly effectiveIn?: (box: Box) => (x: number, y: number) => number;
+  /**
+   * The other tracks' lowest cut envelope over a plan box, leaving out the chains clipped at the node keys in
+   * `except` (a run's portal nodes: both approaches; `EarthworksView.cutEnvelopeIn`): the plugs' backfill stays under
+   * it, and the wings retain the hill as it leaves it. None when omitted.
+   */
+  readonly cutEnvelopeIn?: (box: Box, except: readonly string[]) => (x: number, y: number) => number;
+  /** The terrain mesh's earthwork attribute over a plan box (`EarthworksView.attributeIn`), for the plugs' outlines. */
+  readonly attributeIn?: (box: Box) => (x: number, y: number, natural: number, drawn: number, out: Float64Array) => void;
+  /** The plan box of the underlay's notch behind the tunnel plane at node key `key` (`EarthworksView.notchBox`). */
+  readonly notchBox?: (key: string) => Box | undefined;
+  /** The core's effective ground at nodes, for the portal definition at buffer ends (`isPortal`); the natural terrain when omitted. */
+  readonly ground?: GroundQuery;
   /** False draws no structures (`?structures=0`, for before/after checks). */
   readonly enabled?: boolean;
 }
@@ -135,6 +153,13 @@ const OTHER_SAMPLE_M = 0.5;
 const PROXY_CHORD_M = 6;
 
 const P: PathPoint = { x: 0, y: 0, z: 0, tx: 1, ty: 0 };
+
+type Box = { readonly minX: number; readonly minY: number; readonly maxX: number; readonly maxY: number };
+
+/** A plug reaches at most this far behind its face (the underlay's notch under a tall hill), and this far across it. */
+const PLUG_MAX_REACH_M = 60;
+/** The underlay's notch lies within this of the track behind a portal (where the retained skyline tops the section). */
+const NOTCH_HALF_WIDTH_M = 12;
 
 export class StructureView {
   readonly group = new Group();
@@ -338,6 +363,13 @@ export class StructureView {
     return out;
   }
 
+  /** Each built portal's frame and its wings as drawn (checks and e2e: the masonry's outline). */
+  get portalOutlines(): readonly { readonly frame: PortalFrame; readonly wings: PortalWings }[] {
+    const out: { frame: PortalFrame; wings: PortalWings }[] = [];
+    for (const b of this.built.values()) for (const p of b.plugs) out.push({ frame: p.frame, wings: p.wings });
+    return out;
+  }
+
   /** The highest hill plug surface at sim plan (x, y), or NaN where no plug is; picking marches it with the terrain. */
   plugHeightAt(x: number, y: number): number {
     let best = Number.NaN;
@@ -532,43 +564,90 @@ export class StructureView {
     const plugMeshes: Mesh[] = [];
     const counts = { arch: 0, solid: 0, truss: 0, girder: 0, piers: 0, abutments: 0, portals: 0 };
     let topZ = -Infinity;
-    const open = [0, 1].filter((end) => isPortalEnd(this.options.terrain, run, end as 0 | 1)).length;
-    // A plug reaches at most half-way to the other portal, whose own plug covers the rest (the whole run at a dead
-    // end), so a larger plug never spills over the other portal's face and wings.
-    const plugCapM = open === 2 ? path.lengthM / 2 : path.lengthM;
-    for (const end of [0, 1] as const) {
-      if (!isPortalEnd(this.options.terrain, run, end)) continue;
+    const terrain = this.options.terrain;
+    const drawn = this.options.groundM;
+    // The ends that open to daylight (the core's portal definition, over its effective ground), each with its frame.
+    const ends = ([0, 1] as const).filter((end) => isPortalEnd(terrain, run, end, this.options.ground ?? null));
+    const portals = ends.map((end) => {
       path.at(end === 0 ? 0 : path.lengthM, P);
       const dir = end === 0 ? 1 : -1;
       const frame: PortalFrame = { x: P.x, y: P.y, z: P.z, tx: dir * P.tx, ty: dir * P.ty };
-      const kind = run.ends[end];
-      const approach: PortalApproach = kind === "ground" ? "ground" : kind === "bridge" ? "bridge" : "buffer";
-      const drawn = this.options.groundM;
-      // The wings run to the ground drawn in front of the face (the approach's cutting ends at the portal plane since
-      // the D4 feel-check fixes), so they fit the local cutting.
-      const wings = portalWings(this.options.terrain, frame, approach, drawn ? (x, y) => drawn(x, y) : undefined, this.otherFormations(run, end, P.x, P.y));
-      // The face reaches under the ground in front: a bridge or a low approach needs it deeper.
-      const front = naturalHeightM(this.options.terrain, this.lat, P.x - frame.tx * 3, P.y - frame.ty * 3);
-      const depth = approach === "ground" ? 1.5 : Math.min(12.7, Math.max(1.5, P.z - (Number.isNaN(front) ? P.z : front) + 1.2));
-      const asset = this.registry.get(PORTAL_KIND, portalVariant(wings.left, wings.right, depth), 0);
-      for (const g of Object.values(asset.slots)) if (g) place(sink, g, frame);
-      counts.portals += 1;
-      // The plug is the mound over the bore where the ground behind the face is lower than the face top (plug.ts): its
-      // region is the mound's footprint over the lowest ground a few metres behind the face, plus the fade band. Since
-      // the D4 feel-check fixes there is no approach bowl to fill (the cutting stops at the portal plane).
-      const skyTop = P.z + portalSkylineV(0) + PLUG_UNDER_COPING_M;
-      const behind = this.groundM(P.x + frame.tx * (MOUND_FLAT_M - 1), P.y + frame.ty * (MOUND_FLAT_M - 1));
-      const rise = Math.max(0, skyTop - (Number.isNaN(behind) ? P.z : Math.min(behind, skyTop)));
-      const depthM = Math.min(45, plugCapM, Math.max(10, MOUND_FLAT_M + MOUND_END_RUN * rise + PLUG_FADE_M + PLUG_EDGE_M));
-      const halfWidthM = Math.min(45, Math.max(8, PORTAL_HALF_WIDTH_M + Math.max(wings.left, wings.right) + PLUG_FADE_M + PLUG_EDGE_M, MOUND_CROWN_HALF_M + MOUND_SIDE_RUN * rise + PLUG_FADE_M + PLUG_EDGE_M));
       const node = run.nodes[end];
-      const reach = Math.hypot(depthM, halfWidthM);
-      const cut = this.options.cutEnvelopeIn?.({ minX: P.x - reach, minY: P.y - reach, maxX: P.x + reach, maxY: P.y + reach }, `${node.q},${node.r},${node.zMm}`);
-      const plug = new HillPlug(this.options.terrain, this.shading, frame, wings, depthM, halfWidthM, drawn ? (x, y) => drawn(x, y) : undefined, cut);
-      plugs.push(plug);
-      const pm = this.plugMesh(plug);
-      if (pm) plugMeshes.push(pm);
-      topZ = Math.max(topZ, P.z + portalSkylineV(0) + 1, plug.maxZ);
+      const key = `${node.q},${node.r},${node.zMm}`;
+      // Behind the face the plug reaches its backfill's reach and the approach's underlay notch (the 45° headwall's
+      // cut the terrain mesh draws under it), at most PLUG_MAX_REACH_M.
+      const notch = this.options.notchBox?.(key);
+      let notchS = 0;
+      if (notch) {
+        for (const [x, y] of [
+          [notch.minX, notch.minY],
+          [notch.minX, notch.maxY],
+          [notch.maxX, notch.minY],
+          [notch.maxX, notch.maxY],
+        ] as const) notchS = Math.max(notchS, (x - frame.x) * frame.tx + (y - frame.y) * frame.ty);
+      }
+      return { end, frame, key, notchS: Math.min(PLUG_MAX_REACH_M, notchS + 1) };
+    });
+    const except = portals.map((p) => p.key);
+    // What a portal reads lies within this of its node; two portals whose squares meet share one set of readers.
+    const radius = (p: (typeof portals)[number]) => Math.max(BACKFILL_REACH_S_M, BACKFILL_REACH_U_M, p.notchS, PORTAL_HALF_WIDTH_M + PORTAL_MAX_WING_M) + 2;
+    const squares = portals.map((p) => ({ minX: p.frame.x - radius(p), minY: p.frame.y - radius(p), maxX: p.frame.x + radius(p), maxY: p.frame.y + radius(p) }));
+    const a = squares[0];
+    const b = squares[1];
+    const shared = a !== undefined && b !== undefined && !(a.maxX < b.minX || b.maxX < a.minX || a.maxY < b.minY || b.maxY < a.minY);
+    const groups = shared && a && b ? [{ box: { minX: Math.min(a.minX, b.minX), minY: Math.min(a.minY, b.minY), maxX: Math.max(a.maxX, b.maxX), maxY: Math.max(a.maxY, b.maxY) }, members: [0, 1] }] : squares.map((box, i) => ({ box, members: [i] }));
+    for (const group of groups) {
+      const effectiveM = this.options.effectiveIn?.(group.box);
+      const cutM = this.options.cutEnvelopeIn?.(group.box, except);
+      const attributeM = this.options.attributeIn?.(group.box);
+      const members = group.members.map((i) => {
+        const p = portals[i] as (typeof portals)[number];
+        const kind = run.ends[p.end];
+        const approach: PortalApproach = kind === "ground" ? "ground" : kind === "bridge" ? "bridge" : "buffer";
+        const f = p.frame;
+        // The wings retain the hill as the other tracks' cuttings leave it (the approach's own is not).
+        const wings = portalWings(terrain, f, approach, drawn ? (x, y) => drawn(x, y) : undefined, this.otherFormations(run, p.end, f.x, f.y), cutM);
+        // The face reaches under the ground in front: a bridge or a low approach needs it deeper.
+        const front = naturalHeightM(terrain, this.lat, f.x - f.tx * 3, f.y - f.ty * 3);
+        const depth = approach === "ground" ? 1.5 : Math.min(12.7, Math.max(1.5, f.z - (Number.isNaN(front) ? f.z : front) + 1.2));
+        const variant = portalVariant(wings.left, wings.right, depth, wings.steepLeft, wings.steepRight);
+        const asset = this.registry.get(PORTAL_KIND, variant, 0);
+        for (const g of Object.values(asset.slots)) if (g) place(sink, g, f);
+        counts.portals += 1;
+        // The wings as drawn (whole decimetres), so the plug's outline follows the masonry.
+        const drawnWings = unpackPortal(variant);
+        return { portal: p, wings: { left: drawnWings.wingLeftM, right: drawnWings.wingRightM, steepLeft: drawnWings.steepLeft, steepRight: drawnWings.steepRight } };
+      });
+      const surface = new PlugSurface(
+        terrain,
+        members.map((m) => ({ frame: m.portal.frame, wings: m.wings })),
+        { ...(drawn ? { drawnM: drawn } : {}), ...(effectiveM ? { effectiveM } : {}), ...(cutM ? { cutM } : {}), ...(attributeM ? { attributeM } : {}) },
+      );
+      // A two-portal run's plugs meet at its middle, square to the track there (one surface, so the seam is exact).
+      let split: { x: number; y: number; tx: number; ty: number } | undefined;
+      if (members.length === 2) {
+        path.at(path.lengthM / 2, P);
+        split = { x: P.x, y: P.y, tx: P.tx, ty: P.ty };
+      }
+      members.forEach((m, i) => {
+        const f = m.portal.frame;
+        const longest = Math.max(m.wings.left, m.wings.right);
+        const across = wingAcross(longest + (WING_PIER_ALONG_M[1] ?? 0)) + 1;
+        const region = {
+          portal: i,
+          // In front of the face: the fill behind the splayed wings and the bank beyond their ends.
+          sMin: -(PORTAL_WING_SPLAY_SIN * (longest + 1) + BACKFILL_REACH_U_M * PORTAL_WING_SPLAY_SIN + 1),
+          sMax: Math.min(PLUG_MAX_REACH_M, Math.max(BACKFILL_REACH_S_M + 0.5, m.portal.notchS)),
+          uMax: Math.max(BACKFILL_REACH_U_M + 0.5, NOTCH_HALF_WIDTH_M, across),
+          // The end 0 portal keeps the side before the middle, the end 1 portal the side after it.
+          ...(split ? { split: m.portal.end === 0 ? split : { x: split.x, y: split.y, tx: -split.tx, ty: -split.ty } } : {}),
+        };
+        const plug = new HillPlug(terrain, this.shading, surface, region);
+        plugs.push(plug);
+        const pm = this.plugMesh(plug);
+        if (pm) plugMeshes.push(pm);
+        topZ = Math.max(topZ, f.z + portalSkylineV(0) + 1, plug.maxZ);
+      });
     }
     const mesh = this.meshOf(sink, `tunnel portals ${run.pieces.length} pieces`, this.tunnelGroup);
     const proxies = run.pieces.map((rp) => this.proxiesFor(rp.piece, PICK_LAYER.TUNNEL, -0.4, BORE_SPRING_V + BORE_HALF_M, BORE_HALF_M + 0.3)).flat();

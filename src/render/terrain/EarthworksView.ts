@@ -1,8 +1,11 @@
 import { type CentrelineIndex, centrelineIndex, nearestOnCentreline } from "../../core/geometry/sample";
-import { type GroundView, type NetworkView, type Terrain, earthworkPieces, networkAdjacency, toWorld } from "../../core/sim/api";
+import { type GroundQuery, type GroundView, type NetworkView, type Terrain, conformedHeightM, earthworkPieces, groundMmAt, heightDmAt, networkAdjacency, toWorld } from "../../core/sim/api";
 import type { SceneryClearance } from "../scenery/clearance";
+import { type PortalFrame, frameLocal } from "../structures/plug";
+import { BACKFILL_REACH_U_M, backfillV, behindFront } from "../structures/portalOutline";
+import { RunPath } from "../structures/runPath";
 import { isPortalEnd, structureRuns } from "../structures/runs";
-import { ChunkPass, DrawnHeightfield, type EarthworkPiece, type Envelope, FORMATION_HALF_WIDTH_M, chunksTouching, envelopeAt, nearestOnPiece, piecesTouching } from "./earthworks";
+import { ChunkPass, DrawnHeightfield, type EarthworkPiece, type Envelope, FORMATION_HALF_WIDTH_M, chunksTouching, earthworkPotential, encodeEarthworkPotential, envelopeAt, lodLattice, naturalHeightM, nearestOnPiece, piecesTouching } from "./earthworks";
 import { type buildEarthworkChunk, earthworkChunkSteps } from "./earthworkMesh";
 import type { TerrainLod } from "./offsetGrid";
 import { type MeshData, buildChunkData } from "./terrainGeometry";
@@ -51,11 +54,13 @@ export const SCENERY_MOVED_M = 0.1;
  */
 export const PORTAL_SCENERY_CLEARANCE_M = 9;
 
-/** A bridge piece or a portal the scenery gives way to: a centreline or a disc, and its plan box. */
+/** A bridge piece or a portal the scenery gives way to: a centreline or a disc (and a portal's backfill), and its plan box. */
 interface Clearing {
   readonly index: CentrelineIndex | null;
   readonly x: number;
   readonly y: number;
+  /** A portal's frame: its backfill (`portalOutline.ts`) buries what stands under it. */
+  readonly portal?: PortalFrame;
   readonly minX: number;
   readonly minY: number;
   readonly maxX: number;
@@ -120,12 +125,15 @@ export class EarthworksView {
   private maxCutM = 0;
   private maxFillM = 0;
   private readonly near = { d: 0, s: 0 };
+  private readonly local = { s: 0, u: 0 };
+  private readonly lat0;
   /** The step in flight: its queue key (still at the queue's head) and its remaining slices. */
   private current: { readonly key: string; readonly work: Generator<void, void, void> } | undefined;
 
   constructor(private readonly options: EarthworksViewOptions) {
     this.heightfield = new DrawnHeightfield(options.terrain, 0);
     this.heightfieldLod1 = new DrawnHeightfield(options.terrain, 1);
+    this.lat0 = lodLattice(options.terrain, 0);
     this.budgetMs = options.budgetMs ?? EARTHWORKS_BUDGET_MS;
     this.target = options.target;
     this.scenery = options.scenery;
@@ -219,22 +227,106 @@ export class EarthworksView {
 
   /**
    * The lowest cut envelope (m) of the earthwork pieces reaching into a plan box, as a function of (x, y) (Infinity
-   * where none reaches), leaving out the chain whose fixed clip plane is at node key `except` (a portal's own
-   * approach, whose headwall the portal face stands in). The hill plug is capped by it (`plug.ts`).
+   * where none reaches), leaving out the chains whose fixed clip plane is at one of the node keys in `except` (a
+   * tunnel run's portals: both approaches, whose headwalls the faces stand in). In `"ground"` mode, as the core
+   * judges: the hill plugs' backfill is capped by it (`plug.ts`), and the wings retain the hill as it leaves it.
    */
-  cutEnvelopeIn(box: { minX: number; minY: number; maxX: number; maxY: number }, except: string): (x: number, y: number) => number {
-    const pieces = piecesTouching(this.pieces.values(), box).filter((p) => !p.planes.some((c) => c.fixed && c.key === except));
+  cutEnvelopeIn(box: { minX: number; minY: number; maxX: number; maxY: number }, except: readonly string[]): (x: number, y: number) => number {
+    const pieces = piecesTouching(this.pieces.values(), box).filter((p) => !p.planes.some((c) => c.fixed && except.includes(c.key)));
     const near = { d: 0, s: 0 };
     const e: Envelope = { u: 0, l: 0, d: 0 };
     return (x, y) => {
       let u = Number.POSITIVE_INFINITY;
       for (const p of pieces) {
         if (x < p.minX || x > p.maxX || y < p.minY || y > p.maxY) continue;
-        if (envelopeAt(p, p, x, y, null, near, e) && e.u < u) u = e.u;
+        if (envelopeAt(p, p, x, y, null, near, e, "ground") && e.u < u) u = e.u;
       }
       return u;
     };
   }
+
+  /**
+   * The core's effective ground (m) over a plan box, as a function of (x, y): the conformed height of every piece
+   * reaching into the box in `"ground"` mode (`core/track/earthworks.ts`, "Portals retain the hill"), NaN off the map.
+   * Behind a tunnel portal it is the hill the portal retains, where the terrain mesh keeps the underlay (the 45°
+   * headwall from the track bed); the hill plug draws it (`plug.ts`). Elsewhere it equals the drawn ground.
+   */
+  effectiveIn(box: { minX: number; minY: number; maxX: number; maxY: number }): (x: number, y: number) => number {
+    const pieces = piecesTouching(this.pieces.values(), box);
+    const lat = this.lat0;
+    const terrain = this.options.terrain;
+    return (x, y) => conformedHeightM(pieces, x, y, naturalHeightM(terrain, lat, x, y), 0, null, "ground");
+  }
+
+  /**
+   * The terrain mesh's `earthwork` attribute (m) at plan points over a box, as the chunk pass writes it
+   * (`ChunkPass.attributesAt`): the encoded potential (from the core's `"ground"`-mode cut envelope, so it follows the
+   * visible ground behind tunnel portals), the drawn departure `drawn − natural` and the plan distance to the nearest
+   * centreline; zeros where no piece reaches. The hill plug gives it to the vertices where it lies on the terrain, so
+   * its outline matches the terrain's colours and facets (`plug.ts`).
+   */
+  attributeIn(box: { minX: number; minY: number; maxX: number; maxY: number }): (x: number, y: number, natural: number, drawn: number, out: Float64Array) => void {
+    const pieces = piecesTouching(this.pieces.values(), box);
+    const near = { d: 0, s: 0 };
+    const e: Envelope = { u: 0, l: 0, d: 0 };
+    return (x, y, natural, drawn, out) => {
+      let u = Number.POSITIVE_INFINITY;
+      let l = Number.NEGATIVE_INFINITY;
+      let d = Number.POSITIVE_INFINITY;
+      for (const p of pieces) {
+        if (x < p.minX || x > p.maxX || y < p.minY || y > p.maxY) continue;
+        if (!envelopeAt(p, p, x, y, null, near, e, "ground")) continue;
+        if (e.u < u) u = e.u;
+        if (e.l > l) l = e.l;
+        if (e.d < d) d = e.d;
+      }
+      if (u === Number.POSITIVE_INFINITY) {
+        out[0] = 0;
+        out[1] = 0;
+        out[2] = 0;
+        return;
+      }
+      out[0] = encodeEarthworkPotential(earthworkPotential(natural, u, l));
+      out[1] = Math.abs(drawn - natural) > 1e-6 ? drawn - natural : 0;
+      out[2] = d;
+    };
+  }
+
+  /**
+   * The plan box of the pieces whose chains end at a tunnel plane through node key `key` (a portal's approach): where
+   * the underlay's headwall can notch the hill behind that portal. Undefined when none does.
+   */
+  notchBox(key: string): { minX: number; minY: number; maxX: number; maxY: number } | undefined {
+    let box: { minX: number; minY: number; maxX: number; maxY: number } | undefined;
+    for (const p of this.pieces.values()) {
+      if (!p.planes.some((c) => c.fixed && c.tunnel && c.key === key)) continue;
+      box = box ? { minX: Math.min(box.minX, p.minX), minY: Math.min(box.minY, p.minY), maxX: Math.max(box.maxX, p.maxX), maxY: Math.max(box.maxY, p.maxY) } : { minX: p.minX, minY: p.minY, maxX: p.maxX, maxY: p.maxY };
+    }
+    return box;
+  }
+
+  /**
+   * The core's effective ground at points and nodes over the view's pieces, for the core's portal definition at
+   * buffer ends (`isPortal`): the same rule and rounding as the world's `EffectiveGround`, without its caches.
+   */
+  readonly ground: GroundQuery = {
+    heightM: (x, y) => conformedHeightM(this.pieces.values(), x, y, naturalHeightM(this.options.terrain, this.lat0, x, y), 0, null, "ground"),
+    nodeMm: (q, r) => {
+      const t = this.options.terrain;
+      const water = groundMmAt(t, { q, r });
+      if (water === undefined) return undefined;
+      const bedDm = heightDmAt(t, { q, r }) ?? 0;
+      return water > bedDm * 100 ? water : this.ground.nodeEarthMm(q, r);
+    },
+    nodeEarthMm: (q, r) => {
+      const dm = heightDmAt(this.options.terrain, { q, r });
+      if (dm === undefined) return undefined;
+      const w = toWorld({ q, r });
+      const h = this.ground.heightM(w.x, w.y);
+      return Number.isNaN(h) ? dm * 100 : Math.round(h * 1000);
+    },
+    meets: (minX, minY, maxX, maxY) => piecesTouching(this.pieces.values(), { minX, minY, maxX, maxY }).length > 0,
+  };
 
   /** A ground piece's current reach at LOD0 and LOD1 (settled beside its neighbours), or undefined (tests, checks). */
   reachOf(key: string): readonly [number, number] | undefined {
@@ -242,20 +334,49 @@ export class EarthworksView {
     return p ? [p.reachM, p.lod1.reachM] : undefined;
   }
 
-  /** Whether earthworks claim plan (x, y) for scenery: on a formation, under a bridge, at a portal, or where the drawn ground moved. */
+  /**
+   * Whether earthworks claim plan (x, y) for scenery: on a formation, under a bridge, at a portal, or where the visible
+   * ground moved. The visible ground is the drawn one, except behind a tunnel portal, where the hill plug draws the
+   * core's effective ground (the hill the portal retains) and the backfill over the underlay's notch: scenery there
+   * stays on the hill unless the backfill buries it (D4 second feel-check fixes; tested against the underlay, the
+   * notch was a treeless chevron behind every portal).
+   */
   clearsScenery(x: number, y: number, near: readonly EarthworkPiece[], clearing: readonly Clearing[] = []): boolean {
     for (const p of near) {
       if (x < p.minX || x > p.maxX || y < p.minY || y > p.maxY) continue;
       if (nearestOnPiece(p, x, y, this.near).d <= SCENERY_CLEARANCE_M) return true;
     }
+    const natural = this.heightfield.naturalAtM(x, y);
+    let visible = Number.NEGATIVE_INFINITY;
     for (const c of clearing) {
       if (x < c.minX || x > c.maxX || y < c.minY || y > c.maxY) continue;
-      if (c.index ? nearestOnCentreline(c.index, x, y, this.near).d <= SCENERY_CLEARANCE_M : Math.hypot(x - c.x, y - c.y) <= PORTAL_SCENERY_CLEARANCE_M) return true;
+      if (c.index) {
+        if (nearestOnCentreline(c.index, x, y, this.near).d <= SCENERY_CLEARANCE_M) return true;
+        continue;
+      }
+      if (Math.hypot(x - c.x, y - c.y) <= PORTAL_SCENERY_CLEARANCE_M) return true;
+      const f = c.portal;
+      if (!f) continue;
+      const l = frameLocal(f, x, y, this.local);
+      if (behindFront(l.s, l.u) >= 0) visible = Math.max(visible, f.z + backfillV(l.s, l.u));
     }
-    if (this.heightfield.triangles.size === 0) return false;
-    const drawn = this.heightfield.heightAtM(x, y);
-    const natural = this.heightfield.naturalAtM(x, y);
+    if (this.heightfield.triangles.size === 0 && visible === Number.NEGATIVE_INFINITY) return false;
+    let drawn = this.heightfield.heightAtM(x, y);
+    if (drawn < natural - SCENERY_MOVED_M && this.behindTunnelPlane(x, y, near)) {
+      const effective = conformedHeightM(near, x, y, natural, 0, null, "ground");
+      if (effective > drawn) drawn = effective;
+    }
+    if (visible > drawn) drawn = visible;
     return Math.abs(drawn - natural) > SCENERY_MOVED_M;
+  }
+
+  /** Whether (x, y) lies past a tunnel end's clip plane of a piece whose reach box holds it. */
+  private behindTunnelPlane(x: number, y: number, near: readonly EarthworkPiece[]): boolean {
+    for (const p of near) {
+      if (x < p.minX || x > p.maxX || y < p.minY || y > p.maxY) continue;
+      for (const c of p.planes) if (c.fixed && c.tunnel && (x - c.x) * c.tx + (y - c.y) * c.ty > 0) return true;
+    }
+    return false;
   }
 
   /**
@@ -304,11 +425,18 @@ export class EarthworksView {
     for (const run of structureRuns(network)) {
       if (run.structure !== "tunnel") continue;
       for (const end of [0, 1] as const) {
-        if (!isPortalEnd(this.options.terrain, run, end)) continue;
+        if (!isPortalEnd(this.options.terrain, run, end, this.ground)) continue;
         const n = run.nodes[end];
         const { x, y } = toWorld(n);
-        const r = PORTAL_SCENERY_CLEARANCE_M;
-        wanted.set(`p:${n.q},${n.r},${n.zMm}`, () => ({ index: null, x, y, minX: x - r, minY: y - r, maxX: x + r, maxY: y + r }));
+        // The disc around the face and the wings' roots, and the backfill's reach behind the face.
+        const r = Math.max(PORTAL_SCENERY_CLEARANCE_M, BACKFILL_REACH_U_M + 1);
+        wanted.set(`p:${n.q},${n.r},${n.zMm}:${run.key}`, () => {
+          const path = RunPath.ofRun(run.pieces);
+          const p = { x: 0, y: 0, z: 0, tx: 1, ty: 0 };
+          path.at(end === 0 ? 0 : path.lengthM, p);
+          const dir = end === 0 ? 1 : -1;
+          return { index: null, x, y, portal: { x: p.x, y: p.y, z: p.z, tx: dir * p.tx, ty: dir * p.ty }, minX: x - r, minY: y - r, maxX: x + r, maxY: y + r };
+        });
       }
     }
     const t = this.options.terrain;
@@ -392,12 +520,12 @@ export class EarthworksView {
   }
 }
 
-/** Whether two preparations of one piece draw the same: equal reaches, cap rises and clip planes. */
+/** Whether two preparations of one piece draw the same: equal reaches, cap rises and clip planes (a tunnel plane's too). */
 function sameSettled(a: EarthworkPiece, b: EarthworkPiece): boolean {
   if (a.reachM !== b.reachM || a.lod1.reachM !== b.lod1.reachM || a.capRiseM !== b.capRiseM || a.lod1.capRiseM !== b.lod1.capRiseM) return false;
   if (a.planes.length !== b.planes.length) return false;
   return a.planes.every((p, i) => {
     const q = b.planes[i];
-    return q !== undefined && p.x === q.x && p.y === q.y && p.tx === q.tx && p.ty === q.ty && p.fixed === q.fixed && p.key === q.key;
+    return q !== undefined && p.x === q.x && p.y === q.y && p.tx === q.tx && p.ty === q.ty && p.fixed === q.fixed && p.key === q.key && p.tunnel === q.tunnel && p.zM === q.zM;
   });
 }

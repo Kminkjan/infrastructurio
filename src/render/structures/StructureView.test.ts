@@ -6,6 +6,7 @@ import { type Command, type NetworkView, type PieceSpec, type Structure, toWorld
 import { createWorld } from "../../core/sim/world";
 import { AssetRegistry } from "../art/AssetRegistry";
 import { PICK_LAYER, pickMask } from "../picking/layers";
+import { EarthworksView } from "../terrain/EarthworksView";
 import { waterPlane } from "../terrain/heightfieldRay";
 import { computeTerrainShading } from "../terrain/terrainShading";
 import { StructureView } from "./StructureView";
@@ -36,6 +37,9 @@ function setup(options: { clockStepMs?: number; groundM?: (x: number, y: number)
   registerStructureAssets(registry);
   let t = 0;
   let frames = 0;
+  // The earthworks as the app wires them (the drawn ground, the core's effective ground, the other tracks' cuts),
+  // unless a test gives its own drawn ground.
+  const earthworks = options.groundM ? undefined : new EarthworksView({ terrain, target: { shading, replaceChunk: () => true }, requestFrame: () => {}, now: () => 0, budgetMs: Infinity });
   const view = new StructureView({
     terrain,
     registry,
@@ -48,6 +52,15 @@ function setup(options: { clockStepMs?: number; groundM?: (x: number, y: number)
     },
     now: () => (t += options.clockStepMs ?? 0),
     ...(options.groundM ? { groundM: options.groundM } : {}),
+    ...(earthworks
+      ? {
+          groundM: (x: number, y: number) => earthworks.heightfield.heightAtM(x, y),
+          effectiveIn: (box: { minX: number; minY: number; maxX: number; maxY: number }) => earthworks.effectiveIn(box),
+          cutEnvelopeIn: (box: { minX: number; minY: number; maxX: number; maxY: number }, except: readonly string[]) => earthworks.cutEnvelopeIn(box, except),
+          notchBox: (key: string) => earthworks.notchBox(key),
+          ground: earthworks.ground,
+        }
+      : {}),
   });
   const run = (cmd: Command) => {
     const result = world.run(cmd, true);
@@ -55,6 +68,7 @@ function setup(options: { clockStepMs?: number; groundM?: (x: number, y: number)
   };
   const build = (pieces: PieceSpec[], structure: Structure) => run({ type: "build-track", pieces, structure });
   const settle = () => {
+    if (earthworks) for (let i = 0; i < 100 && (earthworks.sync(world.network() as NetworkView, world.ground()) || earthworks.busy); i++);
     for (let i = 0; i < 100 && (view.sync(world.network() as NetworkView) || view.busy); i++);
     expect(view.stats.appliedRev).toBe(world.network().rev);
   };

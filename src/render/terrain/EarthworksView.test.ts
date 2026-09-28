@@ -9,9 +9,9 @@ import { type ClearableLayer, SceneryClearance } from "../scenery/clearance";
 import { EARTHWORK_ATTRIBUTE, EARTHWORK_ITEM_SIZE } from "../art/shaderChunks/earthwork";
 import { type EarthworkChunkTarget, EarthworksView, PORTAL_SCENERY_CLEARANCE_M, SCENERY_CLEARANCE_M } from "./EarthworksView";
 import { TerrainView } from "./TerrainView";
-import { SIDE_SLOPE_RUN } from "./earthworks";
+import { ChunkPass, REFINE, SIDE_SLOPE_RUN, piecesTouching } from "./earthworks";
 import type { EarthworkMeshData } from "./earthworkMesh";
-import { buildChunkData, chunkCounts } from "./terrainGeometry";
+import { CHUNK_NODES, buildChunkData, chunkCounts } from "./terrainGeometry";
 import { type TerrainShading, computeTerrainShading } from "./terrainShading";
 
 const material = new MeshBasicMaterial();
@@ -334,7 +334,9 @@ describe("earthworks view", () => {
     ];
     const terrain = makeTerrain(130, 70, (_q, _r, col) => 200 + Math.max(0, 60 - Math.abs(col - 64) * 4));
     // The same plan as a bridge 1 m over the ridge's 26 m crest, and as a tunnel 9 m under the 20 m land (15 m under
-    // the crest). Until D4's rules both lay at 20 m, a deck under the ridge and a tunnel no deeper than a cutting.
+    // the crest). Until D4's rules both lay at 20 m, a deck under the ridge and a tunnel no deeper than a cutting. The
+    // tunnel's buffer ends lie 9 m under the land, past the core's ±8 m band: dead ends inside the ground, no portals
+    // (`isPortal`; until the D4 second feel-check fixes the renderer opened portals there, under up to 12 m of cover).
     for (const [structure, zMm] of [
       ["bridge", 27_000],
       ["tunnel", 11_000],
@@ -350,12 +352,87 @@ describe("earthworks view", () => {
       const after = snapshotChunks(s.view, s.terrain);
       for (const [key, arrays] of natural) arrays.forEach((a, i) => expect(after.get(key)?.[i], `${structure} ${key}`).toEqual(a));
       // A bridge clears its corridor (4 m past its end is where its abutment stands); a tunnel only the ground around
-      // its portals (both ends open to daylight here).
-      expect(layer.cleared, structure).toEqual(structure === "bridge" ? [true, true, false, true, false] : [false, false, false, true, false]);
+      // its portals, and this one has none.
+      expect(layer.cleared, structure).toEqual(structure === "bridge" ? [true, true, false, true, false] : [false, false, false, false, false]);
       s.sim.execute({ type: "undo" });
       s.earthworks.sync(s.sim.network(), s.sim.ground());
       expect(layer.cleared.every((c) => !c)).toBe(true);
     }
+  });
+
+  it("clears scenery around a portal and in its approach's cutting, but keeps it on the hill the portal retains (D4 second feel-check fixes)", () => {
+    const y0 = 30 * 2.5 * Math.sqrt(3);
+    // Across the ridge at 15 m: 6 ground pieces in a cutting, 16 tunnel pieces, 8 ground (the core's inference); the
+    // west portal at (41, 30), x = 280 m, the tunnel running east, 7.8 m under the hill there.
+    const portalX = 280;
+    const points = [
+      { x: portalX + 3, y: y0 + 4 }, // on the portal's face and wings (the disc around the node)
+      { x: portalX + 5, y: y0 + 7.7 }, // on the hill behind the face, 9.2 m from the node: the underlay's notch
+      { x: portalX - 10, y: y0 + 8 }, // on the approach cutting's side slope
+      { x: portalX + 12, y: y0 + 14 }, // on the ridge, clear of everything
+    ];
+    const terrain = makeTerrain(130, 70, (_q, _r, col) => 200 + Math.max(0, 60 - Math.abs(col - 64) * 4));
+    const layer = new FakeLayer(points);
+    const s = ridgeSetup({ scenery: new SceneryClearance(terrain, [layer]) });
+    const pieces = s.run.map((p) => ({ ...p, from: { ...p.from, zMm: 15_000 }, z1Mm: 15_000 }));
+    const built = s.sim.execute(build(pieces));
+    expect(built.ok, JSON.stringify(built)).toBe(true);
+    expect(s.sim.network().pieces.map((p) => p.structure[0]).join("")).toBe("ggggggttttttttttttttttgggggggg");
+    for (let i = 0; i < 50 && (s.earthworks.sync(s.sim.network(), s.sim.ground()) || s.earthworks.busy); i++);
+    // The terrain mesh keeps the underlay's 45° headwall there (it cuts the hill), but the plug draws the hill the
+    // core retains, so the tree stays; tested against the underlay it was a treeless chevron behind every portal.
+    const notch = points[1] as { x: number; y: number };
+    expect(s.earthworks.heightfield.heightAtM(notch.x, notch.y)).toBeLessThan(s.earthworks.heightfield.naturalAtM(notch.x, notch.y) - 0.3);
+    expect(layer.cleared).toEqual([true, false, true, false]);
+    s.sim.execute({ type: "undo" });
+    for (let i = 0; i < 50 && (s.earthworks.sync(s.sim.network(), s.sim.ground()) || s.earthworks.busy); i++);
+    expect(layer.cleared.every((c) => !c)).toBe(true);
+  });
+
+  it("keeps the underlay's heights behind a portal but shades by the ground the core shows there (D4 second feel-check fixes)", () => {
+    const terrain = makeTerrain(130, 70, (_q, _r, col) => 200 + Math.max(0, 60 - Math.abs(col - 64) * 4));
+    const s = ridgeSetup();
+    const pieces = s.run.map((p) => ({ ...p, from: { ...p.from, zMm: 15_000 }, z1Mm: 15_000 }));
+    expect(s.sim.execute(build(pieces)).ok).toBe(true);
+    const ground = [...s.sim.ground().pieces.values()];
+    expect(ground.some((p) => p.planes.some((c) => c.fixed && c.tunnel))).toBe(true);
+    // The west portal at x = 280 m: the chunk holding the hill behind it.
+    const y0 = 30 * 2.5 * Math.sqrt(3);
+    const pass = new ChunkPass();
+    const cx = Math.floor(285 / (5 * CHUNK_NODES));
+    const cy = Math.floor(30 / CHUNK_NODES);
+    expect(pass.run(terrain, 0, cx, cy, piecesTouching(ground, ChunkPass.chunkBox(terrain, 0, cx, cy)))).toBe(true);
+    const sub = 5 / REFINE;
+    const at = (x: number, y: number) => {
+      const rs = Math.round(y / (sub * (Math.sqrt(3) / 2)));
+      return { qs: Math.round(x / sub - rs / 2), rs };
+    };
+    let notch = 0;
+    let front = 0;
+    for (let x = 270; x <= 292; x += 0.5) {
+      for (let y = y0 - 8; y <= y0 + 8; y += 0.5) {
+        const { qs, rs } = at(x, y);
+        const drawn = pass.departureAt(qs, rs);
+        const shown = pass.shownDepartureAt(qs, rs);
+        const px = sub * (qs + rs / 2);
+        const py = sub * rs * (Math.sqrt(3) / 2);
+        if (px < 280) {
+          // In front of the portal plane the two agree bit for bit.
+          expect(shown, `${px}, ${py}`).toBe(drawn);
+          if (drawn < -0.3) front += 1;
+        } else if (drawn < -0.3) {
+          // Behind it the mesh keeps the underlay's notch, the shading the core's retained hill: never lower.
+          notch += 1;
+          expect(shown, `${px}, ${py}`).toBeGreaterThanOrEqual(drawn - 1e-6);
+        }
+      }
+    }
+    expect(front).toBeGreaterThan(20);
+    expect(notch).toBeGreaterThan(20);
+    // Right behind the face over the track the underlay is cut 4–5 m; the ground shown there is the hill (7.8 m of it).
+    const { qs, rs } = at(282, y0);
+    expect(pass.departureAt(qs, rs)).toBeLessThan(-4);
+    expect(pass.shownDepartureAt(qs, rs)).toBeGreaterThan(-0.2);
   });
 
   it("cuts the ground down to a bridge deck set into the bank, and never raises it under a bridge (D4, M2)", () => {

@@ -1,4 +1,4 @@
-import { type NetworkNode, type NetworkPiece, type NetworkView, type Structure, type Terrain, heightDmAt } from "../../core/sim/api";
+import { type GroundQuery, type NetworkNode, type NetworkPiece, type NetworkView, type Structure, type Terrain, isPortal } from "../../core/sim/api";
 
 /**
  * Structure runs (issue #68 "Render"): the network's bridge and tunnel pieces
@@ -37,9 +37,6 @@ export interface StructureRun {
   /** Identity: the structure and the sorted piece keys. */
   readonly key: string;
 }
-
-/** A tunnel end at a buffer opens to daylight (gets a portal) only when less ground than this covers it. */
-export const PORTAL_BUFFER_MAX_COVER_M = 12;
 
 /** Every bridge and tunnel run of the network, in section order. */
 export function structureRuns(network: NetworkView): StructureRun[] {
@@ -128,16 +125,18 @@ function endKind(network: NetworkView, node: NetworkNode, own: ReadonlySet<numbe
 
 /**
  * Whether a tunnel run's end opens to daylight: into ground or a bridge (a
- * transition), or at a buffer that less than PORTAL_BUFFER_MAX_COVER_M of
- * natural ground covers. A deep dead end inside a hill gets no portal.
+ * transition), or at a buffer the core counts as a portal (`isPortal`: the
+ * track within the ±8 m band of the ground there, GROUND_BAND_MM, over the
+ * core's effective ground when `ground` is given, else the natural terrain).
+ * A deeper dead end inside a hill gets no portal. Until the D4 second
+ * feel-check fixes (2026-09-28) the renderer opened one under up to 12 m of
+ * natural cover: 28 of the 30 buffer portals in the committed population lay
+ * in that 8–12 m gap, fully buried.
  */
-export function isPortalEnd(terrain: Terrain, run: StructureRun, end: 0 | 1): boolean {
+export function isPortalEnd(terrain: Terrain, run: StructureRun, end: 0 | 1, ground: GroundQuery | null = null): boolean {
   if (run.structure !== "tunnel" || run.closed) return false;
   const kind = run.ends[end];
   if (kind === "ground" || kind === "bridge") return true;
   if (kind !== "buffer") return false;
-  const node = run.nodes[end];
-  const groundDm = heightDmAt(terrain, node);
-  if (groundDm === undefined) return true;
-  return groundDm / 10 - node.zMm / 1000 < PORTAL_BUFFER_MAX_COVER_M;
+  return isPortal(terrain, run.nodes[end], ground);
 }

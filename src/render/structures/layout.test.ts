@@ -52,9 +52,15 @@ describe("structure runs", () => {
     const order = qs.map((id) => nodes[id]?.q);
     expect(order).toEqual([...order].sort((a, b) => (order[0] === 15 ? (a ?? 0) - (b ?? 0) : (b ?? 0) - (a ?? 0))));
     expect(bridge.key.startsWith("bridge:")).toBe(true);
-    // A tunnel end at a buffer opens to daylight only under less than 12 m of ground (here: 10 m).
+    // A tunnel end at a buffer opens to daylight only where the core counts a portal, within its ±8 m band of the
+    // ground (`isPortal`); here 10 m of ground covers it, a dead end inside the hill. Until the D4 second feel-check
+    // fixes (2026-09-28) the renderer opened portals under up to 12 m, fully buried in the hill.
     const tunnel = runs[1] as StructureRun;
-    expect([isPortalEnd(terrain, tunnel, 0), isPortalEnd(terrain, tunnel, 1)]).toEqual([true, true]);
+    expect([isPortalEnd(terrain, tunnel, 0), isPortalEnd(terrain, tunnel, 1)]).toEqual([true, false]);
+    // The band's edge, on the same buffer node raised to 8 m under the 30 m hill and just below that.
+    const at = (zMm: number): StructureRun => ({ ...tunnel, nodes: [tunnel.nodes[0], { ...tunnel.nodes[1], zMm }] });
+    expect(isPortalEnd(terrain, at(22_000), 1)).toBe(true);
+    expect(isPortalEnd(terrain, at(21_999), 1)).toBe(false);
     expect(isPortalEnd(terrain, bridge, 0)).toBe(false);
   });
 
