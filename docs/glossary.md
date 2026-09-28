@@ -61,6 +61,16 @@ blocked. Carried in `FrameView.signalAspect`.
 - **Runtime state** (trains, holdings, the operator, time) is neither. It never enters undo
   history.
 
+### Auto-grade
+
+The planner's height mode for a drag with no height steps (`Drag.heightMode: "auto"`, owner
+decision 2026-09-28, D4): track follows the ground wherever it can within 35‰, the end
+included, and the rest becomes cuttings and embankments (±4 m) or, beyond that, the bridges
+and tunnels [structure](#structure-ground-bridge-tunnel) inference picks. The end may sit
+above or below the ground, and the tooltip shows by how much. With height steps pressed the
+mode is "fixed": the end sits that many steps above the ground, and the inner nodes are
+fitted to 35‰ the same way. See [the simulation model §8](simulation-model.md#8-planner).
+
 ## B
 
 ### Block
@@ -191,12 +201,11 @@ different heights never share a node. Terrain heights are Int16 dm at lattice no
 convert at the terrain boundary. Millimetres are a default since 2026-09-26: dm could not
 hold 35‰ on a 5 m straight, while mm gives exactly 175 mm
 ([ADR 0010 D2 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d2-track-model)).
-Track follows the ground (owner decision, 2026-09-27, for D3; D4 revisits it with the 35‰
-rule): each planned node sits on the ground (the terrain, or the water surface over a lower
-bed) plus an offset. The planner spreads the offset along a drag by length with
-largest-remainder rounding, between the heights of existing nodes the drag passes within
-6.5 m, so retracing sloped track reuses it. A curve or shift has one grade, so only its ends
-follow the ground.
+Track follows the ground within 35‰ (owner decisions 2026-09-27 for D3 and 2026-09-28 for
+D4, [auto-grade](#auto-grade)): planned nodes lie on the ground (the terrain, or the water
+surface over a lower bed) wherever 35‰ allows, and deviate as little as they can where the
+ground is steeper. Existing nodes the drag passes within 6.5 m pin its height, so retracing
+sloped track reuses it. A curve or shift has one grade, so only its ends follow the ground.
 
 ### End of authority (EOA)
 
@@ -354,8 +363,9 @@ straights. It solves a 2×2 integer system over about 100 candidates and chooses
 largest radius under the user cap → shortest → smallest |turn| → left before right. A
 two-bend fit joins into existing ports, and, where no single bend reaches a free drag's
 end or a node next to it, two bends in one drag turn up to 180° (U-turns, hairpins,
-S-curves; owner decisions 2026-09-27). Commands carry the resolved pieces, so tuning the
-planner never breaks replays.
+S-curves; owner decisions 2026-09-27). It also sets the node heights, within 35‰ (D4,
+[auto-grade](#auto-grade)). Commands carry the resolved pieces, so tuning the planner never
+breaks replays.
 
 ### Platform
 
@@ -367,7 +377,9 @@ its shortest platform, and reversal is allowed at platform stops.
 ### Portal
 
 The mouth of a tunnel, where a tunnel piece meets the terrain surface; it is rendered with
-a hill plug. Within 10 m of a portal the 6 m minimum tunnel cover does not apply.
+a hill plug. Within 10 m of a portal the 6 m minimum tunnel cover does not apply. As built
+(D4): a node of a tunnel piece with at most 4 m of cover (the track within the ground band
+there), and the 10 m are measured along the track, through neighbouring tunnel pieces.
 
 ### Precision mode
 
@@ -493,12 +505,13 @@ See [piece](#piece-straight-curve-shift).
 ### Structure (ground, bridge, tunnel)
 
 A per-piece property, inferred (`auto`) or forced by the Bridge and Tunnel tools. With
-terrain height h:
+terrain height h (the bed under water), judged along the whole piece (D4: straights exactly,
+curves and shifts every 0.5 m):
 - **ground** needs −4 m ≤ z − h ≤ +4 m and no water;
-- **bridge** is needed more than 4 m above terrain or over water, and must stay 4.0 m
-  above the water;
-- **tunnel** is needed more than 4 m below terrain, with at least 6 m cover except within
-  10 m of a [portal](#portal).
+- **bridge** is needed more than 4 m above terrain or over water; its deck may not dip
+  below the terrain and must stay 4.0 m above the water;
+- **tunnel** is needed more than 4 m below terrain or under water (below the bed), with at
+  least 6 m cover except within 10 m of a [portal](#portal).
 
 Rendering chooses a stone arch viaduct (4–20 m over land), a steel Warren truss (over water
 or spans > 30 m) or a plate-girder overpass.

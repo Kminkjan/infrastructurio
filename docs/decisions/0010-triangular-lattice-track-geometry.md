@@ -1295,6 +1295,206 @@ of this ADR stays Proposed.
 - **Not established:** the owner's reading of the changed cases; the look gates; timings on the gate
   hardware; the `?terrain=d11a` captures, which were not re-shot.
 
+## Findings (2026-09-28, D4 grades and structures)
+
+Recorded on branch `codex/d4-structures-core`, from `main` at `81779af`, code at `843e85f`
+([#68](https://github.com/Kminkjan/infrastructurio/issues/68), the core half). Measurements are
+automated (Vitest 4.1.10, Node 26.7.0, macOS 26.6.2, Apple M5 Pro) unless labelled agent
+(Playwright 1.63.0, headless Chrome). The status of this ADR stays Proposed: the owner decision
+below sets D4's height behaviour and accepts no ADR.
+- **Owner decision (2026-09-28, as relayed to the implementing agent): "Auto-grade".** "Track
+  follows the ground wherever it can within 35‰; the rest is absorbed by cuttings/embankments
+  (±4 m) and, beyond that, automatic bridges and tunnels. The end may sit above or below the
+  ground; the tooltip shows by how much." The relayed context: following the ground exactly
+  (the D3 behaviour) puts about half of all pieces on the diorama above 35‰.
+- **Rule 3, grade** ([`track/validate.ts`](../../src/core/track/validate.ts)). An added piece
+  fails `grade-too-steep` when |num| > 35 · den on its exact rational grade. The message quotes
+  the climb that is too steep and the length it needs: the run of the command's chained pieces
+  around the first steep one that rise (or fall) with it, when the run as a whole exceeds 35‰
+  (an end too high for its drag), else the piece alone. Example (a fixture): "The track climbs
+  3 m over 50 m (6.00 %), steeper than the 3.5 % maximum; it needs 85.8 m to climb 3 m, so
+  lengthen the drag or change the end height."
+- **Rule 4, terrain and structure** ([`track/structure.ts`](../../src/core/track/structure.ts)).
+  The rules follow #68; the sampling, water and portal details are defaults to test.
+  - **Samples.** The track height is linear in arc length between the node heights (as
+    clearance has it), and the terrain linear over each lattice triangle (the surface the
+    renderer draws). A primary straight runs along a triangle edge, so its two nodes decide
+    exactly; a secondary straight crosses one edge at its midpoint, so its nodes and that
+    midpoint decide exactly, in integer mm. Curves and shifts are sampled every 0.5 m of arc
+    (`sampleCentrelineEvery`), with the exact node heights at their ends; on slopes up to the
+    diorama's steepest (0.66) a surface kink between samples can hide about 0.17 m. Curve
+    samples are floats decided at commit time, as for clearance.
+  - **Water.** A sample is over water where the terrain lies below the water level, and h is
+    the bed there. Track at or above the bed is in or over the water; below it, under the water.
+  - **Inference** (`auto`), with A the largest z − h and B the largest h − z: in or over water:
+    bridge; else under water: tunnel; A > 4 m and B > 4 m: bridge when A ≥ B, else tunnel;
+    A > 4 m: bridge; B > 4 m: tunnel; else ground. The first cut made any piece over water a
+    bridge; a probe found track 8 m under a riverbed rejected as a bridge below the ground, so
+    track under the bed is a tunnel.
+  - **Each structure's rules**, codes in catalogue order: ground `needs-bridge` (A > 4 m, or in
+    or over water), `needs-tunnel` (B > 4 m, or under water); bridge `bridge-below-ground` (the
+    deck below the terrain at any sample, B > 0), `bridge-too-low-over-water` (a sample over
+    water under the water level + 4.0 m); tunnel `tunnel-too-shallow` (nowhere deeper than the
+    4 m band, or less than 6 m of cover farther than 10 m along the track from a portal).
+  - **Portals.** A node of a tunnel piece is a portal when the track is within the ground band
+    there (cover ≤ 4 m): where a tunnel meets ground track, a bridge or open air. The distance
+    walks through neighbouring tunnel pieces, existing ones included, so the second 5 m piece
+    is still within 10 m of the portal before the first, however the pieces were batched.
+  - Only added pieces are judged; a reused piece keeps its structure. `auto` infers per added
+    piece and the preview's `diff.added` carries the result; a forced structure applies to
+    every added piece; an undo or redo applies the recorded structures.
+- **Rule 6.** A clash (closer than 4.0 m in plan while less than 6.5 m apart in height, as in
+  D2) is `vertical-clearance` where the two centrelines cross or touch in plan (the closest
+  chords lie within the pieces' arc pads), else `tracks-too-close`. The message quotes the
+  smallest height gap the check measured and the height missing to 6.5 m, rounded up.
+  Crossings and stacked track at 6.5 m or more pass (fixtures), and a bridge over a line
+  derives two plain nodes at the crossing, never a shared node or junction (fixture). The D2
+  test stays conservative on slopes: heights compare as the gap between chord height ranges.
+- **Codes.** 18 implemented (D2's 11, then these 7), each with a negative fixture in
+  [`sim/fixtures.test.ts`](../../src/core/sim/fixtures.test.ts), on a hand-made map (flat land,
+  a 5 m hill, a lake).
+- **`Drag`, additive** ([`track/planner.ts`](../../src/core/track/planner.ts)): `heightMode?:
+  "auto" | "fixed"` (omitted: "fixed") and `structure?: StructureChoice` (omitted: "auto"; the
+  structure the build will carry, used to validate candidates). Every existing field keeps its
+  meaning; in "auto" `dzMm` still names the end height the tool would want and serves only to
+  find a buffer end under the pointer. The track tool passes "auto" while `heightSteps` is 0,
+  plans once without the end re-plan, and its tooltip's "End height" is the plan's end above
+  the ground, as before.
+- **Heights, as built** (defaults to test):
+  - **End.** "fixed": `from.zMm + dzMm`; a snapped port: its z. "auto": the ground at the end
+    node clamped to what 35‰ reaches from the last fixed node, raised to clear water where that
+    stays reachable; or, with magnetism on (not in precision), an existing node's height there
+    within that reach and 6.5 m, which is the planner's vertical magnetism now.
+  - **Pins** as in D3, against the profile computed so far; after each pin the profile is
+    computed again. Where a pin or port leaves a span 35‰ cannot join, the span is a uniform
+    ramp that preview rejects as `grade-too-steep`.
+  - **Target:** the ground in "auto"; in "fixed", the D3 profile (the ground plus the offset
+    apportioned between fixed nodes).
+  - **Fit, per span between fixed nodes:** the largest chain of nodes that can lie exactly on
+    the target (consecutive members 35‰ joins, water floors between them reachable; a node
+    whose target is below its floor never lies on it), by dynamic programming in O(m²), ties to
+    the nearer predecessor; then in each gap the least Σ|z − t| subject to 35‰ per piece and
+    the floors, exactly in integer mm by a slope-trick pass over convex piecewise-linear costs.
+    Where the target is within 35‰ the result is the target: every D3 drag case, pinning case
+    and flat-map property passes unchanged.
+  - **Water:** every node of a piece that crosses water gets the floor water level + 4.0 m, as
+    far as 35‰ reaches from the span's fixed ends.
+- **Choosing the fit** (an uncommitted probe: 1,000 free drags and 150 chains of 3–6, the
+  generator in [`tests/support/autoGrade.ts`](../../tests/support/autoGrade.ts), before the
+  final choice):
+
+  | Fit | Accepted | Nodes on the ground | Mean \|z − g\| | Kept |
+  |---|---|---|---|---|
+  | L1 only, end on the reachable ground | 72.9% | 25.0% | 2.21 m | no |
+  | L1, free end weighted 1 in the objective | 74.6% | 26.4% | 2.15 m | no |
+  | L1 plus 3× cost beyond the ±4 m band | 72.8% | 25.0% | 2.21 m | no |
+  | **On-target chain, then L1 (chosen)** | **72.8%** | **27.2%** | **2.22 m** | **yes** |
+
+  - L1 alone balances cut against fill: across a 12 m valley it started descending on the flat
+    approach (cutting it) to lower the viaduct. The chain keeps flat approaches on the ground
+    and deviates only where the ground is too steep; on the 80‰ test ridge it leaves the flat
+    on the ground and cuts 2.25 m at the crest, where L1 filled 0.68 m on the flanks' feet to
+    cut 1.58 m. Aggregates barely differ.
+  - A free end in the objective accepted 1.7 points more, but the relayed instruction was the
+    end nearest the ground the grade allows, so that stays. Band weights 0, 1, 3 and 10 moved
+    acceptance by at most 0.2 points and were dropped.
+  - Also tried and not kept: re-fitting a candidate that failed `tunnel-too-shallow` with its
+    shallow tunnel nodes pushed to 6 m of cover, or `bridge-below-ground` with the piece's ends
+    raised over its highest terrain (acceptance 72.9% → 72.9%; up to 24 more validations per
+    failing drag); and aiming a curve's ends at the least-squares line of the terrain under it
+    (72.7%).
+- **Diorama measurement** (the same generator, final code; the committed test runs 600 + 80):
+  1,682 drags (1,000 free, 150 chains), 1,225 accepted (72.8%).
+  - Rejected: `tunnel-too-shallow` 199, `bridge-too-low-over-water` 146, `bridge-below-ground`
+    74, `out-of-bounds` 23, `kinked-join` 9, `tracks-too-close` 4, `grade-too-steep` 1,
+    `vertical-clearance` 1.
+  - Free drags and each chain's first: 80.0% of 1,150; chained continuations: 57.3% of 532.
+    Excluding the 117 drags that start on water: 77.4% of 1,565.
+  - Causes: 64 of the water rejections start on water and 82 on land too near the water to
+    climb 4 m at 35‰ (3.4 m from a 10.6 m shore needs 97 m). Of `bridge-below-ground`, 65 are
+    curves or shifts whose single grade crosses both a hollow and a rise; 27 of the 74 dip
+    0.5 m or less. Of `tunnel-too-shallow`, 183 are 4–6 m of cover more than 10 m from a
+    portal (109 on straights, 74 on curves or shifts), 16 have no portal within 10 m. Of the
+    822 drags with a curve or shift, 140 (17.0%) fail on that piece.
+  - New pieces of accepted plans: ground 86.5% of pieces (85.1% of length), bridge 11.6%
+    (13.3%), tunnel 1.8% (1.6%).
+  - Node height minus the ground over 31,329 nodes: 27.2% exactly on it; |d| p50 0.65 m, p95
+    10.40 m, max 25.47 m; 16.6% beyond ±4 m.
+  - Grades over 29,931 pieces: 0‰ 8.4%, under 10‰ 1.6%, 10–20‰ 4.4%, 20–30‰ 9.3%, 30–35‰
+    76.4%, over 35‰ 0.0% (one plan, a chained drag pinned to its own track, which preview
+    rejects). This terrain is steep: half the ground-following pieces exceeded 35‰ in D3.
+- **Open point 4: ordinary seeded hills rarely admit a tunnel.** Committed probe
+  ([`planner.grade.test.ts`](../../src/core/track/planner.grade.test.ts)): 300 dry straight
+  lines of 10–60 pieces with both ends on the ground, where even the highest 35‰ profile
+  between the ends lies more than 4 m under the ground somewhere, so only a tunnel can take
+  them. The planner's own heights build 10 (3.3%); the deepest 35‰ profile builds 5 (1.7%);
+  the rest fail `tunnel-too-shallow`. By geometry (not a test): from a portal at ≤ 4 m of cover
+  the cover must reach 6 m within 10 m, so the terrain must rise at least 16.5% along the track
+  (20% less the 3.5% the track can descend). An uncommitted probe of 400 such lines found that
+  slope (p10 12‰, median 81‰, p90 289‰) where the cover first passes 4 m, and 17.3% at least
+  165‰. A tunnel exists where a face is that steep (an example is in the test: 44 pieces from
+  (253, 97) on heading 9); the gap is the rule's, and this finding recommends no threshold.
+- **Performance, dev measurements and not gates.** `sim/perf.test.ts` now builds its 4,900
+  pieces at z = 0 as `auto` (tunnels under 6 m or more of cover) and drags from the ground in
+  "auto" mode; `main`'s code was run on the same workload. The machine was loaded (load
+  average 4–21, a parallel agent), so ranges overlap; three runs each:
+  - calmer (before at load 4.5, after at load 12): `planTrack` median 0.087–0.095 →
+    0.153–0.159 ms, p95 0.502–0.525 → 0.629–0.694 ms; two-bend-heavy p95 0.855–0.886 →
+    1.006–1.029 ms; worst case (every candidate of a 110-piece plan rejected) median 1.74–2.17
+    → 2.68–2.94 ms, p95 2.38–3.17 → 3.27–4.04 ms; `preview` p95 0.100–0.112 → 0.120–0.142 ms;
+  - alternating before/after at load 15–21: `planTrack` median 0.123–0.188 → 0.229–0.389 ms;
+    `preview` p95 0.135–0.333 → 0.209–0.417 ms.
+  - Preview stays far inside gate B3 (p95 ≤ 4 ms, provisional; authoritative only in the
+    [acceptance gates](../evidence/m4/2026-09-26-acceptance-gates.md)). Planning costs about
+    1.6–1.9× `main`'s: the profile (chain, fits, water tests) and rule 4 run for each of up to
+    8 candidates. No cache was added.
+- **Tests** (automated): 685 in 84 files at `843e85f` (652 in 82 before), 679 passing.
+  - New: [`structure.test.ts`](../../src/core/track/structure.test.ts) (sampling, inference,
+    each rule, the portal walk) and [`planner.grade.test.ts`](../../src/core/track/planner.grade.test.ts)
+    (up a too-steep hill, into a valley, over water, through a steep-faced hill, the fixed-mode
+    ramp, pins in "auto", two properties, open point 4, the diorama measurement); seven negative
+    fixtures, the positive crossing, stacking and 6.5 m fixtures; a tool test of the height mode
+    and end height; malformed-drag cases for the new fields.
+  - Changed because D4 legitimately changes them: the D2 fixture, API and property tests ran on
+    seeded maps where their track at z = 0 lay 10–40 m under the ground, so they now run on
+    hand-made terrain (their keys and intent unchanged; the forced tunnel on flat ground became
+    a forced bridge; the property list adds `needs-bridge`); `resolveStructure` (auto → ground)
+    became `structureChoice`; the planner contract test's steep map now expects the fixed ramp's
+    rejection and an auto plan at 35‰; the 6 m pinned drop reports `grade-too-steep` before
+    `kinked-join`; the three hill tests keep their exact D3 expectations on a gentle 20‰ ridge
+    and assert the fit on the 80‰ one; `checkShape` accepts the fit where the D3 profile
+    exceeds 35‰; the diorama probe runs in "auto"; the perf workloads as above; the tool's
+    chaining test drags 35 m on flat ground (1 m in 20 m is 50‰); the earthworks chained-ghost
+    e2e raises 3 steps over 24 pieces (6 over 20 was 60‰, and more than 4 m is now a bridge).
+  - **Failing, for the render lane** (each assumes D3 heights): `trackLift.test.ts` (rails
+    against the natural terrain, nodes no longer on the ground); four `EarthworksView.test.ts`
+    tests (the ridge sim runs on a seeded map unlike the view's, whose heights now decide the
+    structures, and its 6 m cut is now a tunnel; the 500-piece network builds 432); the
+    `earthworksGolden.test.ts` byte pin (299 conformed pieces, not 411); and two
+    `earthworks.e2e.ts` scenes (agent): the hill curve and the owner's lake-shore curve are now
+    rejected as `bridge-below-ground` on their curve (6.6 m and 1.3 m below the terrain).
+    `tests/support/groundPlans.ts` now plans in "auto", as the tool does.
+- **For the render and tool lane.**
+  - Structures: `NetworkPiece.structure`, and the preview's `diff.added` for a ghost; reused
+    pieces keep theirs. Only `ground` pieces should be conformed; a portal is a tunnel node with
+    ≤ 4 m of cover, bridges touch the ground where their deck meets it.
+  - Codes: 18 in `REASON_CODES`, messages "<what>; <fix>", so "Can't build" and the fix hint
+    come out of `splitReason` unchanged; the constants are exported from `sim/api`
+    (`MAX_GRADE_PERMILLE`, `GROUND_BAND_MM`, `WATER_CLEARANCE_MM`, `TUNNEL_COVER_MM`,
+    `PORTAL_ZONE_MM`).
+  - `heightMode` wiring is in `trackTool.planFor`; Bridge and Tunnel modes may pass
+    `Drag.structure` so candidates validate as the command will. Anchoring on elevated track
+    sets height steps from its height, so such a drag plans in "fixed".
+- **Not established:**
+  - whether auto-grade feels right: that is the owner's feel check; nothing here is human
+    evidence;
+  - the render of structures and the conform of ground pieces under D4 heights (the render
+    half);
+  - a planner that routes over or under existing track; a drag crossing ground-level track at
+    the same height is rejected, and one height step raises only the end;
+  - that curve samples decide identically across JavaScript engines, or timings on the gate
+    hardware.
+
 ## Revisit when
 
 - The D3 feel check finds construction unsatisfying for reasons that planner tuning, chained
@@ -1362,3 +1562,8 @@ of this ADR stays Proposed.
   water is drawn, the capped reach faded and chunks spread over slices, the diagonal reach
   change skipped, coverage and rebuild costs before and after); status unchanged, still
   Proposed.
+- 2026-09-28: D4 grades and structures findings added (the relayed owner decision
+  "Auto-grade" verbatim, the grade, terrain-structure and vertical-clearance rules as built,
+  `Drag.heightMode` and `Drag.structure`, the height fit and the alternatives measured, the
+  diorama measurement, open point 4, performance, changed and failing tests); status unchanged,
+  still Proposed.
