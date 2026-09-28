@@ -17,7 +17,8 @@ import { dragBetween, lookAtNode, nodeScreen } from "./hook";
  *   bottom at 10.7 m, with ground approaches, crossing a track on the valley side at (9, 244)
  *   (a girder span);
  * - a bridge over the river valley, heading 2 from (242, 104), deck at 31.9 m, 21.9 m over the water;
- * - a tunnel through the hill heading 2 from (40, 180) at 17.0 m, under up to 16.7 m of cover.
+ * - a tunnel through the hill heading 2 from (40, 180) at 17.0 m, under up to 16.7 m of cover, between the nodes
+ *   where its cover passes the 8 m band (12 and 55 along the line).
  */
 
 const env = (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env ?? {};
@@ -70,7 +71,11 @@ async function shoot(page: Page, name: string): Promise<void> {
 
 const VIADUCT: Run = { q: 23, r: 230, d: 4, zMm: 27_000, parts: [[-4, 3, "ground"], [3, 57, "bridge"], [57, 62, "ground"]] };
 const RIVER: Run = { q: 242, r: 104, d: 2, zMm: 31_900, parts: [[0, 4, "ground"], [4, 31, "bridge"], [31, 33, "ground"]] };
-const TUNNEL: Run = { q: 40, r: 180, d: 2, zMm: 17_000, parts: [[-3, 8, "ground"], [8, 57, "tunnel"], [57, 61, "ground"]] };
+// The tunnel runs where its cover passes the 8 m band (owner decision 2026-09-28 "M2"): nodes 12–55, with cuttings
+// up to 7.7 m deep before and after it (until then nodes 8–57).
+const TUNNEL: Run = { q: 40, r: 180, d: 2, zMm: 17_000, parts: [[-3, 12, "ground"], [12, 55, "tunnel"], [55, 61, "ground"]] };
+const WEST_PORTAL = 12;
+const EAST_PORTAL = 55;
 
 test(`structure captures (${LABEL})`, async ({ page }) => {
   const errors: string[] = [];
@@ -110,11 +115,11 @@ test(`structure captures (${LABEL})`, async ({ page }) => {
     ["truss-close", at(RIVER, 18), 12],
     ["truss-default", at(RIVER, 18), 6],
     ["truss-region", at(RIVER, 18), 2.5],
-    ["portal-west-close", at(TUNNEL, 8), 12],
-    ["portal-west-zoom", at(TUNNEL, 8), 24],
-    ["portal-east-close", at(TUNNEL, 57), 12],
-    ["portal-east-zoom", at(TUNNEL, 57), 24],
-    ["tunnel-default", at(TUNNEL, 12), 6],
+    ["portal-west-close", at(TUNNEL, WEST_PORTAL), 12],
+    ["portal-west-zoom", at(TUNNEL, WEST_PORTAL), 24],
+    ["portal-east-close", at(TUNNEL, EAST_PORTAL), 12],
+    ["portal-east-zoom", at(TUNNEL, EAST_PORTAL), 24],
+    ["tunnel-default", at(TUNNEL, WEST_PORTAL + 4), 6],
     ["tunnel-region", at(TUNNEL, 32), 2.5],
   ];
   for (const [name, [q, r], ppm] of views) {
@@ -128,13 +133,13 @@ test(`structure captures (${LABEL})`, async ({ page }) => {
   await shoot(page, "viaduct-close-yaw1");
   await page.keyboard.press("q");
   await page.waitForTimeout(900);
-  await lookAtNodeZ(page, ...at(TUNNEL, 8), 12);
+  await lookAtNodeZ(page, ...at(TUNNEL, WEST_PORTAL), 12);
   await page.keyboard.press("e");
   await page.keyboard.press("e");
   await page.waitForTimeout(1200);
   await shoot(page, "portal-west-close-yaw2");
   // The east portal from its front (three yaw steps turn the view half round).
-  await lookAtNodeZ(page, ...at(TUNNEL, 57), 12);
+  await lookAtNodeZ(page, ...at(TUNNEL, EAST_PORTAL), 12);
   await page.keyboard.press("e");
   await page.waitForTimeout(1200);
   await shoot(page, "portal-east-close-yaw3");

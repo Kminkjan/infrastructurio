@@ -1,15 +1,21 @@
 import { type Page, expect, test } from "@playwright/test";
-import { lookAtNode, nodeScreen, openDiorama, snapshot, undoToEmpty } from "./hook";
+import { dragBetween, lookAtNode, nodeScreen, openDiorama, snapshot, undoToEmpty } from "./hook";
 
 /**
  * D4 structures e2e (agent evidence: synthetic input through the real pointer and keyboard; it says nothing
  * about how the structures look or feel). The Bridge (5) and Tunnel (6) tools, the ghost's structure, the
  * network's structures, the occlusion aids H, U and C, and undo back to an empty network.
  *
- * The D3 planner lays every node on the ground plus an offset ramped from the start's to the end's, so the
- * bridge's deck ramps up from its bank, and the tunnel is laid below the hill by lowering its first end with
- * PgDn and chaining at that depth, then raising the last end back to the ground (until the core lane's
- * auto-grade planner lands, which may change these plans; see the D4 core lane).
+ * With D4's auto-grade and the thresholds of the owner decision 2026-09-28 "M2", the drags are plain ones:
+ * - the bridge starts on the river's water, where a free drag begins at the deck height (the water level +
+ *   4.0 m), and ends on the far bank, so the deck crosses level at the water level + 4.0 m;
+ * - the tunnel is laid as a player would through a hill on the golden diorama: a Track drag into the hill whose
+ *   end 35‰ cannot bring up to the ground (it ends under 9.7 m of hill, the last pieces tunnels already), the
+ *   Tunnel tool on from that end under U (an underground end is picked only in the x-ray), and a Track drag from
+ *   the far foot that magnetism joins to the tunnel's far end. A forced tunnel must lie deeper than the ±8 m band,
+ *   so the Tunnel tool cannot start at a free node on the ground: no slope on the diorama rises 8 m in one step.
+ * (Until then the D3 planner laid every node on the ground plus a ramped offset: the bridge's far end was raised
+ * 6 m with PgUp and the tunnel lowered 8 m with PgDn and chained at that depth.)
  */
 
 interface Terrain {
@@ -31,8 +37,11 @@ interface Hook {
   planScreen(x: number, y: number, z: number): { x: number; y: number };
 }
 
-/** A heading-2 line (q, r + i) over the river: 3 dry nodes, 4–8 water nodes, 3 dry nodes; the first and last node indices. */
-async function findRiverCrossing(page: Page): Promise<{ q: number; r: number; length: number }> {
+/**
+ * A heading-2 line over the river: 3 dry nodes, 4–8 water nodes, 3 dry nodes. Returns the first water node and how
+ * many water nodes follow it, so node (q, r + water) is the far bank's first dry node.
+ */
+async function findRiverCrossing(page: Page): Promise<{ q: number; r: number; water: number }> {
   return page.evaluate(() => {
     const t = (window.__diorama as unknown as { terrain: Terrain }).terrain;
     const wet = (q: number, r: number) => {
@@ -51,68 +60,61 @@ async function findRiverCrossing(page: Page): Promise<{ q: number; r: number; le
         if (w < 4 || w > 8) continue;
         let d = 0;
         while (d < 3 && wet(q, r + i + w + d) === false) d++;
-        if (d === 3) return { q, r, length: i + w + d - 1 };
+        if (d === 3) return { q, r: r + i, water: w };
       }
     }
     throw new Error("no river crossing found");
   });
 }
 
-/** A straight line (heading 0 or 2) of 40 nodes over dry ground whose middle stands at least 7 m above both ends. */
-async function findHill(page: Page): Promise<{ q: number; r: number; dq: number; dr: number; length: number }> {
+/**
+ * The hill for the tunnel (found with the D4 planner and tool in Node, 2026-09-28): a heading-1 line of 50 nodes from
+ * (233, 51) over dry land, both ends on the ground. A Track drag straight through makes a cutting, a tunnel, a long
+ * cutting and a second tunnel; its middle lies under up to 10.2 m of hill.
+ */
+const HILL = { q: 233, r: 51, dq: 1, dr: 1, length: 50, deep: 12, far: 43 } as const;
+
+async function tunnelHookState(page: Page): Promise<{ pieces: { structure: string }[]; ends: { q: number; r: number; zMm: number }[] }> {
   return page.evaluate(() => {
-    const t = (window.__diorama as unknown as { terrain: Terrain }).terrain;
-    const at = (q: number, r: number) => {
-      const col = q + Math.floor(r / 2);
-      if (r < 0 || r >= t.rows || col < 0 || col >= t.columns) return undefined;
-      return { h: (t.heightsDm[r * t.columns + col] ?? 0) / 10, wet: t.water[r * t.columns + col] === 1 };
-    };
-    const length = 40;
-    for (const [dq, dr] of [
-      [1, 0],
-      [0, 1],
-    ] as const) {
-      for (let r = 10; r < t.rows - 10; r += 2) {
-        for (let col = 10; col < t.columns - 10; col += 2) {
-          const q = col - Math.floor(r / 2);
-          let ok = true;
-          let top = -Infinity;
-          for (let i = 0; i <= length && ok; i++) {
-            const n = at(q + dq * i, r + dr * i);
-            if (!n || n.wet) ok = false;
-            else top = Math.max(top, n.h);
-          }
-          const a = at(q, r);
-          const b = at(q + dq * length, r + dr * length);
-          if (ok && a && b && Math.abs(a.h - b.h) < 2 && top - Math.max(a.h, b.h) > 7) return { q, r, dq, dr, length };
-        }
-      }
-    }
-    throw new Error("no hill found");
+    const h = window.__diorama as unknown as { network(): { pieces: { structure: string }[]; nodes: { q: number; r: number; zMm: number; kind: string }[] } };
+    const n = h.network();
+    return { pieces: n.pieces.map((p) => ({ structure: p.structure })), ends: n.nodes.filter((x) => x.kind === "buffer").map((x) => ({ q: x.q, r: x.r, zMm: x.zMm })) };
   });
 }
 
-test("builds a bridge over water with the Bridge tool, hides its deck with H, cycles stacked picks with C, and undoes to empty", async ({ page }) => {
+async function coverAt(page: Page, q: number, r: number, zMm: number): Promise<number> {
+  return page.evaluate(({ q, r, zMm }) => {
+    const t = (window.__diorama as unknown as { terrain: Terrain }).terrain;
+    const col = q + Math.floor(r / 2);
+    return (t.heightsDm[r * t.columns + col] ?? 0) / 10 - zMm / 1000;
+  }, { q, r, zMm });
+}
+
+test("builds a level bridge across the river with the Bridge tool from the water, hides its deck with H, cycles stacked picks with C, and undoes to empty", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   await openDiorama(page);
-  const { q, r, length } = await findRiverCrossing(page);
-  const endR = r + length;
-  await lookAtNode(page, q, r + length / 2, 6);
+  const { q, r, water } = await findRiverCrossing(page);
+  const length = water;
+  const endR = r + water;
+  await lookAtNode(page, q, r + water / 2, 6);
 
   await page.keyboard.press("5");
   expect((await page.evaluate(() => (window.__diorama as unknown as Hook).tool())).active).toBe("bridge");
   await expect(page.getByRole("button", { name: /Bridge/ })).toHaveAttribute("aria-pressed", "true");
 
-  // Drag across the river, raising the far end 6 m while dragging.
+  // From the first water node by the near bank to the far bank's first dry node: the drag starts at the deck
+  // height, the water level + 4.0 m (owner decision 2026-09-28 "M2"), and no height keys are pressed.
+  const waterLevelMm = await page.evaluate(() => (window.__diorama as unknown as { terrain: { waterLevelDm: number } }).terrain.waterLevelDm * 100);
   const from = await nodeScreen(page, q, r);
   const to = await nodeScreen(page, q, endR);
-  await page.mouse.move(from.x, from.y);
+  await page.mouse.move(from.x, from.y, { steps: 4 });
+  expect(await page.evaluate(() => (window.__diorama as unknown as Hook).tool().target)).toMatchObject({ kind: "node", q, r });
   await page.mouse.down();
   await page.mouse.move(to.x, to.y, { steps: 14 });
-  for (let i = 0; i < 6; i++) await page.keyboard.press("PageUp");
   await expect(page.getByTestId("construction-tooltip")).toContainText("Structure: bridge");
   expect(await page.evaluate(() => (window.__diorama as unknown as Hook).ghostMarks())).toBe(true);
+  expect(await page.evaluate(() => (window.__diorama as unknown as { tool(): { heightSteps: number } }).tool().heightSteps)).toBe(0);
   await page.mouse.up();
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
@@ -121,6 +123,8 @@ test("builds a bridge over water with the Bridge tool, hides its deck with H, cy
   const net = await page.evaluate(() => (window.__diorama as unknown as Hook).network());
   expect(net.pieces.length).toBe(length);
   expect(net.pieces.every((p) => p.structure === "bridge")).toBe(true);
+  // A level deck at the water level + 4.0 m, from the water to the far bank.
+  expect(net.pieces.every((p) => p.z0Mm === waterLevelMm + 4000 && p.z1Mm === waterLevelMm + 4000)).toBe(true);
   const stats = await page.evaluate(() => (window.__diorama as unknown as Hook).structureStats());
   expect(stats.bridges).toBe(1);
   const layouts = await page.evaluate(() => (window.__diorama as unknown as Hook).structureLayouts());
@@ -146,7 +150,7 @@ test("builds a bridge over water with the Bridge tool, hides its deck with H, cy
       }
       return { ...h.planScreen(best.x, best.y, best.z + 0.4), zMm: best.z * 1000 };
     },
-    { q, r: r + length / 2 },
+    { q, r: r + water / 2 },
   );
   await page.keyboard.press("1");
   await page.mouse.move(mid.x, mid.y, { steps: 4 });
@@ -183,43 +187,67 @@ test("builds a bridge over water with the Bridge tool, hides its deck with H, cy
   expect(errors).toEqual([]);
 });
 
-test("lays a tunnel under a hill with the Tunnel tool, with portals at both ends, shows it with U, and undoes to empty", async ({ page }) => {
+test("lays a tunnel through a hill: into it with Track, on with the Tunnel tool under U, out with Track; portals at both ends; undoes to empty", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   await openDiorama(page);
-  const { q, r, dq, dr, length } = await findHill(page);
+  const { q, r, dq, dr, length, deep, far } = HILL;
   const node = (i: number): [number, number] => [q + dq * i, r + dr * i];
-  await lookAtNode(page, ...node(length / 2), 3);
+
+  // 1. Track into the hill: 35‰ cannot bring the end up to the ground, so it ends deep inside, in a tunnel.
+  await lookAtNode(page, ...node(deep / 2), 6);
+  await page.keyboard.press("1");
+  await dragBetween(page, await nodeScreen(page, ...node(0)), await nodeScreen(page, ...node(deep)), 12);
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => window.__diorama?.ready === true);
+  let state = await tunnelHookState(page);
+  expect(state.pieces).toHaveLength(deep);
+  expect(state.pieces.some((p) => p.structure === "tunnel")).toBe(true);
+  const inside = state.ends.find((e) => e.q === node(deep)[0] && e.r === node(deep)[1]);
+  if (!inside) throw new Error("no end inside the hill");
+  expect(await coverAt(page, inside.q, inside.r, inside.zMm)).toBeGreaterThan(8);
+
+  // 2. The Tunnel tool on from that end, which only the underground x-ray (U) lets the pointer pick.
+  await lookAtNode(page, ...node((deep + far) / 2), 4);
+  await page.keyboard.press("u");
   await page.keyboard.press("6");
   expect((await page.evaluate(() => (window.__diorama as unknown as Hook).tool())).structure).toBe("tunnel");
-
-  // Into the hill 8 m under the ground, on at that depth, and out again to the ground at the far foot.
-  const a = await nodeScreen(page, ...node(0));
-  const b = await nodeScreen(page, ...node(6));
-  await page.mouse.move(a.x, a.y);
+  const a = await nodeScreen(page, inside.q, inside.r, inside.zMm);
+  await page.mouse.move(a.x, a.y, { steps: 4 });
+  expect(await page.evaluate(() => (window.__diorama as unknown as Hook).tool().target)).toMatchObject({ kind: "endpoint", q: inside.q, r: inside.r, zMm: inside.zMm });
   await page.mouse.down();
-  await page.mouse.move(b.x, b.y, { steps: 8 });
-  for (let i = 0; i < 8; i++) await page.keyboard.press("PageDown");
+  const b = await nodeScreen(page, ...node(far));
+  await page.mouse.move(b.x, b.y, { steps: 12 });
   await expect(page.getByTestId("construction-tooltip")).toContainText("Structure: tunnel");
   await page.mouse.up();
-  const c = await nodeScreen(page, ...node(length - 6));
-  await page.mouse.move(c.x, c.y, { steps: 8 });
-  await page.mouse.click(c.x, c.y);
-  const d = await nodeScreen(page, ...node(length));
-  await page.mouse.move(d.x, d.y, { steps: 8 });
-  for (let i = 0; i < 8; i++) await page.keyboard.press("PageUp");
-  await page.mouse.click(d.x, d.y);
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("u");
+  await page.waitForFunction(() => window.__diorama?.ready === true);
+  state = await tunnelHookState(page);
+  expect(state.pieces).toHaveLength(far);
+  // Every piece the Tunnel tool added is a tunnel, and the first drag's deep end was one already.
+  expect(state.pieces.filter((p) => p.structure === "tunnel").length).toBeGreaterThanOrEqual(far - deep + 1);
+
+  // 3. Track from the far foot back to the tunnel's far end: magnetism joins it, whatever its depth.
+  await lookAtNode(page, ...node((far + length) / 2), 6);
+  await page.keyboard.press("1");
+  await dragBetween(page, await nodeScreen(page, ...node(length)), await nodeScreen(page, ...node(far)), 10);
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => window.__diorama?.ready === true);
 
   const net = await page.evaluate(() => (window.__diorama as unknown as Hook).network());
   expect(net.pieces.length).toBe(length);
-  expect(net.pieces.every((p) => p.structure === "tunnel")).toBe(true);
+  const kinds = net.pieces.map((p) => p.structure);
+  expect(kinds.filter((k) => k === "tunnel").length).toBeGreaterThan(30);
+  expect(kinds.filter((k) => k === "bridge")).toHaveLength(0);
   const stats = await page.evaluate(() => (window.__diorama as unknown as Hook).structureStats());
   expect(stats).toMatchObject({ tunnels: 1, portals: 2 });
 
   // A pixel over the tunnel's middle at its depth: without U the pick is the hill's ground, with U the tunnel.
+  await lookAtNode(page, ...node(Math.round((deep + far) / 2)), 4);
   const middle = await page.evaluate(
     ({ q, r }) => {
       const h = window.__diorama as unknown as Hook;
@@ -237,7 +265,7 @@ test("lays a tunnel under a hill with the Tunnel tool, with portals at both ends
       }
       return h.planScreen(best.x, best.y, best.z + 0.4);
     },
-    { q: node(Math.round(length / 2))[0], r: node(Math.round(length / 2))[1] },
+    { q: node(Math.round((deep + far) / 2))[0], r: node(Math.round((deep + far) / 2))[1] },
   );
   await page.keyboard.press("1");
   await page.mouse.move(middle.x, middle.y, { steps: 4 });
