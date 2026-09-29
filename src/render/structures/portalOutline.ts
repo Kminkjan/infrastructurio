@@ -1,5 +1,18 @@
 import { HEADWALL_RISE } from "../../core/sim/api";
-import { BORE_DEPTH_M, PORTAL_HALF_WIDTH_M, PORTAL_RETAIN_ABOVE_TOP_M, PORTAL_TOP_V, PORTAL_WING_RUN, PORTAL_WING_SPLAY_COS, PORTAL_WING_SPLAY_SIN, portalSkylineV } from "./dimensions";
+import {
+  BORE_DEPTH_M,
+  COPING_M,
+  PORTAL_HALF_WIDTH_M,
+  PORTAL_PARAPET_M,
+  PORTAL_RETAIN_ABOVE_TOP_M,
+  PORTAL_TOP_V,
+  PORTAL_WALL_M,
+  PORTAL_WING_RUN,
+  PORTAL_WING_SPLAY_COS,
+  PORTAL_WING_SPLAY_SIN,
+  WING_T,
+  portalSkylineV,
+} from "./dimensions";
 
 /**
  * A tunnel portal's outline in plan (D4 second feel-check fixes, 2026-09-28), shared by the portal asset
@@ -59,6 +72,69 @@ export const WALL_FOOT_UNDER_SKYLINE_M = 2.5;
 export const WING_PIER_ALONG_M: readonly [number, number] = [-0.1, 0.6];
 export const WING_PIER_PROUD_M = 0.15;
 export const WING_PIER_TOP_V = 0.5;
+
+/**
+ * The masonry tops the plug abuts (the portal asset's, `assets.ts`): the face's parapet coping (its top over the track
+ * height, its back edge behind the face plane and its half width), the cornice beside it (its top is the face top), and
+ * each wing's coping (its height over the wall top and its overhang past the wall's faces).
+ */
+export const FACE_COPING_TOP_V = PORTAL_TOP_V + PORTAL_PARAPET_M + COPING_M;
+export const FACE_COPING_BACK_M = 0.71;
+export const FACE_COPING_HALF_M = PORTAL_HALF_WIDTH_M + 0.05;
+export const CORNICE_BACK_M = PORTAL_WALL_M;
+export const CORNICE_HALF_M = PORTAL_HALF_WIDTH_M + 0.14;
+export const WING_COPING_H_M = 0.28;
+export const WING_COPING_OVER_M = 0.06;
+/** The end pier's cap: its height over the pier top. */
+export const WING_PIER_CAP_M = 0.16;
+/**
+ * Behind the masonry's back edge the plug's cap (`masonryCapV`) rises this much per metre (2 : 1) until it meets the
+ * ground it draws: steeper than the core's 45° retained headwall behind the face, so it rejoins it within a metre.
+ */
+export const MASONRY_CAP_RISE = 2;
+/** Within the masonry's plan the plug stays this far under its top (the plug's own 4 cm lift included by the caller). */
+export const MASONRY_CAP_UNDER_M = 0.02;
+
+/**
+ * The highest the hill plug may stand over the track height at (s, u) behind the portal's masonry (verification
+ * finding 2026-09-29): no higher than the top of the masonry its front line runs under, less MASONRY_CAP_UNDER_M,
+ * rising at MASONRY_CAP_RISE behind that masonry's back edge; +Infinity away from it. Behind the face plane the core's
+ * retained hill rises 45° from 0.25 m over the face top, so it stood over the parapet coping's back edge (0.17 m at
+ * the plug's front line) and up to 0.8 m over the wing coping at the face's corners: the plug's front edge floated
+ * there, and rays passed under it to the dark bore behind (a black sliver along the coping, a black notch at the
+ * corner). The lowest over the face (its coping, then the cornice beside it) and each wing (its coping from its root;
+ * inside the corner, where the wall has no coping, the face top; the end pier's cap past its end).
+ */
+export function masonryCapV(s: number, u: number, wings: PortalWings): number {
+  const au = u < 0 ? -u : u;
+  let cap = Number.POSITIVE_INFINITY;
+  if (au <= CORNICE_HALF_M) {
+    const coping = au <= FACE_COPING_HALF_M;
+    const top = coping ? FACE_COPING_TOP_V : PORTAL_TOP_V;
+    const back = coping ? FACE_COPING_BACK_M : CORNICE_BACK_M;
+    cap = top - MASONRY_CAP_UNDER_M + (s > back ? MASONRY_CAP_RISE * (s - back) : 0);
+  }
+  const c = PORTAL_WING_SPLAY_COS;
+  const k = PORTAL_WING_SPLAY_SIN;
+  for (const side of [1, -1] as const) {
+    const length = side === 1 ? wings.right : wings.left;
+    if (length <= 0.05) continue;
+    const du = side * u - PORTAL_HALF_WIDTH_M;
+    const along = -k * s + c * du;
+    const end = length + (WING_PIER_ALONG_M[1] ?? 0);
+    // From the corner between the face's cornice and the wing's coping (inside the face's width the face governs) to
+    // the end pier's far side.
+    if (along > end || (along < 0 && (au <= CORNICE_HALF_M || along < -PORTAL_WALL_M))) continue;
+    const behind = c * s + k * du;
+    const steep = side === 1 ? wings.steepRight === true : wings.steepLeft === true;
+    const pier = along > length + (WING_PIER_ALONG_M[0] ?? 0);
+    const top = along < 0 ? PORTAL_TOP_V : pier ? wingCopingV(length, steep) + WING_PIER_TOP_V + WING_PIER_CAP_M : wingCopingV(along, steep) + WING_COPING_H_M;
+    const back = pier ? WING_T + WING_PIER_PROUD_M + WING_COPING_OVER_M : along < 0 ? WING_T : WING_T + WING_COPING_OVER_M;
+    const wing = top - MASONRY_CAP_UNDER_M + (behind > back ? MASONRY_CAP_RISE * (behind - back) : 0);
+    if (wing < cap) cap = wing;
+  }
+  return cap;
+}
 
 /** The retained skyline over the track height at |u| (7.65 m over the face, then 1 : 1.5). */
 export function retainV(u: number): number {

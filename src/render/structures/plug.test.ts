@@ -1,11 +1,27 @@
 import { describe, expect, it } from "vitest";
 import { makeTerrain } from "../../../tests/support/makeTerrain";
+import { smoothstep } from "../math";
 import type { Terrain } from "../../core/sim/api";
 import { type TerrainShading, computeTerrainShading } from "../terrain/terrainShading";
 import { EARTHWORK_WEIGHT_FROM_X, encodeEarthworkPotential, lodLattice, lodNodeIndex } from "../terrain/earthworks";
 import { BORE_DEPTH_M, BORE_HALF_M, BORE_SPRING_V, PORTAL_HALF_WIDTH_M, PORTAL_TOP_V, portalSkylineV } from "./dimensions";
 import { HillPlug, PLUG_LIFT_M, PLUG_UNDER_COPING_M, type PlugGround, type PlugRegion, PlugSurface, type PortalFrame, frameWorld, portalWings } from "./plug";
-import { BACKFILL_REACH_S_M, BACKFILL_REACH_U_M, OPEN_FRONT_RISE, PLUG_START_M, backfillV, behindFront, openFrontDistance, retainV, wingAcross, wingCopingV, wingPoint } from "./portalOutline";
+import {
+  BACKFILL_REACH_S_M,
+  BACKFILL_REACH_U_M,
+  FACE_COPING_BACK_M,
+  FACE_COPING_TOP_V,
+  OPEN_FRONT_RISE,
+  PLUG_START_M,
+  backfillV,
+  behindFront,
+  masonryCapV,
+  openFrontDistance,
+  retainV,
+  wingAcross,
+  wingCopingV,
+  wingPoint,
+} from "./portalOutline";
 
 /** Flat ground `groundDm` over a 60 × 50 node map; a portal facing west at plan (100, 90), its tunnel running east (+x). */
 function site(groundDm: number | ((q: number, r: number, col: number, row: number) => number)) {
@@ -79,17 +95,37 @@ function underlay(frame: PortalFrame, natural: (x: number, y: number) => number)
   };
 }
 
+/**
+ * A drawn-ground function as the terrain mesh draws it: linear in each 1.25 m sub-lattice triangle (the plug meets it
+ * there along its contour, `HillPlug`), so a step in a test's stub reads as the ramp the mesh draws.
+ */
+function meshed(drawn: (x: number, y: number) => number): (x: number, y: number) => number {
+  const sub = 5 / 4;
+  const row = sub * (Math.sqrt(3) / 2);
+  const at = (qs: number, rs: number) => drawn(sub * (qs + rs / 2), row * rs);
+  return (x, y) => {
+    const rf = y / row;
+    const qf = x / sub - rf / 2;
+    const Q = Math.floor(qf + 1e-9);
+    const R = Math.floor(rf + 1e-9);
+    const fq = qf - Q;
+    const fr = rf - R;
+    if (fq + fr <= 1) return (1 - fq - fr) * at(Q, R) + fq * at(Q + 1, R) + fr * at(Q, R + 1);
+    return (fq + fr - 1) * at(Q + 1, R + 1) + (1 - fq) * at(Q, R + 1) + (1 - fr) * at(Q + 1, R);
+  };
+}
+
 describe("hill plug", () => {
   it("draws the hill the portal retains over the underlay's notch, exactly the natural ground and shaded as it", () => {
     // The hill stands 12 m over the track (28 m); the core's effective ground behind the face is the natural hill.
     const s = site(280);
     const natural = () => 28;
-    const plug = plugOf(s, { drawnM: underlay(s.frame, natural), effectiveM: natural });
+    const drawnM = underlay(s.frame, natural);
+    const plug = plugOf(s, { drawnM, effectiveM: natural });
     const d = plug.data;
     expect(d.triangleCount).toBeGreaterThan(100);
     // Over the notch the plug is the hill itself (plus the lift); where the underlay is the hill, nothing is drawn.
     for (const [ss, u] of [
-      [1, 0],
       [4, 3],
       [8, -6],
       [10, 2],
@@ -97,19 +133,51 @@ describe("hill plug", () => {
       const p = at(ss, u);
       expect(plug.heightAt(p.x, p.y), `s ${ss} u ${u}`).toBeCloseTo(28 + PLUG_LIFT_M, 9);
     }
+    // Right behind the face it never stands over the parapet coping, rising 2 : 1 behind its back edge (verification
+    // fix 2026-09-29: this stub's hill is a 12 m cliff at the face plane; the core's retained hill rises 45° from 0.25 m
+    // over the face top, so there the cap takes at most 0.24 m off it). Before, it stood 3.4 m over the coping here.
+    const behind = at(1, 0);
+    expect(plug.heightAt(behind.x, behind.y)).toBeCloseTo(s.frame.z + masonryCapV(1, 0, { left: 5, right: 5 }), 9);
+    expect(masonryCapV(1, 0, { left: 5, right: 5 })).toBeCloseTo(FACE_COPING_TOP_V - 0.02 + 2 * (1 - 0.71), 9);
     expect(Number.isNaN(plug.heightAt(at(16, 0).x, at(16, 0).y))).toBe(true);
     expect(Number.isNaN(plug.heightAt(at(-2, 0).x, at(-2, 0).y))).toBe(true);
-    // Every vertex is the natural ground: the terrain's own normal (flat: straight up), its baked colour (barycentric
-    // in its lattice triangle, as the terrain mesh interpolates it), and no lip weight.
+    // Beyond the cap's reach (and its neighbours') every vertex is the natural ground: the terrain's own normal (flat:
+    // straight up), its baked colour (barycentric in its lattice triangle, as the terrain mesh interpolates it), and no
+    // lip weight. Nearer the masonry every vertex is the cap exactly.
     const lat = lodLattice(s.terrain, 0);
+    const wings5 = { left: 5, right: 5 };
+    const capAt = (x: number, y: number) => s.frame.z + masonryCapV(x - s.frame.x, s.frame.y - y, wings5);
+    let capped = 0;
     for (let v = 0; v < 3 * d.triangleCount; v++) {
-      expect(d.positions[3 * v + 1]).toBeCloseTo(28 + PLUG_LIFT_M, 5);
-      expect(d.normals[3 * v + 1]).toBeCloseTo(1, 6);
+      const vx = d.positions[3 * v] ?? 0;
+      const vy = -(d.positions[3 * v + 2] ?? 0);
+      // The cap under the hill at the vertex, or within two sub-lattice steps (a clipped vertex interpolates two
+      // lattice vertices, whose normals read their neighbours).
+      let near = capAt(vx, vy);
+      for (const r of [1.26, 2.52]) for (let k = 0; k < 12; k++) near = Math.min(near, capAt(vx + r * Math.cos((k * Math.PI) / 6), vy + r * Math.sin((k * Math.PI) / 6)));
+      if (near < 28 + PLUG_LIFT_M) {
+        const cap = capAt(vx, vy);
+        // Either on the plug's surface (the hill, the cap under it, or the open front's bank), or on the drawn ground
+        // as the terrain mesh draws it, where the plug comes down to it (its contour).
+        // (The lift fades out as the plug comes down to the ground: `PLUG_LIFT_M`.)
+        const pz = d.positions[3 * v + 1] ?? 0;
+        const ground = meshed(drawnM)(vx, vy);
+        const top = plug.surface.sample(vx, vy, 28, { v: 0, d: 0, e: 0, n: 0, f: 0, t: 0 }).t;
+        const onGround = Math.abs(pz - ground) <= 1e-4;
+        if (!onGround) expect(pz, `vertex ${v}`).toBeCloseTo(top + PLUG_LIFT_M * smoothstep(0, PLUG_LIFT_M, top - ground), 4);
+        if (!onGround) expect(top).toBeLessThanOrEqual(Math.min(28, cap - PLUG_LIFT_M) + 1e-9);
+        if (cap < 28 + PLUG_LIFT_M && !onGround && Math.abs(pz - cap) < 1e-4) capped += 1;
+        continue;
+      }
+      // (Lifted over the notch; on the ground itself at its rim, where the lift fades out.)
+      expect(d.positions[3 * v + 1]).toBeCloseTo(28 + PLUG_LIFT_M * smoothstep(0, PLUG_LIFT_M, 28 - meshed(drawnM)(vx, vy)), 3);
+      expect(d.normals[3 * v + 1], `vertex ${v}`).toBeCloseTo(1, 6);
       expect(d.earthwork[3 * v]).toBe(0);
       const x = d.positions[3 * v] ?? 0;
       const y = -(d.positions[3 * v + 2] ?? 0);
       for (let axis = 0; axis < 3; axis++) expect(d.colors[3 * v + axis], `vertex ${v}`).toBeCloseTo(bakedColour(s.terrain, lat, s.shading, x, y, axis), 5);
     }
+    expect(capped).toBeGreaterThan(20);
     for (let t = 0; t < d.triangleCount; t++) expect(faceUp(d.positions, t)).toBeGreaterThan(0);
   });
 
@@ -148,22 +216,115 @@ describe("hill plug", () => {
     }
     expect(checked).toBeGreaterThan(300);
     // Made ground reads as an embankment: its attribute is the fill's potential (3.65 m of fill over the hill at most:
-    // the lip and the earthwork weight in full), its departure is never negative (no bare cut face), and the far
-    // natural ground carries nothing.
+    // the lip and the earthwork weight in full), its departure is never negative (no bare cut face), and its outline is
+    // the fill's toe, with the potential of the daylight line there (since the plug ends along its toe, verification
+    // fix 2026-09-29; before, sub-triangles kept past the toe carried less, down to 0 on the natural ground).
     const attr = (v: number, k: number) => plug.data.earthwork[3 * v + k] ?? 0;
     const n = 3 * plug.data.triangleCount;
     const xs = Array.from({ length: n }, (_, v) => attr(v, 0));
     expect(Math.max(...xs)).toBeCloseTo(encodeEarthworkPotential(PORTAL_TOP_V + PLUG_UNDER_COPING_M - 4), 5);
     expect(Math.max(...xs)).toBeGreaterThan(EARTHWORK_WEIGHT_FROM_X);
-    expect(Math.min(...xs)).toBe(0);
+    expect(Math.min(...xs)).toBeCloseTo(encodeEarthworkPotential(0), 3);
     for (let v = 0; v < n; v++) expect(attr(v, 1)).toBeGreaterThanOrEqual(0);
     expect(plug.maxZ).toBeCloseTo(top, 6);
+  });
+
+  it("ends along its contour with the drawn ground, with the terrain's own look there: no staircase (verification fix 2026-09-29)", () => {
+    // A low portal on flat ground 4 m over the track: the backfill's 1 : 1.5 falls meet the ground in oblique lines.
+    const s = site(200);
+    const wings = { left: 5, right: 5 };
+    const plug = plugOf(s, {}, wings);
+    const surface = plug.surface;
+    const sample = { v: 0, d: 0, e: 0, n: 0, f: 0, t: 0 };
+    const d = plug.data;
+    const key = (x: number, y: number) => `${x.toFixed(4)},${y.toFixed(4)}`;
+    const open = new Set(outline(d).filter((p) => {
+      const ss = p.x - s.frame.x;
+      const u = s.frame.y - p.y;
+      return !(behindFront(ss, u) < 1e-3 && (Math.abs(u) <= PORTAL_HALF_WIDTH_M + 0.2 || Math.abs(u) <= wingAcross(5.6) + 0.35));
+    }).map((p) => key(p.x, p.y)));
+    expect(open.size).toBeGreaterThan(40);
+    let worstRise = 0;
+    const rises: number[] = [];
+    let worstNormal = 0;
+    let worstLip = 0;
+    for (let v = 0; v < 3 * d.triangleCount; v++) {
+      const x = d.positions[3 * v] ?? 0;
+      const y = -(d.positions[3 * v + 2] ?? 0);
+      if (!open.has(key(x, y))) continue;
+      // On the toe where the backfill meets the ground (f = D): before, whole sub-triangles past it were kept wherever
+      // a corner rose, and the outline ran along their edges, up to a metre of fill short of the ground.
+      surface.sample(x, y, surface.naturalAt(x, y), sample);
+      // (Where the fill is defined; past the open front and the walls' lines it is not.)
+      if (Number.isFinite(sample.f)) {
+        worstRise = Math.max(worstRise, Math.abs(sample.f - sample.d));
+        rises.push(Math.abs(sample.f - sample.d));
+      }
+      // The flat natural ground's own normal (straight up), and the potential of the fill's daylight line, so the
+      // relief's facets fade out along the toe itself (from a metre outside it), as on the terrain's own banks.
+      worstNormal = Math.max(worstNormal, 1 - (d.normals[3 * v + 1] ?? 0));
+      if (Number.isFinite(sample.f)) worstLip = Math.max(worstLip, Math.abs((d.earthwork[3 * v] ?? 0) - encodeEarthworkPotential(0)));
+    }
+    rises.sort((a, b) => a - b);
+    // Linear along each sub-triangle edge, the clip lands on the toe to within the fill's kinks (before this fix,
+    // 2026-09-29, automated: median 0.43 m, 90th percentile 0.90 m, most 1.09 m short of the ground).
+    expect(rises[Math.floor(rises.length / 2)]).toBeLessThan(0.01);
+    expect(rises[Math.floor(rises.length * 0.9)]).toBeLessThan(0.15);
+    expect(worstRise).toBeLessThan(0.3);
+    expect(worstNormal).toBeLessThan(1e-6);
+    expect(worstLip).toBeLessThan(0.05);
+    // The clipped cells keep their winding: every triangle faces up.
+    for (let t = 0; t < d.triangleCount; t++) expect(faceUp(d.positions, t)).toBeGreaterThan(0);
+  });
+
+  it("never floats its front edge over the masonry it abuts: under the face coping and each wing coping (verification fix 2026-09-29)", () => {
+    // A hill 12 m over the track, retained as the core retains it: 0.25 m over the face top at the face plane (falling
+    // 1 : 1.5 beyond the face's width), rising 45° behind it; the underlay notch under it.
+    const s = site(280);
+    const z = s.frame.z;
+    const effectiveM = (x: number, y: number) => {
+      const ss = x - s.frame.x;
+      return ss > 0 ? Math.min(28, z + retainV(Math.abs(s.frame.y - y)) + ss) : 28;
+    };
+    const wings = { left: 5, right: 5 };
+    const plug = plugOf(s, { drawnM: underlay(s.frame, () => 28), effectiveM }, wings);
+    const h = (ss: number, u: number) => plug.heightAt(at(ss, u).x, at(ss, u).y);
+    // Along the face coping's back edge the retained hill stood 0.24 m over its top (0.17 m at the plug's front line),
+    // so rays passed under the plug's edge to the bore's dark back: the black sliver.
+    let face = 0;
+    for (let u = -4.2; u <= 4.2; u += 0.1) {
+      const v = h(FACE_COPING_BACK_M, u);
+      if (Number.isNaN(v)) continue;
+      face += 1;
+      expect(v, `u ${u}`).toBeLessThanOrEqual(z + FACE_COPING_TOP_V - 0.02 + 1e-9);
+      expect(effectiveM(at(FACE_COPING_BACK_M, u).x, at(FACE_COPING_BACK_M, u).y)).toBeGreaterThan(z + FACE_COPING_TOP_V);
+    }
+    expect(face).toBeGreaterThan(60);
+    // Along each wing's back edge (its coping's), from its root out: never over the coping's top (the corner where the
+    // face meets the wing stood up to 0.8 m over it: the black notch).
+    let wing = 0;
+    for (const side of [1, -1] as const) {
+      const n = { s: Math.sqrt(3) / 2, u: side * 0.5 };
+      for (let t = 0; t <= 5; t += 0.25) {
+        const w = wingPoint(side, t);
+        const back = 0.8 + 0.06;
+        const v = h(w.s + n.s * back, w.u + n.u * back);
+        if (Number.isNaN(v)) continue;
+        wing += 1;
+        expect(v, `side ${side} t ${t}`).toBeLessThanOrEqual(z + wingCopingV(t) + 0.28 - 0.02 + 1e-9);
+      }
+    }
+    expect(wing).toBeGreaterThan(8);
+    // A metre and more behind the coping the plug is the retained hill again.
+    expect(h(2, 0)).toBeCloseTo(effectiveM(at(2, 0).x, at(2, 0).y) + PLUG_LIFT_M, 9);
   });
 
   it("meets the drawn ground along its whole outline except inside the masonry: no tear, no fade band", () => {
     // A low portal on flat ground 4 m over the track, with a neighbour's 6 m-deep cutting across the plug (8–14 m right).
     const s = site(200);
-    const cutting = (_x: number, y: number) => (90 - y > 8 && 90 - y < 14 ? 14 : 20);
+    // Drawn as the terrain mesh draws it (linear in each 1.25 m sub-triangle, as the app's drawn heightfield is): the
+    // plug ends along its contour with it (verification fix 2026-09-29).
+    const cutting = meshed((_x: number, y: number) => (90 - y > 8 && 90 - y < 14 ? 14 : 20));
     for (const wings of [
       { left: 5, right: 5 },
       { left: 0, right: 2.5 },
@@ -183,7 +344,8 @@ describe("hill plug", () => {
         const inWall = behindFront(ss, u) < 1e-3 && (Math.abs(u) <= PORTAL_HALF_WIDTH_M + 0.2 || (wing > 0.05 && Math.abs(u) <= wingAcross(wing + 0.6) + 0.35));
         if (inWall) continue;
         open += 1;
-        worst = Math.max(worst, Math.abs(p.z - PLUG_LIFT_M - cutting(p.x, p.y)));
+        // (On the ground itself: the lift fades out there.)
+        worst = Math.max(worst, Math.abs(p.z - cutting(p.x, p.y)));
       }
       expect(open).toBeGreaterThan(20);
       expect(worst, JSON.stringify(wings)).toBeLessThan(0.01 + 1e-6);
@@ -234,8 +396,9 @@ describe("hill plug", () => {
         return out;
       };
       const [sa, sb] = plugs.map(seam) as [Map<string, number>, Map<string, number>];
-      // (At 20 m the backfill has fallen to the hill by the middle: only a few vertices meet there.)
-      expect(sa.size, `${lengthM} m`).toBeGreaterThan(lengthM < 20 ? 5 : 0);
+      // (At 20 m the backfill has fallen to the hill by the middle: since the plug ends along its toe (verification fix
+      // 2026-09-29) no vertex lies on the middle line; before, a few of the sub-triangles kept past the toe did.)
+      expect(sa.size, `${lengthM} m`).toBeGreaterThanOrEqual(lengthM < 20 ? 6 : 0);
       expect([...sa.keys()].sort()).toEqual([...sb.keys()].sort());
       for (const [y, z] of sa) expect(sb.get(y), `${lengthM} m at y ${y}`).toBe(z);
       // Each plug stays on its side; over each bore's drawn depth the arch keeps its cover.
@@ -258,11 +421,12 @@ describe("hill plug", () => {
     const s = site(280);
     const z = s.frame.z;
     const section = (u: number) => z + Math.max(0, Math.abs(u) - 4) / 1.5;
-    const cutting = (x: number, y: number) => {
+    // (Drawn as the terrain mesh draws it: linear in each sub-triangle, as the app's drawn heightfield is.)
+    const cutting = meshed((x: number, y: number) => {
       const ss = x - 100;
       const u = 90 - y;
       return ss <= 0 ? Math.min(28, section(u)) : Math.min(28, section(u) + ss);
-    };
+    });
     const effective = (x: number, y: number) => {
       const ss = x - 100;
       const u = 90 - y;
@@ -291,7 +455,7 @@ describe("hill plug", () => {
       const wing = pu >= 0 ? wings.right : wings.left;
       if (behindFront(ss, pu) < 1e-3 && (Math.abs(pu) <= PORTAL_HALF_WIDTH_M + 0.2 || Math.abs(pu) <= wingAcross(wing + 0.6) + 0.35)) continue;
       open += 1;
-      far = Math.max(far, Math.abs(p.z - PLUG_LIFT_M - cutting(p.x, p.y)));
+      far = Math.max(far, Math.abs(p.z - cutting(p.x, p.y)));
     }
     expect(open).toBeGreaterThan(10);
     expect(far).toBeLessThan(0.01 + 1e-6);

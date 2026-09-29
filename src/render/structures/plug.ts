@@ -4,7 +4,22 @@ import { CREST_ROUND_M, EARTHWORK_MIN_M, FORMATION_HALF_WIDTH_M, SIDE_SLOPE_RUN,
 import { DRY_FULL_M } from "../terrain/earthworkMesh";
 import type { TerrainShading } from "../terrain/terrainShading";
 import { PORTAL_HALF_WIDTH_M, PORTAL_MAX_WING_M, PORTAL_RETAIN_ABOVE_TOP_M, PORTAL_WING_SPLAY_COS, PORTAL_WING_SPLAY_SIN, WING_T } from "./dimensions";
-import { OPEN_FRONT_RISE, PLUG_START_M, type PortalWings, WING_MIN_RETAIN_M, backfillV, behindFront, openFrontDistance, retainV, underMasonry, wingAcross, wingBack, wingCopingV, wingPoint } from "./portalOutline";
+import {
+  OPEN_FRONT_RISE,
+  PLUG_START_M,
+  type PortalWings,
+  WING_MIN_RETAIN_M,
+  backfillV,
+  behindFront,
+  masonryCapV,
+  openFrontDistance,
+  retainV,
+  underMasonry,
+  wingAcross,
+  wingBack,
+  wingCopingV,
+  wingPoint,
+} from "./portalOutline";
 
 export { PLUG_START_M } from "./portalOutline";
 
@@ -55,12 +70,20 @@ export { PLUG_START_M } from "./portalOutline";
  * rule (a tunnel end's clip plane that follows the wings, or the core retaining the backfill), not render.
  */
 
-/** The plug stands this far over the surface it covers (no depth fight at its outline). */
+/**
+ * The plug stands this far over the surface it covers (no depth fight over it), faded out as it comes down to the
+ * drawn ground at its outline, where it ends on it.
+ */
 export const PLUG_LIFT_M = 0.04;
 /** The hill behind the face is retained this far over the face top (the core's `PORTAL_RETAIN_ABOVE_TOP_M`). */
 export const PLUG_UNDER_COPING_M = PORTAL_RETAIN_ABOVE_TOP_M;
 /** A plug triangle is drawn only where the plug stands this far over the drawn ground at one of its corners. */
 export const PLUG_MIN_RISE_M = 0.01;
+/**
+ * A plug vertex takes the terrain's own look where it lies on it (PLUG_MIN_RISE_M), its own from this far over the
+ * drawn ground, smoothly between (`HillPlug`).
+ */
+export const PLUG_BLEND_RISE_M = 0.3;
 /**
  * The backfill reaches this far in front of the plug's front line (still inside the walls: the line lies 0.6 m behind
  * their fronts, in 0.8 m of masonry), so every vertex a clip puts on it carries it: rounding, and the linear clip across
@@ -236,7 +259,8 @@ export function portalWings(
 
 /**
  * One evaluation of the plug surface: the plug V, the drawn ground D, the shown ground (D, or E in its notch), the
- * natural N and the backfill as capped (−Infinity where none), m.
+ * natural N, the backfill as capped (−Infinity where none; f − D is negative past its toe, where `HillPlug` clips) and
+ * the surface before it is kept over D (V = max(D, t)), m.
  */
 export interface PlugSample {
   v: number;
@@ -244,6 +268,7 @@ export interface PlugSample {
   e: number;
   n: number;
   f: number;
+  t: number;
 }
 
 /**
@@ -277,9 +302,12 @@ export class PlugSurface {
     let fill = Number.NEGATIVE_INFINITY;
     let open = Number.POSITIVE_INFINITY;
     let openFrame: PortalFrame | undefined;
+    let masonry = Number.POSITIVE_INFINITY;
     for (const p of this.portals) {
       const l = frameLocal(p.frame, x, y, this.local);
       if (l.s > 0) behindAny = true;
+      const m = p.frame.z + masonryCapV(l.s, l.u, p.wings) - PLUG_LIFT_M;
+      if (m < masonry) masonry = m;
       // (With slack where masonry stands over the line: the plug's clipped vertices lie on the line itself, where
       // rounding dropped the fill from about every other one, a sawtooth along the walls.)
       const bf = behindFront(l.s, l.u);
@@ -328,6 +356,10 @@ export class PlugSurface {
       if (cap < top) top = cap;
       if (cap < out.f) out.f = cap;
     }
+    // Never over the masonry it abuts (`masonryCapV`), so its front edge never floats over a coping.
+    if (masonry < top) top = masonry;
+    if (masonry < out.f) out.f = masonry;
+    out.t = top;
     out.v = top > d ? top : d;
     return out;
   }
@@ -368,16 +400,33 @@ interface BuildVertex {
   x: number;
   y: number;
   z: number;
-  nx: number;
-  ny: number;
-  nz: number;
-  r: number;
-  g: number;
-  b: number;
+  /**
+   * The drawn ground there, how far the plug stands over it (V − D, which sets the look's blend), and the contour
+   * clip's value (`contourRise`: negative past a fill's toe, where the plug is clipped).
+   */
+  d: number;
+  over: number;
+  rise: number;
+  /** The terrain's own look there (`t…`: normal, linear colour, earthwork attribute) and the plug's (`p…`). */
+  tnx: number;
+  tny: number;
+  tnz: number;
+  pnx: number;
+  pny: number;
+  pnz: number;
+  tr: number;
+  tg: number;
+  tb: number;
+  pr: number;
+  pg: number;
+  pb: number;
   /** The earthwork attribute (encoded potential, departure, distance), the terrain's layout. */
-  ex: number;
-  ey: number;
-  ez: number;
+  tex: number;
+  tey: number;
+  tez: number;
+  pex: number;
+  pey: number;
+  pez: number;
 }
 
 export class HillPlug {
@@ -392,7 +441,7 @@ export class HillPlug {
   readonly frame: PortalFrame;
   readonly wings: PortalWings;
   private readonly lat;
-  private readonly scratch: PlugSample = { v: 0, d: 0, e: 0, n: 0, f: 0 };
+  private readonly scratch: PlugSample = { v: 0, d: 0, e: 0, n: 0, f: 0, t: 0 };
   private readonly local = { s: 0, u: 0 };
 
   constructor(
@@ -463,7 +512,7 @@ export class HillPlug {
   heightAt(x: number, y: number): number {
     if (x < this.minX || x > this.maxX || y < this.minY || y > this.maxY || this.inside(x, y) < 0) return Number.NaN;
     const p = this.surface.sample(x, y, this.surface.naturalAt(x, y), this.scratch);
-    return p.v - p.d > PLUG_MIN_RISE_M ? p.v + PLUG_LIFT_M : Number.NaN;
+    return p.v - p.d > PLUG_MIN_RISE_M ? p.v + PLUG_LIFT_M * smoothstep(0, PLUG_LIFT_M, p.v - p.d) : Number.NaN;
   }
 
   /** The drawn ground on a grid over the plug's region and along its wings' fronts: the view rebuilds the plug when it changes. */
@@ -544,7 +593,19 @@ export class HillPlug {
       if (g >= 0) return (eAt[g] ?? 0) - (nAt[g] ?? 0);
       return sample.e - sample.n;
     };
+    // Whether the plug covers the underlay's notch at the sub-vertex or a neighbour (E over D).
+    const notchNear = (qs: number, rs: number): boolean => {
+      for (let i = -4; i < 24; i += 4) {
+        const g = evalAt(qs + (i < 0 ? 0 : (NEIGHBOURS[i] ?? 0)), rs + (i < 0 ? 0 : (NEIGHBOURS[i + 1] ?? 0)));
+        const e = g >= 0 ? (eAt[g] ?? 0) : sample.e;
+        const d = g >= 0 ? (dAt[g] ?? 0) : sample.d;
+        if (e > d + NOTCH_MIN_M) return true;
+      }
+      return false;
+    };
     const attr = new Float64Array(3);
+    const terrainNormal = { x: 0, y: 0, z: 0 };
+    const plugNormal = { x: 0, y: 0, z: 0 };
 
     // Vertices of the drawn triangles, shared by every triangle that meets them.
     const vertexIds = new Map<number, number>();
@@ -559,11 +620,16 @@ export class HillPlug {
       const ev = g >= 0 ? (eAt[g] ?? 0) : sample.e;
       const nv = g >= 0 ? (nAt[g] ?? 0) : sample.n;
       const fv = g >= 0 ? (fAt[g] ?? 0) : sample.f;
-      // A vertex where the plug lies on the terrain (its outline) takes the terrain's own look: the normal the terrain
-      // mesh gives it (tilted by the drawn ground's departure) and its earthwork attribute, so the shading and the
-      // colours are continuous across the outline; the old plug's outline showed the lattice's sawtooth in light.
-      const onTerrain = v - dv <= PLUG_MIN_RISE_M;
-      const d0 = onTerrain ? shownDeparture(qs, rs) : departure(qs, rs);
+      // Each vertex carries two looks, blended where the triangle is pushed (`push`): the terrain's own (the normal the
+      // terrain mesh gives it, tilted by the shown ground's departure, its colour and its earthwork attribute), and
+      // the plug's (tilted by the plug's departure, with the backfill's potential). The look moves from the first to
+      // the second as the plug rises over the drawn ground (PLUG_BLEND_RISE_M), and the plug ends at the drawn ground
+      // itself (clipped along the contour where it meets it), so shading, colours and facets run on across the
+      // outline. Kept whole where a corner rose, with the plug's look at that corner, every sub-triangle along the
+      // outline stood out in light and in the relief's facets, a 1.25 m staircase (verification finding 2026-09-29;
+      // the old plug's outline showed the lattice's sawtooth the same way).
+      const x = sub * (qs + rs / 2);
+      const y = sub * rs * HALF_SQRT3;
       // The smooth natural normal and colour at the sub-vertex, barycentric in its LOD0 triangle.
       const Q = Math.floor(qs / SUB);
       const R = Math.floor(rs / SUB);
@@ -583,58 +649,97 @@ export class HillPlug {
             ];
       const blend = (source: Float32Array, axis: number): number => {
         let s = 0;
-        for (const [node, w] of frame) if (w !== 0 && node >= 0) s += w * (source[3 * node + axis] ?? 0);
+        for (const [node, weight] of frame) if (weight !== 0 && node >= 0) s += weight * (source[3 * node + axis] ?? 0);
         return s;
       };
-      let nx = blend(shading.normals, 0);
-      let ny = blend(shading.normals, 1);
-      let nz = blend(shading.normals, 2);
-      let len = Math.hypot(nx, ny, nz) || 1;
-      nx /= len;
-      ny /= len;
-      nz /= len;
-      // Tilted by the departure's least-squares gradient over the six neighbours, exactly as the terrain mesh tilts a
-      // moved vertex: zero where the plug is the natural hill, so the normal is the terrain's own there.
-      let gx = 0;
-      let gy = 0;
-      for (let i = 0; i < 24; i += 4) {
-        const dq = qs + (NEIGHBOURS[i] ?? 0);
-        const dr = rs + (NEIGHBOURS[i + 1] ?? 0);
-        const dd = (onTerrain ? shownDeparture(dq, dr) : departure(dq, dr)) - d0;
-        gx += (NEIGHBOURS[i + 2] ?? 0) * dd;
-        gy += (NEIGHBOURS[i + 3] ?? 0) * dd;
-      }
-      if (gx !== 0 || gy !== 0) {
-        const s0 = 1 / Math.max(ny, 1e-3);
-        nx = nx * s0 - gx / (3 * sub);
-        nz = nz * s0 + gy / (3 * sub);
-        ny = 1;
-        len = Math.hypot(nx, ny, nz) || 1;
-        nx /= len;
-        ny /= len;
-        nz /= len;
-      }
-      const dry = smoothstep(EARTHWORK_MIN_M, DRY_FULL_M, Math.abs(onTerrain ? dv - nv : d0));
-      const colour = (axis: number): number => {
+      const n0x = blend(shading.normals, 0);
+      const n0y = blend(shading.normals, 1);
+      const n0z = blend(shading.normals, 2);
+      const n0 = Math.hypot(n0x, n0y, n0z) || 1;
+      // The natural normal tilted by a departure's least-squares gradient over the six neighbours, exactly as the
+      // terrain mesh tilts a moved vertex (zero where the departure is flat, so the terrain's own normal there).
+      const tilted = (depart: (qs: number, rs: number) => number, out: { x: number; y: number; z: number }): void => {
+        let nx = n0x / n0;
+        let ny = n0y / n0;
+        let nz = n0z / n0;
+        const d0 = depart(qs, rs);
+        let gx = 0;
+        let gy = 0;
+        for (let i = 0; i < 24; i += 4) {
+          const dd = depart(qs + (NEIGHBOURS[i] ?? 0), rs + (NEIGHBOURS[i + 1] ?? 0)) - d0;
+          gx += (NEIGHBOURS[i + 2] ?? 0) * dd;
+          gy += (NEIGHBOURS[i + 3] ?? 0) * dd;
+        }
+        if (gx !== 0 || gy !== 0) {
+          const s0 = 1 / Math.max(ny, 1e-3);
+          nx = nx * s0 - gx / (3 * sub);
+          nz = nz * s0 + gy / (3 * sub);
+          ny = 1;
+          const len = Math.hypot(nx, ny, nz) || 1;
+          nx /= len;
+          ny /= len;
+          nz /= len;
+        }
+        out.x = nx;
+        out.y = ny;
+        out.z = nz;
+      };
+      tilted(shownDeparture, terrainNormal);
+      tilted(departure, plugNormal);
+      // Made ground blends toward the dry recipe as it moves: the terrain by its drawn departure, the plug by its own.
+      const dryT = smoothstep(EARTHWORK_MIN_M, DRY_FULL_M, Math.abs(dv - nv));
+      const dryP = smoothstep(EARTHWORK_MIN_M, DRY_FULL_M, Math.abs(v - nv));
+      const colour = (axis: number, dry: number): number => {
         const natural = blend(shading.colors, axis);
         return dry > 0 ? natural + (blend(shading.dryColors, axis) - natural) * dry : natural;
       };
-      const x = sub * (qs + rs / 2);
-      const y = sub * rs * HALF_SQRT3;
-      // The earthwork attribute of the ground the vertex shows (the terrain's own on its outline, the shown ground's
-      // over the notch), raised by the backfill's potential (how far the fill stands over that ground), as on an
-      // embankment: the relief's facets fade out from a metre outside the fill's toe, so the fill's sub-triangles
-      // never show as a sawtooth there, and where the plug is the natural hill it is faceted as the terrain.
-      if (this.surface.attributeM) this.surface.attributeM(x, y, nv, onTerrain ? dv : ev, attr);
-      else attr.fill(0);
-      const base = onTerrain ? dv : ev;
-      const fillX = fv > Number.NEGATIVE_INFINITY ? encodeEarthworkPotential(fv - base) : 0;
-      const ex = Math.max(attr[0] ?? 0, fillX);
-      const ey = onTerrain ? (attr[1] ?? 0) : Math.abs(v - nv) > 1e-6 ? v - nv : 0;
-      // Off the terrain the distance is "far": the shader's lower-batter test (bare earth in cuts deeper than 1.2 m near
-      // a centreline) would take the 45° trim above a portal's parapet, directly over the bore, for a cutting's floor.
-      const ez = onTerrain && this.surface.attributeM ? (attr[2] ?? 0) : 99;
-      const vertex: BuildVertex = { x, y, z: v, nx, ny, nz, r: colour(0), g: colour(1), b: colour(2), ex, ey, ez };
+      // The earthwork attribute: the terrain's own; over the plug, that of the ground it shows (the core's shown
+      // ground over the notch) raised by the backfill's potential (how far the fill stands over that ground), as on
+      // an embankment, so the relief's facets fade out from a metre outside the fill's toe and where the plug is the
+      // natural hill it is faceted as the terrain. Off the terrain the distance is "far": the shader's lower-batter
+      // test (bare earth in cuts deeper than 1.2 m near a centreline) would take the 45° trim above a portal's
+      // parapet, directly over the bore, for a cutting's floor.
+      // The potential carries the fill's own on the terrain's side too (measured from the drawn ground), so the relief's
+      // facets fade out from a metre outside the fill's toe: its edge of facets then follows the toe (the contour the
+      // plug is clipped along) instead of the sub-triangles' edges.
+      let tex = 0;
+      let tey = 0;
+      let tez = 99;
+      if (this.surface.attributeM) {
+        this.surface.attributeM(x, y, nv, dv, attr);
+        tex = attr[0] ?? 0;
+        tey = attr[1] ?? 0;
+        tez = attr[2] ?? 0;
+        this.surface.attributeM(x, y, nv, ev, attr);
+      } else attr.fill(0);
+      if (fv > Number.NEGATIVE_INFINITY) tex = Math.max(tex, encodeEarthworkPotential(fv - dv));
+      const fillX = fv > Number.NEGATIVE_INFINITY ? encodeEarthworkPotential(fv - ev) : 0;
+      const vertex: BuildVertex = {
+        x,
+        y,
+        z: v,
+        d: dv,
+        over: v - dv,
+        rise: contourRise(fv, dv, notchNear(qs, rs)),
+        tnx: terrainNormal.x,
+        tny: terrainNormal.y,
+        tnz: terrainNormal.z,
+        pnx: plugNormal.x,
+        pny: plugNormal.y,
+        pnz: plugNormal.z,
+        tr: colour(0, dryT),
+        tg: colour(1, dryT),
+        tb: colour(2, dryT),
+        pr: colour(0, dryP),
+        pg: colour(1, dryP),
+        pb: colour(2, dryP),
+        tex,
+        tey,
+        tez,
+        pex: Math.max(attr[0] ?? 0, fillX),
+        pey: Math.abs(v - nv) > 1e-6 ? v - nv : 0,
+        pez: 99,
+      };
       vertexIds.set(key, verts.length);
       verts.push(vertex);
       return vertex;
@@ -646,11 +751,16 @@ export class HillPlug {
     const ew: number[] = [];
     let maxZ = Number.NEGATIVE_INFINITY;
     const push = (p: BuildVertex): void => {
-      const z = p.z + PLUG_LIFT_M;
+      // Lifted over the surface it covers, but not along its toe, where it ends on the drawn ground: a 4 cm step there
+      // drew a dark line (its shadow and the gap under it) along the contour.
+      const z = p.z + PLUG_LIFT_M * smoothstep(0, PLUG_LIFT_M, p.over);
       pos.push(p.x, z, -p.y);
-      nor.push(p.nx, p.ny, p.nz);
-      col.push(p.r, p.g, p.b);
-      ew.push(p.ex, p.ey, p.ez);
+      const w = smoothstep(PLUG_MIN_RISE_M, PLUG_BLEND_RISE_M, p.over);
+      const m = (a: number, b: number) => a + (b - a) * w;
+      const n = unit(m(p.tnx, p.pnx), m(p.tny, p.pny), m(p.tnz, p.pnz));
+      nor.push(n.x, n.y, n.z);
+      col.push(m(p.tr, p.pr), m(p.tg, p.pg), m(p.tb, p.pb));
+      ew.push(m(p.tex, p.pex), m(p.tey, p.pey), m(p.tez, p.pez));
       if (z > maxZ) maxZ = z;
     };
     const tri: [number, number][] = [
@@ -660,8 +770,20 @@ export class HillPlug {
     ];
     // A vertex where a triangle is clipped takes the surface itself: interpolated from a corner that rises, it would
     // float over the drawn ground along the open front (the drawn ground is linear along the edge, the plug is not).
+    // (The drawn ground and the contour value stay interpolated: every clip vertex lies in its lattice triangle, where
+    // the terrain mesh is linear, so it is the mesh's own height there; and the contour clip then splits every edge
+    // where its neighbour does.)
     const exact = (p: BuildVertex): void => {
-      p.z = this.surface.sample(p.x, p.y, this.surface.naturalAt(p.x, p.y), sample).v;
+      const e = this.surface.sample(p.x, p.y, this.surface.naturalAt(p.x, p.y), sample);
+      p.z = e.t > p.d ? e.t : p.d;
+      p.over = p.z - p.d;
+    };
+    // Where the plug meets the drawn ground (its rise, linear along an edge, crosses 0) it lies on the terrain mesh
+    // there, which is linear along the same edge: the drawn ground, interpolated.
+    const onGround = (p: BuildVertex): void => {
+      p.z = p.d;
+      p.over = 0;
+      p.rise = 0;
     };
     const reach = sub * 1.5;
     for (let rs = rs0; rs < rs1; rs++) {
@@ -713,6 +835,9 @@ export class HillPlug {
             if (!cell.behind) continue;
             let poly: BuildVertex[] = cell.poly;
             for (let c = 0; c < this.convexCount && poly.length > 2; c++) poly = clipPolygon(poly, (p) => this.convex(c, p.x, p.y), exact);
+            // And along the toe where a fill meets the drawn ground (`contourRise`; the same values on both sides of
+            // every edge, so no crack opens between neighbours).
+            if (poly.length > 2) poly = clipPolygon(poly, (p) => p.rise, onGround);
             for (let k = 1; k + 1 < poly.length; k++) {
               const p0 = poly[0] as BuildVertex;
               const p1 = poly[k] as BuildVertex;
@@ -741,14 +866,64 @@ export class HillPlug {
   }
 }
 
-/** Linear interpolation of two build vertices (plan position, height, normal, colour and the earthwork attribute). */
+/**
+ * The plug's clip function at a lattice vertex: the fill's height `f` over the drawn ground `d`, negative past its toe,
+ * no lower than −1 m (no fill: −Infinity), so a clip between a vertex just inside and one with no fill lands next to
+ * the inside one, and one between two of the fill's vertices lands on its toe. At or beside the underlay's notch
+ * (`notch`) it is never negative: there the plug is the hill the core retains, which meets the drawn ground where the
+ * notch ends, at the lattice's vertices, and a whole sub-triangle covers the notch's last dip.
+ */
+function contourRise(f: number, d: number, notch: boolean): number {
+  const r = f - d;
+  if (notch) return r > 0 ? r : 0;
+  return r > -1 ? r : -1;
+}
+
+/** Linear interpolation of two build vertices (plan position, height, drawn ground, rise, both looks). */
 function lerpVertex(a: BuildVertex, b: BuildVertex, t: number): BuildVertex {
   const m = (p: number, q: number) => p + (q - p) * t;
-  const nx = m(a.nx, b.nx);
-  const ny = m(a.ny, b.ny);
-  const nz = m(a.nz, b.nz);
-  const len = Math.hypot(nx, ny, nz) || 1;
-  return { x: m(a.x, b.x), y: m(a.y, b.y), z: m(a.z, b.z), nx: nx / len, ny: ny / len, nz: nz / len, r: m(a.r, b.r), g: m(a.g, b.g), b: m(a.b, b.b), ex: m(a.ex, b.ex), ey: m(a.ey, b.ey), ez: m(a.ez, b.ez) };
+  const tn = unit(m(a.tnx, b.tnx), m(a.tny, b.tny), m(a.tnz, b.tnz));
+  const tnx = tn.x;
+  const tny = tn.y;
+  const tnz = tn.z;
+  const pn = unit(m(a.pnx, b.pnx), m(a.pny, b.pny), m(a.pnz, b.pnz));
+  return {
+    x: m(a.x, b.x),
+    y: m(a.y, b.y),
+    z: m(a.z, b.z),
+    d: m(a.d, b.d),
+    over: m(a.over, b.over),
+    rise: m(a.rise, b.rise),
+    tnx,
+    tny,
+    tnz,
+    pnx: pn.x,
+    pny: pn.y,
+    pnz: pn.z,
+    tr: m(a.tr, b.tr),
+    tg: m(a.tg, b.tg),
+    tb: m(a.tb, b.tb),
+    pr: m(a.pr, b.pr),
+    pg: m(a.pg, b.pg),
+    pb: m(a.pb, b.pb),
+    tex: m(a.tex, b.tex),
+    tey: m(a.tey, b.tey),
+    tez: m(a.tez, b.tez),
+    pex: m(a.pex, b.pex),
+    pey: m(a.pey, b.pey),
+    pez: m(a.pez, b.pez),
+  };
+}
+
+const unitScratch = { x: 0, y: 1, z: 0 };
+
+/** (x, y, z) normalized, into a shared scratch (read it before the next call). */
+function unit(x: number, y: number, z: number): { x: number; y: number; z: number } {
+  const len = Math.hypot(x, y, z) || 1;
+  unitScratch.x = x / len;
+  unitScratch.y = y / len;
+  unitScratch.z = z / len;
+  return unitScratch;
 }
 
 /**

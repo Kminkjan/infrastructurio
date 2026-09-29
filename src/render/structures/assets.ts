@@ -33,7 +33,25 @@ import {
   portalSkylineV,
 } from "./dimensions";
 import { girderDepthM, trussDepthM } from "./layout";
-import { WALL_FOOT_UNDER_SKYLINE_M, WING_PIER_ALONG_M, WING_PIER_PROUD_M, WING_PIER_TOP_V, wallFootV, wingAcross, wingBack, wingCopingV, wingPoint } from "./portalOutline";
+import {
+  CORNICE_BACK_M,
+  CORNICE_HALF_M,
+  FACE_COPING_BACK_M,
+  FACE_COPING_HALF_M,
+  FACE_COPING_TOP_V,
+  WALL_FOOT_UNDER_SKYLINE_M,
+  WING_COPING_H_M,
+  WING_COPING_OVER_M,
+  WING_PIER_ALONG_M,
+  WING_PIER_CAP_M,
+  WING_PIER_PROUD_M,
+  WING_PIER_TOP_V,
+  wallFootV,
+  wingAcross,
+  wingBack,
+  wingCopingV,
+  wingPoint,
+} from "./portalOutline";
 import { BEND_SEGMENT_M, type StructureBuilder as SB, StructureBuilder } from "./structureBuilder";
 
 /**
@@ -397,9 +415,9 @@ export function buildAbutment(depthM: number): StructureBuilder {
 
 const RING = 0.62;
 const CORNICE_H = 0.35;
-/** The wing coping's height and its overhang past the wall's faces. */
-const COPING_H = 0.28;
-const COPING_OVER_M = 0.06;
+/** The wing coping's height and its overhang past the wall's faces (`portalOutline.ts`, which the plug's cap reads). */
+const COPING_H = WING_COPING_H_M;
+const COPING_OVER_M = WING_COPING_OVER_M;
 /** The wing walls start this far along their line inside the face wall, so the corner between them is closed. */
 const WING_ROOT_M = -0.5;
 
@@ -480,9 +498,9 @@ export function buildPortal(wingLeftM: number, wingRightM: number, depthM: numbe
     shade(sb, "walls", palette.masonry, 1.05);
     sb.bar(-0.14, 0.02, bottom, corniceBottom, Math.min(z0, z1), Math.max(z0, z1), { x1: false, y1: false });
   }
-  sb.use("trim", palette.masonryLight).bar(-0.22, PORTAL_WALL_M, corniceBottom, PORTAL_TOP_V, -half - 0.14, half + 0.14, { y0: true });
+  sb.use("trim", palette.masonryLight).bar(-0.22, CORNICE_BACK_M, corniceBottom, PORTAL_TOP_V, -CORNICE_HALF_M, CORNICE_HALF_M, { y0: true });
   sb.use("walls", palette.masonry).bar(0.05, 0.65, PORTAL_TOP_V, PORTAL_TOP_V + PORTAL_PARAPET_M, -half, half, { y1: false });
-  sb.use("trim", palette.masonryLight).bar(-0.01, 0.71, PORTAL_TOP_V + PORTAL_PARAPET_M, PORTAL_TOP_V + PORTAL_PARAPET_M + COPING_M, -half - 0.05, half + 0.05, {});
+  sb.use("trim", palette.masonryLight).bar(-0.01, FACE_COPING_BACK_M, PORTAL_TOP_V + PORTAL_PARAPET_M, FACE_COPING_TOP_V, -FACE_COPING_HALF_M, FACE_COPING_HALF_M, {});
   // The reveal through the face wall, then the dark bore, darker with depth.
   const boreSection = (xa: number, xb: number): void => {
     for (const side of [1, -1]) {
@@ -576,7 +594,7 @@ function buildWing(sb: SB, side: 1 | -1, lengthM: number, depthM: number, steep:
   sb.use("walls", palette.masonry);
   box(lengthM + p0, lengthM + p1, -WING_PIER_PROUD_M, WING_T + WING_PIER_PROUD_M, foot, yEnd + WING_PIER_TOP_V, false);
   sb.use("trim", palette.masonryLight);
-  box(lengthM + p0 - COPING_OVER_M, lengthM + p1 + COPING_OVER_M, -WING_PIER_PROUD_M - COPING_OVER_M, WING_T + WING_PIER_PROUD_M + COPING_OVER_M, yEnd + WING_PIER_TOP_V, yEnd + WING_PIER_TOP_V + 0.16, true);
+  box(lengthM + p0 - COPING_OVER_M, lengthM + p1 + COPING_OVER_M, -WING_PIER_PROUD_M - COPING_OVER_M, WING_T + WING_PIER_PROUD_M + COPING_OVER_M, yEnd + WING_PIER_TOP_V, yEnd + WING_PIER_TOP_V + WING_PIER_CAP_M, true);
 }
 
 // ---- Registry --------------------------------------------------------------------------------------------------
