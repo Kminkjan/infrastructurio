@@ -710,7 +710,8 @@ export class HillPlug {
         tex = attr[0] ?? 0;
         tey = attr[1] ?? 0;
         tez = attr[2] ?? 0;
-        this.surface.attributeM(x, y, nv, ev, attr);
+        // (The shown ground is the drawn one outside the notch: the same attribute.)
+        if (ev !== dv) this.surface.attributeM(x, y, nv, ev, attr);
       } else attr.fill(0);
       if (fv > Number.NEGATIVE_INFINITY) tex = Math.max(tex, encodeEarthworkPotential(fv - dv));
       const fillX = fv > Number.NEGATIVE_INFINITY ? encodeEarthworkPotential(fv - ev) : 0;
