@@ -2216,6 +2216,85 @@ human evidence.
   fold; the valley's first 1–2 m behind the plane, where the smooth maximum's band is still narrow; curved or graded
   approaches, whose V the fan takes from the level straight one (not probed apart); the plug's 45° bank beyond the end
   piers at low portals (unchanged); timings on the gate hardware.
+- **Verification fixes (2026-09-29).** An adversarial verification at `8c7dca9` (automated probes, agent browser runs)
+  reported six findings, two major. Fixed at `ae14adb` (core), `e6f4ba0` (render) and `57598f1` (core and render);
+  captures from `c93fd83`. Automated unless labelled agent; the agent captures (before at `8c7dca9` from a scratch
+  detached worktree, after at the fixed code less a later early exit in `reachEdgeWeight` that leaves the byte pin
+  and every test unchanged; 22 views each, no page errors or warnings) are in the gitignored
+  `test-results/d4-wedges-fix/`, agent evidence only.
+  - **Undo, then redo, refused** (major; since `17bfb27`). A history apply carries no structure choice, so a cutting the
+    10 m rule had made from a shallow tunnel run was judged against the 8 m band and refused as `undo-blocked`. A history
+    apply now allows every ground piece 10 m: a ground piece deeper than the band comes only from such a run, and the
+    other ground rules (water, 8 m above) are the runs' own exclusions. It cannot re-derive the runs, since a tunnel
+    built on later would have kept a run a tunnel. Build, undo and redo of the committed population's accepted free
+    drags: refused 14 of 954 (Track) and 20 of 896 (Straight line) → 0 and 0. Chains built, undone and redone step by
+    step, each state compared: 12 and 12 of 150 → 0 and 0. So `undo-blocked` is again unreachable from commands, as the
+    D2 finding says. Tested, including the verification's Track drag (181, 151) → (191, 166).
+  - **The crack along the plug's open outline** (major). A seam vertex inside the plug (the right wing line's
+    extension behind the face, crossing a lattice edge about 9 m behind the plane) took the core's effective ground
+    exactly, over a terrain mesh that sags under the rounded cutting's end by its linear error (up to 0.16 m). Where that
+    edge was shared with the terrain, the outline stood off it: 0.182 m (ew75 west), 0.061 (xslope), 0.174 (ewhill
+    west). Seam vertices off the outline now take the effective ground interpolated from the lattice vertices, as the
+    mesh draws it; on the outline under the masonry it stays exact. Agent: xslope Detail yaw 3, the crack's darkest
+    pixel went from an RGB sum of 12 to 258 (local median 317); at Close yaw 3 the dashed crack is gone.
+  - **The sliver from the south wing's end pier.** The wing's backfill past its end falls 1 : 1.5 from the coping. On a
+    downhill side the ground falls about as fast, so it ran on down the approach's embankment as a 0.4 m ridge. The
+    ridge stood over 0.1 m for 7.0–7.8 m past the pier at ew75 west, xslope, ewhill west and the dead end, and it was cut
+    off at the region's box 0.19–0.66 m over the terrain. Two changes:
+    - Past the pier the backfill also falls as far as the ground along the wing line falls below the ground at the pier.
+      Where the ground rises it is unchanged, so the bank still ramps up to the hill retained beyond a short wing.
+    - The surface comes down at 45° to the drawn ground toward its regions' edges.
+
+    Now: 0.5, 0.7, 2.4 and 0.8 m past the pier, and every open outline within 0.011 m of the terrain in the 11 portals
+    of 7 scenes (before up to 0.663 m). Bank area over 0.1 m in front of the face beyond 10 m across: 9.5 → 0 m²
+    (ew75 west), 18.3 → 2.5 (xslope), 18.1 → 5.6 (ewhill west), 20.1 → 2.6 (dead end), 15.9 → 10.4 (low2); short40
+    unchanged. Agent: at Close yaw 5 the strip is gone at ew75 west and the dead end, and the bank ends in a small soft
+    lobe past the pier. The [art direction](../art-direction.md)'s backfill description does not yet say this.
+  - **The ground stepping where another track's earthworks end.** The 2.5 m band read another piece's fill envelope
+    through `conformRule`'s narrowing, and the reach bound holds only for 0.6 m. The band now gives way to 0.6 m within a
+    metre of a piece's reach edge, either side. This applies only where that piece's envelopes can change the band: its
+    cut the lowest and at most 3.5 m over the ground, or its fill the highest and at most 6 m under it. `reachEdgeWeight`
+    is folded as the least in `conformedHeightM`, `ground.ts` and the chunk pass, and pieces and chunks are read and
+    queued 4 m further out.
+    - The traced scene (free drag 244, then Track (228, 91) → (235, 98)) had its largest step in 0.02 m, beyond the
+      natural change, go from 0.175 m to 0.017 m.
+    - The population probe built each accepted tunnel drag plus one track beside each portal (12 per portal: parallel at
+      three offsets, or crossing 5–15 m behind the plane, either side). It scanned rows and columns at 0.02 m, 0.3–15 m
+      behind the plane and 25 m across, off 0.3 m of any tunnel plane. Track (543 networks): 13 over 0.06 m and 3 over
+      0.12 m, worst 0.185 m → 10, 0 and 0.065 m. Straight line (521): 12, 3 and 0.185 m → 10, 0 and 0.065 m.
+    - The 10 left are a steep but continuous fold where the portal's fan cut lies a few centimetres under the natural
+      ground beside a neighbour's fill, inside the leave-natural blend. They are identical at `8c7dca9`, unchanged with
+      the band held at 0.6 m, and absent at `2ae19ab`, whose headwall cut 0.6 m deeper there: new with the fan, not
+      the band, and not fixed.
+    - A weight from the reach edge alone gave the band way near the approach's own pieces too: the ew75 drawn-crease
+      measure went 0.744 → 0.805. With the relevance it is 0.744 and 0.629 as before; its bound was tightened
+      0.85 → 0.78.
+    - The byte pin was re-recorded for LOD0's positions, normals and attribute, its heightfield and the surfaces: 40 of
+      the pinned network's 0.625 m samples moved, by at most 0.022 m. With the weight held at 1, every hash of `8c7dca9`
+      was drawn.
+    - So "the reach and neighbour bounds hold" above holds again for the band.
+  - **The lit shoulder behind the wings** (minor, for the owner; not changed). The retained 45° trim still reads as a
+    lit rounded shoulder at ew75 west and the dead end at yaws 4 and 5 and at low3 south at yaw 4. The agent captures
+    `ew75-west-close-yaw4`, `deadend-close-yaw4` and `low3-south-close-yaw4` show it before and after. Rounding its upper
+    edge further, or retaining less trim, touches the retain rule: the owner's call at the next feel check.
+  - **The sawtooth on xslope's uphill crest at yaw 4** (minor, pre-existing; not changed). Agent: the same in both
+    captures (`xslope-detail-yaw4`). The approach cutting's daylight crease on the steepest side slope is plausibly
+    sharper than one 1.25 m sub-triangle (not traced). Widening the daylight clamp on steep side slopes would change
+    every side-hill cutting and rule 4's effective ground, so it is recommended for the earthworks-look backlog.
+  - **Performance** (dev readings on a loaded shared machine, five interleaved rounds, each the median of six rebuilds;
+    not gates). The wired e2e hill: earthworks 8.86–9.42 → 10.16–13.47 ms (mostly about 9.1 → 10.2 ms), structures
+    6.92–9.37 → 6.60–9.64 ms. Scene B: earthworks 3.38–5.30 → 3.92–4.43 ms. The cost is the band's weight near portals
+    and the 4 m ring. Gates are authoritative only in the
+    [acceptance gates](../evidence/m4/2026-09-26-acceptance-gates.md).
+  - **Tests** (automated, 2026-09-29): 817 in 91 files, all passing. New:
+    - undo and redo of a 10 m-rule cutting, and of its demolition, also after a tunnel was built on;
+    - the verification's diorama drag;
+    - the diorama plugs' open outline and their banks past the end piers (fails at 8c7dca9: 0.468 m, 7.7 m);
+    - the band giving way beside a portal (fails at 8c7dca9: 0.175 m).
+
+    Changed: the byte pin (above) and the drawn-crease bound (tightened).
+  - **Not established:** how any of it looks to the owner; the two owner points above; the leave-natural folds beside
+    a neighbour's fill; curved or graded approaches; timings on the gate hardware.
 
 ## Revisit when
 
