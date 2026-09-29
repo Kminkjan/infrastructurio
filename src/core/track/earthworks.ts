@@ -3,7 +3,16 @@ import { centrelineEnds, centrelineIndex, nearestOnCentreline, sampleCentrelineE
 import type { RenderPrim } from "../geometry/templates";
 import { LATTICE_SPACING_M, SQRT3 } from "../lattice";
 import type { Terrain } from "../terrain";
-import { portalRetainV } from "./portal";
+import {
+  PORTAL_DAYLIGHT_ROUND_M,
+  PORTAL_HALF_WIDTH_M,
+  PORTAL_RETAIN_ABOVE_TOP_M,
+  PORTAL_TOP_V,
+  PORTAL_WING_RUN,
+  portalDaylightWeight,
+  portalRetainV,
+  portalRoundBandM,
+} from "./portal";
 
 /**
  * Earthworks: the cuttings and embankments under ground track, one rule the
@@ -79,6 +88,38 @@ import { portalRetainV } from "./portal";
  * mode keeps the earlier envelope, which the renderer's terrain mesh draws under
  * the portal (a 1.25 m mesh cannot draw a 7.65 m step at the face without grass
  * wedges in front of it), until the renderer opts in.
+ *
+ * **Portal wedges rounded** (D4, owner decision 2026-09-29 "Round it off":
+ * "Continue the retained hill's gentle 1:1.5 fall past the wing-wall ends and
+ * round the crease smoothly (core ground rule + plug), so the cutting blends
+ * into the hill with no lit wedge or teeth"). Beyond the wing ends the headwall
+ * S + t (S = bed + e(d) at the foot) was a planar 45° facet, lit or dark as a
+ * parallelogram, meeting the retained skyline's facet R + t in a V along the
+ * line where the two meet at the plane (|u| ≈ 9.84 m on a level straight
+ * approach, just past the wing ends) and the cutting's slope in front along the
+ * plane itself, both creases the 1.25 m terrain drew as teeth. Now, past a
+ * tunnel plane,
+ *   U = smax_k(max(fan, cone), z + R(u) + HEADWALL_RISE · t),  k = min(t, 3 m),
+ * with the fan z + H + √(t² + max(0, S − z − H)²) round the V (H, its bottom
+ * over the track: PORTAL_V_BOTTOM_V): at the plane it is the section S, so it
+ * meets the cutting in front with the same slope (no crease along the plane);
+ * along the V's line it rises at 45° as the retained skyline does (no tongue of
+ * retained hill runs on past the wings); between, the cutting's end is a rounded
+ * cone. `cone` is the piece's own envelope at the point with no clip plane, so
+ * clipping still only raises U and every reach bound holds. smax is a
+ * polynomial smooth maximum (`smoothMax`), 0 at the plane (the ground in front
+ * is the section there, and a rounded maximum would step over it), which rounds
+ * the V; behind the face and the wings U is the retained skyline as before,
+ * except within that band of the V. The underlay mode takes min(the earlier
+ * headwall, U), so the terrain mesh draws the new ground wherever the plug does
+ * not cover it. And beyond the wing ends the smooth clamp where the fan meets
+ * the hill takes a band up to PORTAL_DAYLIGHT_ROUND_M (`Envelope.band`, folded
+ * as the widest; `portal.ts`). Tried first (agent captures, the owner's words
+ * taken literally): the retained skyline R + t continued past the wing ends to
+ * meet the section without a headwall (the prism S) or the cone at the point:
+ * both grew the retained hill's lit 45° facet into a tongue running up to about
+ * 20 m back, and cut up to 7.2 m (the cone) and 8.4 m (the prism) more of the
+ * hill beside a portal (the xslope scene).
  *
  * **Bridges: a cut only** (D4, owner decision 2026-09-28 "M2": a deck may sit
  * up to 2 m below the terrain within 15 m of an abutment). A bridge piece whose
@@ -757,11 +798,23 @@ export function smoothMin(a: number, b: number, k: number): number {
   return (a < b ? a : b) - (h > 0 ? (k / 4) * h * h : 0);
 }
 
+/** Polynomial smooth maximum of a and b over band k: never below max(a, b), equal to it once |a − b| ≥ k, at most k / 4 over it. */
+export function smoothMax(a: number, b: number, k: number): number {
+  if (k <= 0) return a > b ? a : b;
+  const h = 1 - Math.abs(a - b) / k;
+  return (a > b ? a : b) + (h > 0 ? (k / 4) * h * h : 0);
+}
+
 /** A piece's envelopes at a point (`envelopeAt`): the cut U and fill L (m; −Infinity for a cut-only piece) and the plan distance d. */
 export interface Envelope {
   u: number;
   l: number;
   d: number;
+  /**
+   * The smooth clamp's band this piece asks for where it meets the natural ground (`conformRule`): DAYLIGHT_ROUND_M, or
+   * past a tunnel plane beyond the wing ends up to PORTAL_DAYLIGHT_ROUND_M (`portal.ts`).
+   */
+  band: number;
 }
 
 /**
@@ -770,7 +823,8 @@ export interface Envelope {
  * on under the structure. Tried first: 2 : 1, whose crest met the hill in a crease sharper than one 1.25 m
  * sub-triangle and drew a sawtooth behind the wings; and the side slopes' 1 : 1.5, which ate 12 m into the hill
  * behind a portal, so a tunnel piece laid later from the portal saw its cover gone and a portal of its own. Behind a
- * tunnel portal, in `"ground"` mode, the cut rises at the same rate from the portal's retained skyline instead.
+ * tunnel portal the cut rises at the same rate from the portal's retained skyline instead, and beyond its wing ends
+ * it is the fan round the V (see the module comment, "Portal wedges rounded").
  */
 export const HEADWALL_RISE = 1;
 
@@ -778,8 +832,9 @@ export const HEADWALL_RISE = 1;
  * Piece `p`'s envelopes at plan (x, y) with its reach `r` at one LOD, written to `out`: false beyond the reach (the
  * piece moves nothing there). Past a fixed clip plane, by t (the farthest one the point lies beyond), the envelopes
  * are the piece's own at the point's foot on the plane, U raised and L lowered by HEADWALL_RISE · t (see the module
- * comment); in `"ground"` mode, past a tunnel plane, U starts no lower than the portal's retained skyline at the
- * foot (`portalRetainV`; "Portals retain the hill"). Past a buffer end's plane that `clipKeys` names (a query for a
+ * comment); past a tunnel plane, U is the smooth maximum of the fan round the V and the portal's retained skyline
+ * ("Portals retain the hill", "Portal wedges rounded"; in `"underlay"` mode no higher than the earlier headwall), and
+ * beyond the wing ends `out.band` widens. Past a buffer end's plane that `clipKeys` names (a query for a
  * command continuing from that end, `ground.ts`), the piece moves nothing at all: the command is judged as if the
  * chain ended at the plane, whatever it continues with. `near` is scratch for the nearest centreline point.
  */
@@ -818,17 +873,54 @@ export function envelopeAt(
   const section = r.capRiseM === 0 ? slopeRiseM(n.d) : riseAt(r, n.d);
   const rise = section + (t > 0 ? HEADWALL_RISE * t : 0);
   out.d = t > 0 ? n.d + t : n.d;
+  out.band = DAYLIGHT_ROUND_M;
   out.u = bed + rise;
   out.l = p.cutOnly ? Number.NEGATIVE_INFINITY : bed - rise;
-  if (mode === "ground" && plane !== null && plane.tunnel) {
+  if (plane !== null && plane.tunnel) {
     // The foot's offset along the plane, across the track: the plane's direction is its normal turned a quarter.
     const across = (px - plane.x) * -plane.ty + (py - plane.y) * plane.tx;
-    const skyline = plane.zM + portalRetainV(across);
-    // Only where the skyline stands over the approach's own section; elsewhere the envelope stays bit for bit.
-    if (skyline > bed + section) out.u = skyline + HEADWALL_RISE * t;
+    // The hill the portal retains: its skyline over the face and the wings, rising at 45° behind the plane.
+    const retained = plane.zM + portalRetainV(across) + HEADWALL_RISE * t;
+    // Beyond the wing ends, the fan round the V where the skyline meets the section: the section's rise over the V's
+    // bottom along the plane and the 45° rise behind it, combined as a length, so the cutting's end is a rounded cone.
+    const over = bed + section - plane.zM - PORTAL_V_BOTTOM_V;
+    const fan = plane.zM + PORTAL_V_BOTTOM_V + Math.sqrt(t * t + (over > 0 ? over * over : 0));
+    // Never under the approach's own rounded end at the point (its envelope with no clip plane, capped as at the
+    // reach), so the reach and neighbour bounds hold as they do for the plain envelope.
+    const m = nearestOnCentreline(p, x, y, coneNear);
+    const coneRise = r.capRiseM === 0 ? slopeRiseM(m.d) : m.d < r.reachM ? riseAt(r, m.d) : slopeRiseM(m.d) + r.capRiseM;
+    const cone = bedAt(p, m.s) + coneRise;
+    const ground = smoothMax(fan > cone ? fan : cone, retained, portalRoundBandM(t));
+    // The underlay keeps the 45° headwall from the bed where it is lower (the notch the hill plug covers).
+    if (mode === "ground" || ground < out.u) out.u = ground;
+    // Beyond the wing ends the fan meets the hill in a wider smooth clamp (`portalDaylightWeight`), back to
+    // DAYLIGHT_ROUND_M before the piece's earthworks end (by the foot's and the point's own distance), so the ground is
+    // continuous there. Behind the face and the wings the clamp is unchanged, so the hill the portal retains is kept.
+    const far = n.d > m.d ? n.d : m.d;
+    const w = portalDaylightWeight(t, across, PORTAL_V_ACROSS_M) * (1 - smooth01(r.reachM - 4, r.reachM - 1, far));
+    if (w > 0) out.band = DAYLIGHT_ROUND_M + (PORTAL_DAYLIGHT_ROUND_M - DAYLIGHT_ROUND_M) * w;
   }
   return true;
 }
+
+/** Smoothstep of v from e0 to e1 (0 below, 1 above). */
+function smooth01(e0: number, e1: number, v: number): number {
+  const f = v <= e0 ? 0 : v >= e1 ? 1 : (v - e0) / (e1 - e0);
+  return f * f * (3 - 2 * f);
+}
+
+/**
+ * Where the retained skyline meets a level straight approach's section at the portal plane (the bottom of the V the
+ * two make, just past the wing ends): `across` metres from the centreline and PORTAL_V_BOTTOM_V over the track height.
+ * The skyline falls and the section rises at 1 : 1.5 there (PORTAL_WING_RUN, SIDE_SLOPE_RUN), both straight.
+ */
+export const PORTAL_V_ACROSS_M =
+  (PORTAL_TOP_V + PORTAL_RETAIN_ABOVE_TOP_M + PORTAL_HALF_WIDTH_M / PORTAL_WING_RUN + (FORMATION_HALF_WIDTH_M + CREST_ROUND_M / 2) / SIDE_SLOPE_RUN) /
+  (1 / SIDE_SLOPE_RUN + 1 / PORTAL_WING_RUN);
+export const PORTAL_V_BOTTOM_V = slopeRiseM(PORTAL_V_ACROSS_M);
+
+/** Scratch for the nearest centreline point to the point itself behind a tunnel plane (`envelopeAt`). */
+const coneNear = { d: 0, s: 0 };
 
 /**
  * The analytic conformed height at plan (x, y) over natural height `natural`
@@ -849,6 +941,7 @@ export function conformedHeightM(
 ): number {
   let u = Infinity;
   let l = -Infinity;
+  let band = DAYLIGHT_ROUND_M;
   const e = scratchEnvelope;
   for (const p of pieces) {
     const r = reachAt(p, lod);
@@ -856,35 +949,37 @@ export function conformedHeightM(
     if (!envelopeAt(p, r, x, y, clipKeys, scratchNear, e, mode)) continue;
     if (e.u < u) u = e.u;
     if (e.l > l) l = e.l;
+    if (e.band > band) band = e.band;
   }
-  return conformRule(natural, u, l);
+  return conformRule(natural, u, l, band);
 }
 
 const scratchNear = { d: 0, s: 0 };
-const scratchEnvelope: Envelope = { u: 0, l: 0, d: 0 };
+const scratchEnvelope: Envelope = { u: 0, l: 0, d: 0, band: 0 };
 
 /**
  * The natural height `natural` clamped smoothly between the fill envelope `l`
  * and the cut envelope `u` (both infinite where no piece reaches). The clamp
  * is mid + sign(x)·smoothMin(|x|, half, k) about the envelopes' middle, so it
  * is exact on the formation (half = 0) and never leaves [l, u]; k is
- * DAYLIGHT_ROUND_M, narrowed to twice the smaller of |x| and half so shallow
+ * DAYLIGHT_ROUND_M (or the wider `band` past a tunnel plane beyond the wing
+ * ends, `Envelope.band`), narrowed to twice the smaller of |x| and half so shallow
  * ground cannot flip sign. Conflicting envelopes (l ≥ u, two tracks close
  * together) give u: cuts win. Then the "leave natural" band: moves up to
  * EARTHWORK_MIN_M give N, from twice that the clamp in full, smoothly between.
  */
-export function conformRule(natural: number, u: number, l: number): number {
+export function conformRule(natural: number, u: number, l: number, band = DAYLIGHT_ROUND_M): number {
   if (Number.isNaN(natural) || u === Infinity) return natural;
   let c: number;
   if (l >= u) c = u;
   // Only cut-only pieces (bridges) reach here: the two-sided clamp's limit as l falls away, a smooth minimum.
-  else if (l === -Infinity) c = smoothMin(natural, u, DAYLIGHT_ROUND_M);
+  else if (l === -Infinity) c = smoothMin(natural, u, band);
   else {
     const mid = (u + l) / 2;
     const half = (u - l) / 2;
     const x = natural - mid;
     const ax = x < 0 ? -x : x;
-    const m = smoothMin(ax, half, Math.min(DAYLIGHT_ROUND_M, 2 * (ax < half ? ax : half)));
+    const m = smoothMin(ax, half, Math.min(band, 2 * (ax < half ? ax : half)));
     c = x < 0 ? mid - m : mid + m;
   }
   const t = c > natural ? c - natural : natural - c;
@@ -893,6 +988,7 @@ export function conformRule(natural: number, u: number, l: number): number {
   const f = (t - EARTHWORK_MIN_M) / EARTHWORK_MIN_M;
   return natural + (c - natural) * f * f * (3 - 2 * f);
 }
+
 
 /**
  * The natural terrain height (m) at sim plan (x, y): planar inside its lattice

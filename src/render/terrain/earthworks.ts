@@ -351,6 +351,12 @@ export class ChunkPass {
    */
   private upperShown = new Float32Array(0);
   private lower = new Float32Array(0);
+  /**
+   * The smooth clamp's band where a cut meets the natural ground (`conformRule`): the widest any piece reaching the
+   * sub-vertex asks for (DAYLIGHT_ROUND_M, or past a tunnel plane beyond the wing ends up to `PORTAL_DAYLIGHT_ROUND_M`),
+   * for the drawn and the shown ground alike, as the core folds it.
+   */
+  private band = new Float64Array(0);
   private drawn = new Float32Array(0);
   /** The shown conformed height (`shownDepartureAt`); `drawn` wherever no tunnel plane clips. */
   private shown = new Float32Array(0);
@@ -371,8 +377,8 @@ export class ChunkPass {
   private flagRowMax = -Infinity;
   private readonly sub = { qs: 0, rs: 0 };
   private readonly near = { d: 0, s: 0 };
-  private readonly envelope: Envelope = { u: 0, l: 0, d: 0 };
-  private readonly shownEnvelope: Envelope = { u: 0, l: 0, d: 0 };
+  private readonly envelope: Envelope = { u: 0, l: 0, d: 0, band: 0 };
+  private readonly shownEnvelope: Envelope = { u: 0, l: 0, d: 0, band: 0 };
   private readonly past: PastPlane = { plane: null, t: 0 };
 
   /** Chunk box in plan metres, grown by one LOD cell (the ring), for picking candidate pieces. */
@@ -526,6 +532,7 @@ export class ChunkPass {
       this.upper = new Float32Array(n);
       this.upperShown = new Float32Array(n);
       this.lower = new Float32Array(n);
+      this.band = new Float64Array(n);
       this.drawn = new Float32Array(n);
       this.shown = new Float32Array(n);
       this.natural = new Float32Array(n);
@@ -612,17 +619,21 @@ export class ChunkPass {
           if (bed < env.u) env.u = bed;
         }
         const g = rowBase + cs;
+        // (Both modes ask for the same band: it depends only on where the point lies behind the plane.)
+        const k = env.band;
         if (this.stamp[g] !== this.gen) {
           this.stamp[g] = this.gen;
           this.upper[g] = env.u;
           this.upperShown[g] = us;
           this.lower[g] = env.l;
+          this.band[g] = k;
           this.dist[g] = env.d;
           this.touched[this.touchedCount++] = g;
         } else {
           if (env.u < (this.upper[g] ?? Infinity)) this.upper[g] = env.u;
           if (us < (this.upperShown[g] ?? Infinity)) this.upperShown[g] = us;
           if (env.l > (this.lower[g] ?? -Infinity)) this.lower[g] = env.l;
+          if (k > (this.band[g] ?? 0)) this.band[g] = k;
           if (env.d < (this.dist[g] ?? Infinity)) this.dist[g] = env.d;
         }
       }
@@ -643,7 +654,8 @@ export class ChunkPass {
       const qs = cs - Math.floor(rs / 2);
       const nat = naturalAtSub(this.terrain, this.lat, qs, rs);
       this.natural[g] = nat;
-      const c = conformRule(nat, this.upper[g] ?? Infinity, this.lower[g] ?? -Infinity);
+      const band = this.band[g] ?? DAYLIGHT_ROUND_M;
+      const c = conformRule(nat, this.upper[g] ?? Infinity, this.lower[g] ?? -Infinity, band);
       if (Number.isNaN(nat) || c === nat) {
         this.modified[g] = 0;
         this.drawn[g] = nat;
@@ -653,7 +665,7 @@ export class ChunkPass {
       this.modified[g] = 1;
       this.drawn[g] = c;
       // The ground as the core shows it: the underlay's own height except past a tunnel plane (`upperShown`).
-      this.shown[g] = (this.upperShown[g] ?? Infinity) === (this.upper[g] ?? Infinity) ? c : conformRule(nat, this.upperShown[g] ?? Infinity, this.lower[g] ?? -Infinity);
+      this.shown[g] = (this.upperShown[g] ?? Infinity) === (this.upper[g] ?? Infinity) ? c : conformRule(nat, this.upperShown[g] ?? Infinity, this.lower[g] ?? -Infinity, band);
       if (nat - c > maxCut) maxCut = nat - c;
       if (c - nat > maxFill) maxFill = c - nat;
       // Flag every LOD triangle whose closure holds this sub-vertex.

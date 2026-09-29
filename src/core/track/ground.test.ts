@@ -89,6 +89,34 @@ describe("the effective ground", () => {
     );
   });
 
+  it("gives the same ground round a portal built in steps, undone and redone, as built at once (D4 portal wedges)", () => {
+    // The approach, then the tunnel, then a second approach beyond it, one command each, with an undo and a redo; the
+    // ground at every node round both portals equals a fresh sim's that built the same pieces in one command.
+    const terrain = makeTerrain(120, 40, (_q, _r, col) => (col === 29 ? 60 : col >= 30 && col <= 45 ? 140 : 0), -100);
+    const run = (q0: number, n: number): PieceSpec[] => Array.from({ length: n }, (_, i) => ({ kind: "straight", from: { q: q0 + i, r: 20, zMm: 0 }, heading: 0, z1Mm: 0 }) as const);
+    const steps = [run(10, 9), run(19, 8), run(27, 16)];
+    const stepped = simOn(terrain);
+    for (const pieces of steps) expect(stepped.execute({ type: "build-track", pieces, structure: "auto" }).ok).toBe(true);
+    // Read the ground once (filling the node cache), undo and redo the last step, then compare.
+    for (let q = 5; q < 50; q++) for (let r = 10; r < 31; r++) stepped.groundMm(q, r);
+    expect(stepped.execute({ type: "undo" }).ok).toBe(true);
+    for (let q = 5; q < 50; q++) for (let r = 10; r < 31; r++) stepped.groundMm(q, r);
+    expect(stepped.execute({ type: "redo" }).ok).toBe(true);
+    const fresh = simOn(terrain);
+    expect(fresh.execute({ type: "build-track", pieces: steps.flat(), structure: "auto" }).ok).toBe(true);
+    expect(stepped.network().pieces.map((p) => `${p.key}:${p.structure}`).sort()).toEqual(fresh.network().pieces.map((p) => `${p.key}:${p.structure}`).sort());
+    let differs = 0;
+    for (let q = 5; q < 50; q++) {
+      for (let r = 10; r < 31; r++) {
+        if (stepped.groundMm(q, r) !== fresh.groundMm(q, r)) differs += 1;
+      }
+    }
+    expect(differs).toBe(0);
+    // And the portals are there: the tunnel runs between two planes.
+    const planes = new Set([...fresh.ground().pieces.values()].flatMap((p) => p.planes.filter((c) => c.tunnel).map((c) => c.key)));
+    expect(planes.size).toBe(2);
+  });
+
   it("stops a chain's earthworks at a portal: the plane clips every piece of the chain within reach", () => {
     // Flat ground at 0, a 10 m block for q ≥ 19 on rows 16–24: a ground run to (18, 20), then a tunnel into the block.
     const terrain = makeTerrain(120, 40, (q, r) => (r >= 16 && r <= 24 && q >= 19 && q <= 40 ? 100 : 0), -100);

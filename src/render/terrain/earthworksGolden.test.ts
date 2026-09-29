@@ -193,20 +193,29 @@ describe("earthworks and terrain bake output (a byte pin)", () => {
     // colours, the indices, the refined triangles (6,275), the scenery, the reaches, the nearest points and the bakes
     // did not. Checked before re-recording: with only the clamp disabled, the chunk pass's other change (the "ground"
     // envelope evaluated only past a tunnel plane, for the rebuild time) drew every hash of 4dd917a exactly.
+    // Re-recorded again 2026-09-29 (D4 portal wedges, owner decision "Round it off"), deliberately: past a tunnel plane
+    // beyond the wing ends the cut is now the fan round the V where the retained skyline meets the section, met with a
+    // smooth maximum, not the 45° headwall; the underlay draws it where it is lower than the headwall; and there the
+    // smooth clamp's band widens to 2.5 m. So the drawn heights, the normals, colours, attribute and indices of both
+    // LODs, both heightfields and the sampled surfaces moved, and 21 more LOD0 triangles are refined (6,275 → 6,296);
+    // the pieces, reaches, nearest points, scenery, the deepest cut and fill and the bakes did not. Checked before
+    // re-recording: with the old envelope restored in the new code path (the band folded, `conformRule`'s band
+    // argument, the chunk pass's band array), every hash of 2ae19ab was drawn exactly; that check found the band first
+    // kept in a Float32Array, whose 0.6000000238 moved every conformed height by float noise, now a Float64Array.
     expect(hashes).toEqual({
       pieces: 327,
-      refined: 6275,
+      refined: 6296,
       withEarthworks: 37,
       cleared: 294,
       maxCutFill: [9.966000366210938, 7.86400032043457],
-      lod0: "2b79cfce 17c1cc93 e3e3a27f 77b0441c d942eb22",
-      lod1: "5234f545 0f96eea6 196ab467 acb994f4 ccb98367",
-      heightfield0: "3dafd178",
-      heightfield1: "b816c1a3",
+      lod0: "5e8a550c 268431bf 971b9172 be6a55d4 c89f0516",
+      lod1: "1923d351 777d470c 0ac514e9 0f346ef9 0a7e2fa8",
+      heightfield0: "3ab42719",
+      heightfield1: "ac60058b",
       reach: "10a1303f",
       nearest: "ccf44728",
       clearedFlags: "4e0c0685",
-      surfaces: "3aa566b0",
+      surfaces: "e20a43c1",
       shadingD11a: "ab72930b",
       shadingB: "aed09c41",
       splat: "d14a2fa6",

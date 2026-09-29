@@ -3,6 +3,7 @@ import { toWorld } from "../lattice";
 import { type Terrain, groundMmAt, offsetOfNode } from "../terrain";
 import {
   type ChainAdjacency,
+  DAYLIGHT_ROUND_M,
   type EarthworkPiece,
   type Envelope,
   MAX_REACH_M,
@@ -125,7 +126,7 @@ export class EffectiveGround implements GroundQuery {
   private readonly nodeCache = new Map<number, number>();
   private cachedView: GroundView | undefined;
   private readonly near = { d: 0, s: 0 };
-  private readonly envelope: Envelope = { u: 0, l: 0, d: 0 };
+  private readonly envelope: Envelope = { u: 0, l: 0, d: 0, band: 0 };
   private readonly found: EarthworkPiece[] = [];
 
   constructor(
@@ -201,13 +202,15 @@ export class EffectiveGround implements GroundQuery {
     if (near.length === 0) return natural;
     let u = Infinity;
     let l = -Infinity;
+    let band = DAYLIGHT_ROUND_M;
     const e = this.envelope;
     for (const p of near) {
       if (!envelopeAt(p, p, x, y, clip, this.near, e, "ground")) continue;
       if (e.u < u) u = e.u;
       if (e.l > l) l = e.l;
+      if (e.band > band) band = e.band;
     }
-    return conformRule(natural, u, l);
+    return conformRule(natural, u, l, band);
   }
 
   nodeMm(q: number, r: number, clip: ReadonlySet<string> | null = null): number | undefined {

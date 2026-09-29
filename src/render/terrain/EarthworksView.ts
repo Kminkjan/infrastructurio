@@ -234,7 +234,7 @@ export class EarthworksView {
   cutEnvelopeIn(box: { minX: number; minY: number; maxX: number; maxY: number }, except: readonly string[]): (x: number, y: number) => number {
     const pieces = piecesTouching(this.pieces.values(), box).filter((p) => !p.planes.some((c) => c.fixed && except.includes(c.key)));
     const near = { d: 0, s: 0 };
-    const e: Envelope = { u: 0, l: 0, d: 0 };
+    const e: Envelope = { u: 0, l: 0, d: 0, band: 0 };
     return (x, y) => {
       let u = Number.POSITIVE_INFINITY;
       for (const p of pieces) {
@@ -268,7 +268,7 @@ export class EarthworksView {
   attributeIn(box: { minX: number; minY: number; maxX: number; maxY: number }): (x: number, y: number, natural: number, drawn: number, out: Float64Array) => void {
     const pieces = piecesTouching(this.pieces.values(), box);
     const near = { d: 0, s: 0 };
-    const e: Envelope = { u: 0, l: 0, d: 0 };
+    const e: Envelope = { u: 0, l: 0, d: 0, band: 0 };
     return (x, y, natural, drawn, out) => {
       let u = Number.POSITIVE_INFINITY;
       let l = Number.NEGATIVE_INFINITY;
