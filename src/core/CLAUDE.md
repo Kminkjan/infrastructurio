@@ -7,7 +7,15 @@ commands. Status 2026-09-27: `lattice.ts`, `terrain.ts` and `util/` (+ tests) ex
 network) exist (D2); `scenarios/` (the static diorama layout and the Baltic name list) and
 terrain generator version 2 exist (D11a); `track/planner.ts`, the full planner behind
 `sim.planTrack` (one-bend, shift and two-bend fits, magnetism, precision, elevation),
-exists (D3, 2026-09-27, arriving with PR #82); later slices add the rest
+exists (D3, merged in #82); `track/structure.ts` (structure inference and
+the rule-4 checks: the ±8 m ground band, portals, abutments; owner decision 2026-09-28 "M2"),
+with the grade and vertical-clearance rules in `track/validate.ts`, auto-grade and the
+Straight line mode in the planner, and the effective ground (`track/earthworks.ts`, the
+earthworks rule; `track/ground.ts`, settled per revision; `sim.ground()`/`sim.groundMm`)
+that inference, auto-grade and render share, exists (D4, 2026-09-28, PR #84); the D4 tunnel and portal
+iteration (2026-09-28) adds `track/portal.ts` (the portal outline, exported via `sim/api.ts` with `isPortal`),
+portals retaining the hill in the effective ground ("ground" vs render's "underlay" envelope mode) and the 10 m
+tunnel rule (owner decision "Needs 10 m somewhere"); later slices add the rest
 ([simulation model](../../docs/simulation-model.md), [architecture](../../docs/architecture.md)).
 ADRs 0010 (lattice geometry), 0011 (signalling), 0012 (tick and determinism) and 0014
 (operator) are **Proposed**: their numbers are defaults to test, not owner decisions. The

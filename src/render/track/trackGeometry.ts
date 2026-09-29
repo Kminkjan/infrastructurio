@@ -260,6 +260,25 @@ const BALLAST_PROFILE: readonly ProfilePoint[] = [
   { u: -BALLAST_BASE_HALF_M, v: -BALLAST_DEPTH_M },
 ];
 
+/**
+ * Ballast skirts (issue #68, "Earthworks conform … with ballast skirts"): on ground track the
+ * shoulders run on at their own slope, 1.2 times as far again, to 2.92 m out and 0.62 m under the
+ * track height. That is still inside the earthworks' flat 3 m formation, so where the drawn ground
+ * is the bed the skirt lies under it and nothing changes; where the drawn ground falls away from
+ * the ballast's edge (with `?earthworks=0`, on the natural leave-alone band, on the coarser far
+ * LOD, at a structure's end) the skirt closes the gap under the edge. Bridges carry their ballast
+ * in a deck and tunnels are not drawn, so neither gets one.
+ */
+export const SKIRT_RUN = 1.2;
+export const SKIRT_HALF_M = BALLAST_BASE_HALF_M + SKIRT_RUN * (BALLAST_BASE_HALF_M - BALLAST_TOP_HALF_M);
+export const SKIRT_DEPTH_M = BALLAST_DEPTH_M * (1 + SKIRT_RUN);
+
+const SKIRTED_PROFILE: readonly ProfilePoint[] = [
+  { u: SKIRT_HALF_M, v: -SKIRT_DEPTH_M },
+  ...BALLAST_PROFILE,
+  { u: -SKIRT_HALF_M, v: -SKIRT_DEPTH_M },
+];
+
 function railProfile(centre: number): ProfilePoint[] {
   const half = RAIL_WIDTH_M / 2;
   const base = SLEEPER_HEIGHT_M;
@@ -343,8 +362,8 @@ const cSleeper = new Color();
 const cRailTop = new Color();
 const cRailSide = new Color();
 
-/** Ballast, sleepers and rails for one piece. */
-export function buildTrackMeshes(c: TrackCentreline): TrackPieceMeshes {
+/** Ballast (with skirts when asked: ground track), sleepers and rails for one piece. */
+export function buildTrackMeshes(c: TrackCentreline, options: { readonly skirts?: boolean } = {}): TrackPieceMeshes {
   const frames = sampleCentreline(c);
   const start = frames[0];
   const ax = start?.x ?? 0;
@@ -356,13 +375,15 @@ export function buildTrackMeshes(c: TrackCentreline): TrackPieceMeshes {
   cRailSide.setHex(palette.railSide);
 
   const ballast = new Builder(true);
-  const last = BALLAST_PROFILE.length - 2;
+  const profile = options.skirts ? SKIRTED_PROFILE : BALLAST_PROFILE;
+  const skirt = options.skirts ? 1 : 0;
+  const last = profile.length - 2;
   sweep(
     ballast,
     frames,
-    BALLAST_PROFILE,
-    (k) => (k === 0 || k === last ? cShoulder : cBallast),
-    (k) => (k === 2 ? 1 : 0),
+    profile,
+    (k) => (k <= skirt || k >= last - skirt ? cShoulder : cBallast),
+    (k) => (k === 2 + skirt ? 1 : 0),
   );
 
   const sleepers = new Builder(false);

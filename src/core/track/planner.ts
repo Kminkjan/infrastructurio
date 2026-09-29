@@ -1,5 +1,5 @@
 import { MIN_HEIGHT_SEPARATION_MM } from "../geometry/clearance";
-import { type NodeRef, type PieceSpec, canonicalKey, compareNodes, isNodeRef, nodeKey, nodeRef } from "../geometry/piece";
+import { type NodeRef, type PieceSpec, canonicalKey, compareNodes, isNodeRef, nodeKey, nodeRef, resolvePiece } from "../geometry/piece";
 import {
   CURVE_TEMPLATES,
   CURVE_TURNS,
@@ -13,9 +13,11 @@ import {
   shiftTemplate,
 } from "../geometry/templates";
 import { type Axial, HEADINGS, type Heading, SQRT3, isHeading, isPrimary, nearestNode, opposite, rotateHeading, stepLengthMm, stepOf, unit } from "../lattice";
-import { groundMmAt } from "../terrain";
+import { groundMmAt, heightDmAt, isWaterAt } from "../terrain";
+import { MinHeap } from "../util/heap";
 import { divFloor } from "../util/int";
-import { type Counts, type TrackContext, heightsAt, resolveStructure, validate } from "./validate";
+import { WATER_CLEARANCE_MM, pieceCrossesWater } from "./structure";
+import { type Counts, MAX_GRADE_PERMILLE, type StructureChoice, type TrackContext, heightsAt, structureChoice, validate } from "./validate";
 
 /**
  * The planner (simulation model §8, ADR 0010 decision 7): turns a drag the
@@ -127,26 +129,39 @@ import { type Counts, type TrackContext, heightsAt, resolveStructure, validate }
  * end heading), else two (an S-curve back onto d0, say). Everything stays on
  * the lattice.
  *
- * **Elevation: track follows the ground** (owner decision, 2026-09-27, for
- * D3; D4 revisits it with the 35‰ rule and earthworks). The start z is
- * `from.zMm`; the end z is `from.zMm + dzMm`, or the port's z when the end
- * joins a port. Every other node sits on the ground (`groundMmAt`: the
- * terrain, or the water surface over a lower bed) plus an offset, and it is
- * the offset, not the absolute height, that is interpolated between pins.
- * With both ends on the ground the whole plan lies on it; a raised end ramps
- * the offset from the start's to the end's. An intermediate node where the
- * authored track already has a node within 6.5 m of the plan's height there
- * is pinned to that node's height, so a drag that retraces or extends sloped
- * track reuses the pieces it overlaps (node identity includes z, so a height
- * off by a millimetre would miss their keys); `profileOf` has the exact
- * rule and the choice among several heights. Between consecutive pins
- * (start, pinned nodes, end) the offset's change is apportioned over the
- * pieces in proportion to their lengths by largest remainder (Hamilton):
- * each piece gets ⌊|Δoffset|·len/L⌋ mm, and the leftover millimetres go to
- * the largest remainders, ties to the earlier piece. Negative changes mirror
- * positive ones. Following the ground can exceed 35‰ (about half the pieces
- * of a straight drag on the diorama map); nothing rejects that until D4's
- * grade rule.
+ * **Elevation: track follows the ground within 35‰** (owner decisions
+ * 2026-09-27 for D3, "track follows the ground", and 2026-09-28 for D4,
+ * "Auto-grade"). The start z is `from.zMm` (the track tool starts a free drag
+ * on water at the deck height, the water level + 4.0 m: owner decision
+ * 2026-09-28 "M2"). Every piece is at most 35‰
+ * whenever the fixed heights allow it; `profileOf` has the exact rules:
+ * - The **end** is fixed in "fixed" mode (`from.zMm + dzMm`) and at a snapped
+ *   port (the port's z). In "auto" mode a free end takes the ground at the end
+ *   node, clamped to the heights 35‰ reaches from the last fixed node (and
+ *   raised to clear water), or an existing node's height there within that
+ *   reach and 6.5 m.
+ * - **Pins.** An intermediate node where the authored track already has a
+ *   node within 6.5 m of the plan's height there is pinned to that node's
+ *   height, so a drag that retraces or extends sloped track reuses the pieces
+ *   it overlaps (node identity includes z, so a height off by a millimetre
+ *   would miss their keys).
+ * - **Target.** In "fixed" mode, the D3 profile: the ground (`groundMmAt`:
+ *   the terrain, or the water surface over a lower bed) plus an offset
+ *   apportioned by length between consecutive fixed nodes (start, pins, end)
+ *   with largest-remainder rounding (Hamilton: ⌊|Δoffset|·len/L⌋ mm each, the
+ *   leftover millimetres to the largest remainders, ties to the earlier piece;
+ *   descents mirror climbs). In "auto" mode, the ground itself.
+ * - **Fit** (`fitSpan`), between consecutive fixed nodes, with every piece at
+ *   most 35‰ and decks at least 4 m over water (as far as 35‰ reaches): first
+ *   as many nodes as possible exactly on the target (a chain whose
+ *   consecutive members 35‰ joins), then the least summed deviation from the
+ *   target, Σ|z − t| (L1), in each gap between them. Where the target is
+ *   already within 35‰ the fit is the target itself, so on gentle ground a
+ *   plan is exactly the D3 profile; elsewhere only the stretch that is too
+ *   steep deviates, as cuttings and embankments and, beyond ±8 m, the bridges
+ *   and tunnels `preview` infers. Two fixed heights no 35‰ profile joins are
+ *   joined by a uniform ramp instead, which `preview` rejects as
+ *   `grade-too-steep`.
  */
 
 /** A point on the sim plan, integer mm (x east, y north). */
@@ -180,7 +195,38 @@ export interface Drag {
   readonly radiusCapM?: RadiusClassM;
   /** Precision mode (Ctrl, or ⌥ on macOS): an explicit radius class and, optionally, end heading. */
   readonly precision?: { readonly radiusM: RadiusClassM; readonly endHeading?: Heading };
+  /**
+   * How the heights are chosen (D4, additive; omitted means "fixed"). See
+   * "Elevation" in the module comment.
+   * - "fixed" (the tool passes it while height steps are pressed): the end at
+   *   `from.zMm + dzMm` (a snapped port's height instead), as in D3; inner
+   *   nodes follow the D3 profile fitted to 35‰.
+   * - "auto" (no height steps): the planner also chooses a free end's height,
+   *   the ground at the end node as far as 35‰ reaches. `dzMm` then only names
+   *   the end height the tool would want, which is used to find a buffer end
+   *   under the pointer; a snapped port still fixes the end.
+   * - "straight" (the Straight line tool; owner decision 2026-09-28, "One
+   *   'Straight line' tool"): one steady grade from `from.zMm` to the end at
+   *   `from.zMm + dzMm`, moved to the nearest height 35‰ reaches from the start
+   *   (a snapped port keeps its height). The ground is ignored; structure
+   *   inference then makes bridges over valleys and water and tunnels through
+   *   hills. See `straightProfile`.
+   */
+  readonly heightMode?: HeightMode;
+  /**
+   * The structure the build will carry (D4, additive; omitted means "auto"):
+   * the planner validates its candidates with it. It does not change the
+   * heights. No tool forces one since the Bridge and Tunnel tools gave way to
+   * the Straight line tool (2026-09-28); the field stays for replays and tests.
+   */
+  readonly structure?: StructureChoice;
 }
+
+/**
+ * How a drag's heights are chosen: "fixed" end height, "auto" (the planner chooses a free end too; D4), or
+ * "straight" (one steady grade to the end, ignoring the ground; the D4 feel-check fixes, 2026-09-28).
+ */
+export type HeightMode = "auto" | "fixed" | "straight";
 
 export type PlanFit = "none" | "straight" | "one-bend" | "shift" | "two-bend";
 
@@ -800,15 +846,19 @@ function isExisting(ctx: PlannerContext, spec: PieceSpec): boolean {
 
 /**
  * The ground under each node of a path, integer mm (`groundMmAt`: the
- * terrain, or the water surface over a lower bed). A node off the map takes
+ * terrain, or the water surface over a lower bed; since the D4 feel-check
+ * fixes, 2026-09-28, in "auto" and "straight" modes the effective ground,
+ * `ground.ts`: the terrain as the committed track's earthworks shape it, with
+ * the buffer ends on the path clipped). A node off the map takes
  * the ground of the last on-map node before it, or of the first one after it
  * when none comes before; a path entirely off the map takes the start's own
  * height. So a plan that leaves the map still gets deterministic heights,
  * with no jump where it crosses the edge, for `preview` to reject with
  * `out-of-bounds`.
  */
-function groundAlong(ctx: PlannerContext, from: NodeRef, qs: readonly number[], rs: readonly number[]): number[] {
-  const known = qs.map((q, i) => groundMmAt(ctx.terrain, { q, r: rs[i] ?? 0 }));
+function groundAlong(ctx: PlannerContext, from: NodeRef, qs: readonly number[], rs: readonly number[], clip: ReadonlySet<string> | null, effective: boolean): number[] {
+  const ground = effective ? ctx.ground : undefined;
+  const known = qs.map((q, i) => (ground ? ground.nodeMm(q, rs[i] ?? 0, clip) : groundMmAt(ctx.terrain, { q, r: rs[i] ?? 0 })));
   let last = known.find((g) => g !== undefined) ?? from.zMm;
   return known.map((g) => {
     last = g ?? last;
@@ -816,76 +866,411 @@ function groundAlong(ctx: PlannerContext, from: NodeRef, qs: readonly number[], 
   });
 }
 
-/**
- * Node heights along a path, z[0] = `from.zMm` … z[n] = `endZMm` (see
- * "Elevation" in the module comment). Each node's height is the ground
- * there, g[i], plus an offset: the start's offset is `from.zMm − g[0]`, the
- * end's `endZMm − g[n]`, and every pin's is its height minus its ground.
- *
- * Walking from the start, an intermediate node where the authored track
- * already has nodes is pinned to one of their heights, h, when it lies within
- * `MIN_HEIGHT_SEPARATION_MM` (6.5 m) of the reference: the ground there plus
- * the offset on the straight line, by cumulative length, from the last pin's
- * offset to the end's. Nearer than that the path would clash with that track
- * anyway (`tracks-too-close`), so pinning can only let it share the node or
- * reuse the piece; farther, the path passes over or under the track (a grade
- * separation) and keeps its own height. The comparison is exact:
- * |h − ref| · span, with span the length from the last pin to the end, is an
- * integer of at most about 1e14 (safe).
- *
- * Several heights within reach (a bridge over a track, D4) are ranked, first
- * wins: the height whose incoming piece (from the previous node, when that is
- * the start or a pin) is an existing piece; then one whose outgoing piece to
- * an existing height at the next node (or to the end height) is; then the
- * nearest to the reference; then the lower. Only the authored heights, the
- * terrain and the path decide, never insertion order, so the profile is
- * deterministic.
- *
- * The offset's change between consecutive pins is then apportioned over
- * their pieces by length (`apportionMm`, largest remainder), and each node
- * gets its ground plus its offset. With both ends on the ground and no pin,
- * every node lies on the ground; on flat terrain this is exactly the old
- * split of the height change.
- */
-function profileOf(ctx: PlannerContext, from: NodeRef, endZMm: number, shapes: readonly Shape[]): number[] {
+/** The weight that makes a term a hard constraint: more than every other term together (a path has far fewer nodes). */
+const HARD = 1_000_000_000;
+
+/** A plan's path, as the height profile sees it. Node i sits between pieces i − 1 and i. */
+interface Path {
+  readonly n: number;
+  readonly qs: readonly number[];
+  readonly rs: readonly number[];
+  readonly lens: readonly number[];
+  /** The ground at each node (`groundAlong`). */
+  readonly g: readonly number[];
+  /** The largest |Δz| each piece may take at 35‰: ⌊35 · len / 1000⌋ mm. */
+  readonly maxRise: readonly number[];
+  /** Prefix sums of `maxRise`: node a reaches node b within 35‰ iff |z_b − z_a| ≤ reach[b] − reach[a]. */
+  readonly reach: readonly number[];
+  /** The lowest height a node may take: the water level + 4 m beside a piece over water, else −Infinity. */
+  readonly floor: readonly number[];
+}
+
+/** Whether a straight from (q, r) on heading h crosses water: its nodes, or a secondary step's midpoint. */
+function straightWet(ctx: PlannerContext, q: number, r: number, h: Heading, dq: number, dr: number): boolean {
+  const t = ctx.terrain;
+  if (isWaterAt(t, { q, r }) || isWaterAt(t, { q: q + dq, r: r + dr })) return true;
+  if (isPrimary(h)) return false;
+  const a = stepOf(rotateHeading(h, 1));
+  const b = stepOf(rotateHeading(h, -1));
+  const ha = heightDmAt(t, { q: q + a.q, r: r + a.r });
+  const hb = heightDmAt(t, { q: q + b.q, r: r + b.r });
+  return ha !== undefined && hb !== undefined && ha + hb < 2 * t.waterLevelDm;
+}
+
+function pathOf(ctx: PlannerContext, from: NodeRef, shapes: readonly Shape[], clip: ReadonlySet<string> | null, effective: boolean): Path {
   const n = shapes.length;
   const qs: number[] = [from.q];
   const rs: number[] = [from.r];
-  const cum: number[] = [0];
   shapes.forEach((s, i) => {
     qs.push((qs[i] ?? 0) + s.dq);
     rs.push((rs[i] ?? 0) + s.dr);
-    cum.push((cum[i] ?? 0) + s.lengthMm);
   });
-  const total = cum[n] ?? 0;
-  const g = groundAlong(ctx, from, qs, rs);
-  const z: number[] = Array.from({ length: n + 1 }, () => 0);
-  z[0] = from.zMm;
-  z[n] = endZMm;
-  const endOffset = endZMm - (g[n] ?? 0);
-  const pins: number[] = [0];
-  let p = 0;
-  for (let i = 1; i < n; i++) {
+  const lens = shapes.map((s) => s.lengthMm);
+  const maxRise = lens.map((len) => divFloor(MAX_GRADE_PERMILLE * len, 1000));
+  const reach = [0];
+  maxRise.forEach((m, i) => reach.push((reach[i] ?? 0) + m));
+  const deck = ctx.terrain.waterLevelDm * 100 + WATER_CLEARANCE_MM;
+  const floor: number[] = Array.from({ length: n + 1 }, () => Number.NEGATIVE_INFINITY);
+  shapes.forEach((shape, i) => {
     const q = qs[i] ?? 0;
     const r = rs[i] ?? 0;
-    const heights = heightsAt(ctx.index, q, r);
-    if (heights.length === 0) continue;
-    const zp = z[p] ?? 0;
-    const op = zp - (g[p] ?? 0);
-    const span = total - (cum[p] ?? 0);
-    const refScaled = ((g[i] ?? 0) + op) * span + (endOffset - op) * ((cum[i] ?? 0) - (cum[p] ?? 0));
-    const distOf = (h: number): number => Math.abs(h * span - refScaled);
-    const near = heights.filter((h) => distOf(h) < MIN_HEIGHT_SEPARATION_MM * span);
+    let wet: boolean;
+    if (shape.seg.kind === "straight") wet = straightWet(ctx, q, r, shape.seg.heading, shape.dq, shape.dr);
+    else {
+      const res = resolvePiece(specAt(shape, q, r, 0, 0));
+      wet = res.ok && pieceCrossesWater(ctx.terrain, res.piece);
+    }
+    if (!wet) return;
+    floor[i] = deck;
+    floor[i + 1] = deck;
+  });
+  return { n, qs, rs, lens, g: groundAlong(ctx, from, qs, rs, clip, effective), maxRise, reach, floor };
+}
+
+/** A path position's breakpoint for the convex fit, without its heap's lazy shift. */
+interface Knot {
+  readonly x: number;
+  readonly c: number;
+}
+
+/**
+ * A convex piecewise-linear function of one integer variable, kept as its
+ * breakpoints ("slope trick"): `left` holds those left of the minimum (a
+ * max-heap), `right` those right of it (a min-heap), each with a multiplicity
+ * (the slope change there). The minimum lies on [topLeft, topRight].
+ */
+class ConvexPwl {
+  private readonly left = new MinHeap<Knot>((a, b) => b.x - a.x || b.c - a.c);
+  private readonly right = new MinHeap<Knot>((a, b) => a.x - b.x || a.c - b.c);
+  private shiftLeft = 0;
+  private shiftRight = 0;
+
+  topLeft(): number {
+    const k = this.left.peek();
+    return k ? k.x + this.shiftLeft : Number.NEGATIVE_INFINITY;
+  }
+
+  topRight(): number {
+    const k = this.right.peek();
+    return k ? k.x + this.shiftRight : Number.POSITIVE_INFINITY;
+  }
+
+  /** Adds w · max(0, z − a). */
+  addRamp(a: number, w: number): void {
+    if (a >= this.topLeft()) {
+      this.right.push({ x: a - this.shiftRight, c: w });
+      return;
+    }
+    this.left.push({ x: a - this.shiftLeft, c: w });
+    for (let move = w; move > 0; ) {
+      const k = this.left.pop();
+      if (!k) break;
+      const m = Math.min(k.c, move);
+      this.right.push({ x: k.x + this.shiftLeft - this.shiftRight, c: m });
+      if (k.c > m) this.left.push({ x: k.x, c: k.c - m });
+      move -= m;
+    }
+  }
+
+  /** Adds w · max(0, a − z). */
+  addWall(a: number, w: number): void {
+    if (a <= this.topRight()) {
+      this.left.push({ x: a - this.shiftLeft, c: w });
+      return;
+    }
+    this.right.push({ x: a - this.shiftRight, c: w });
+    for (let move = w; move > 0; ) {
+      const k = this.right.pop();
+      if (!k) break;
+      const m = Math.min(k.c, move);
+      this.left.push({ x: k.x + this.shiftRight - this.shiftLeft, c: m });
+      if (k.c > m) this.right.push({ x: k.x, c: k.c - m });
+      move -= m;
+    }
+  }
+
+  /** Adds w · |z − a|. */
+  addAbs(a: number, w: number): void {
+    this.addRamp(a, w);
+    this.addWall(a, w);
+  }
+
+  /** f(z) ← min over |y − z| ≤ d of f(y): the next node may lie up to d above or below. */
+  widen(d: number): void {
+    this.shiftLeft -= d;
+    this.shiftRight += d;
+  }
+}
+
+function clamp(v: number, lo: number, hi: number): number {
+  return v < lo ? lo : v > hi ? hi : v;
+}
+
+/**
+ * Heights for nodes a…b of a path with z_a and z_b fixed: minimise
+ * Σ |z_i − t_i| subject to |z_{i+1} − z_i| ≤ maxRise_i and z_i ≥ floor_i,
+ * exactly in integer mm by dynamic programming over convex piecewise-linear
+ * costs ("slope trick", O(m log m)). A floor binds only as high as 35‰
+ * reaches from z_a and z_b, so the grade always holds (a deck that cannot
+ * clear the water is left for `preview` to reject). Among equally good
+ * heights each node takes the one nearest its target, so the result is
+ * deterministic. Writes into `z`.
+ */
+function fitSegment(path: Path, target: readonly number[], a: number, b: number, za: number, zb: number, z: number[]): void {
+  const f = new ConvexPwl();
+  const lo: number[] = [];
+  const hi: number[] = [];
+  const reachA = path.reach[a] ?? 0;
+  const reachB = path.reach[b] ?? 0;
+  for (let i = a; i <= b; i++) {
+    if (i === a) f.addAbs(za, HARD);
+    else if (i === b) f.addAbs(zb, HARD);
+    else {
+      f.addAbs(target[i] ?? 0, 1);
+      const fl = path.floor[i] ?? Number.NEGATIVE_INFINITY;
+      if (fl > Number.NEGATIVE_INFINITY) {
+        const top = Math.min(za + (path.reach[i] ?? 0) - reachA, zb + reachB - (path.reach[i] ?? 0));
+        f.addWall(Math.min(fl, top), HARD);
+      }
+    }
+    lo.push(f.topLeft());
+    hi.push(f.topRight());
+    if (i < b) f.widen(path.maxRise[i] ?? 0);
+  }
+  z[b] = zb;
+  for (let i = b - 1; i > a; i--) {
+    const next = z[i + 1] ?? 0;
+    const d = path.maxRise[i] ?? 0;
+    const wLo = next - d;
+    const wHi = next + d;
+    const aLo = Math.max(lo[i - a] ?? 0, wLo);
+    const aHi = Math.min(hi[i - a] ?? 0, wHi);
+    z[i] = aLo <= aHi ? clamp(target[i] ?? 0, aLo, aHi) : (hi[i - a] ?? 0) < wLo ? wLo : wHi;
+  }
+  z[a] = za;
+}
+
+/**
+ * Heights for nodes a…b with z_a and z_b fixed, following the target wherever
+ * 35‰ lets it: first the largest set of nodes that can lie exactly on their
+ * target, a chain from a to b in which each consecutive pair is joinable
+ * within 35‰ (|t_j − t_i| ≤ what 35‰ reaches over their pieces) and leaves
+ * every water floor between them reachable, found by dynamic programming in
+ * O(m²), ties to the nearer predecessor; a node whose target lies below its
+ * water floor is never on it. Then each gap between consecutive chain nodes
+ * is filled by the least-deviation fit (`fitSegment`). So flat approaches
+ * stay on the ground and only the stretch that is too steep deviates, where
+ * L1 alone would balance cut against fill and cut the approaches to lower a
+ * viaduct (ADR 0010, D4 finding: both measured on the diorama).
+ */
+function fitSpan(path: Path, target: readonly number[], a: number, b: number, za: number, zb: number, z: number[]): void {
+  const m = b - a;
+  const value = (i: number): number => (i === a ? za : i === b ? zb : (target[i] ?? 0));
+  const count: number[] = Array.from({ length: m + 1 }, () => -1);
+  const prev: number[] = Array.from({ length: m + 1 }, () => -1);
+  count[0] = 0;
+  for (let k = 1; k <= m; k++) {
+    const i = a + k;
+    const vi = value(i);
+    if (i !== b && vi < (path.floor[i] ?? Number.NEGATIVE_INFINITY)) continue;
+    const ri = path.reach[i] ?? 0;
+    // Over the nodes strictly between j and i, the floors 35‰ must reach from both: floor_k ≤ v_j + (R_k − R_j)
+    // and floor_k ≤ v_i + (R_i − R_k), kept as running maxima of floor_k − R_k and floor_k + R_k.
+    let fromJ = Number.NEGATIVE_INFINITY;
+    let toI = Number.NEGATIVE_INFINITY;
+    for (let jk = k - 1; jk >= 0; jk--) {
+      // A chain to jk holds at most jk nodes, so no earlier predecessor can beat the count found.
+      if (jk + 1 <= (count[k] ?? -1)) break;
+      const j = a + jk;
+      if (jk < k - 1) {
+        const inner = j + 1;
+        const fl = path.floor[inner] ?? Number.NEGATIVE_INFINITY;
+        const rk = path.reach[inner] ?? 0;
+        if (fl - rk > fromJ) fromJ = fl - rk;
+        if (fl + rk > toI) toI = fl + rk;
+      }
+      const c = count[jk] ?? -1;
+      if (c < 0 || c + 1 <= (count[k] ?? -1)) continue;
+      const vj = value(j);
+      const rj = path.reach[j] ?? 0;
+      if (Math.abs(vi - vj) <= ri - rj && fromJ <= vj - rj && toI <= vi + ri) {
+        count[k] = c + 1;
+        prev[k] = jk;
+      }
+    }
+  }
+  if ((count[m] ?? -1) < 0) {
+    // No chain leaves the water floors reachable (the floors cannot be met from z_a and z_b): fit the span directly,
+    // which raises the floors' nodes as far as 35‰ reaches.
+    fitSegment(path, target, a, b, za, zb, z);
+    return;
+  }
+  const chain: number[] = [];
+  for (let k = m; k >= 0; k = prev[k] ?? -1) {
+    chain.push(a + k);
+    if (k === 0) break;
+  }
+  chain.reverse();
+  for (let c = 1; c < chain.length; c++) {
+    const u = chain[c - 1] ?? a;
+    const v = chain[c] ?? b;
+    z[u] = value(u);
+    z[v] = value(v);
+    if (v - u > 1) fitSegment(path, target, u, v, value(u), value(v), z);
+  }
+  z[a] = za;
+  z[b] = zb;
+}
+
+/** z_a … z_b as one uniform climb: the height change apportioned by length (largest remainder). */
+function rampSegment(path: Path, a: number, b: number, za: number, zb: number, z: number[]): void {
+  const steps = apportionMm(zb - za, path.lens.slice(a, b));
+  z[a] = za;
+  for (let i = a; i < b; i++) z[i + 1] = (z[i] ?? 0) + (steps[i - a] ?? 0);
+  z[b] = zb;
+}
+
+/** The heights 35‰ lets node n take from fixed node p, raised to clear water where that stays reachable. */
+function reachRange(path: Path, p: number, zp: number, n: number): readonly [number, number] {
+  const d = (path.reach[n] ?? 0) - (path.reach[p] ?? 0);
+  const lo = zp - d;
+  const hi = zp + d;
+  let raised = lo;
+  for (let j = p + 1; j <= n; j++) {
+    const fl = path.floor[j] ?? Number.NEGATIVE_INFINITY;
+    if (fl > Number.NEGATIVE_INFINITY) raised = Math.max(raised, fl - ((path.reach[n] ?? 0) - (path.reach[j] ?? 0)));
+  }
+  return [raised <= hi ? raised : lo, hi];
+}
+
+/**
+ * Node heights for a set of fixed nodes (always the start; the end unless it
+ * is free; pins): the free end first (auto), then each span between
+ * consecutive fixed nodes fitted to the target, or ramped when 35‰ cannot
+ * join them.
+ */
+function solveHeights(path: Path, fixed: ReadonlyMap<number, number>, mode: HeightMode): number[] {
+  const { n, g } = path;
+  const all = new Map(fixed);
+  if (!all.has(n)) {
+    const p = Math.max(...[...all.keys()].filter((k) => k < n));
+    const [lo, hi] = reachRange(path, p, all.get(p) ?? 0, n);
+    all.set(n, clamp(g[n] ?? 0, lo, hi));
+  }
+  const idx = [...all.keys()].sort((x, y) => x - y);
+  const z: number[] = Array.from({ length: n + 1 }, () => 0);
+  // The target: the ground (auto), or the D3 profile, the ground plus an offset apportioned between fixed nodes (fixed).
+  const target = [...g];
+  if (mode === "fixed") {
+    for (let k = 1; k < idx.length; k++) {
+      const a = idx[k - 1] ?? 0;
+      const b = idx[k] ?? 0;
+      const offA = (all.get(a) ?? 0) - (g[a] ?? 0);
+      const offB = (all.get(b) ?? 0) - (g[b] ?? 0);
+      const steps = apportionMm(offB - offA, path.lens.slice(a, b));
+      let offset = offA;
+      for (let i = a; i < b - 1; i++) {
+        offset += steps[i - a] ?? 0;
+        target[i + 1] = (g[i + 1] ?? 0) + offset;
+      }
+    }
+  }
+  for (let k = 1; k < idx.length; k++) {
+    const a = idx[k - 1] ?? 0;
+    const b = idx[k] ?? 0;
+    const za = all.get(a) ?? 0;
+    const zb = all.get(b) ?? 0;
+    if (Math.abs(zb - za) > (path.reach[b] ?? 0) - (path.reach[a] ?? 0)) rampSegment(path, a, b, za, zb, z);
+    else fitSpan(path, target, a, b, za, zb, z);
+  }
+  return z;
+}
+
+/** A plan's end height: fixed (by the drag in "fixed" mode, or by a port), or chosen by the planner (null, "auto"). */
+interface Heights {
+  readonly mode: HeightMode;
+  readonly endZMm: number | null;
+  readonly structure: StructureChoice;
+  /** Whether a free end may pin to an existing node's height (vertical magnetism: off in precision mode). */
+  readonly endPins: boolean;
+  /** Whether `endZMm` is a snapped port's height, which the straight mode never moves. */
+  readonly endPort?: boolean;
+}
+
+/**
+ * Node heights along a path, z[0] = `from.zMm` … z[n] (see "Elevation" in the
+ * module comment).
+ *
+ * **Pins.** Walking from the start, a node where the authored track already
+ * has nodes is pinned to one of their heights, h, when h lies within
+ * `MIN_HEIGHT_SEPARATION_MM` (6.5 m) of the profile computed so far (from the
+ * start, the earlier pins and the end). Nearer than that the path would clash
+ * with that track anyway, so pinning can only let it share the node or reuse
+ * the piece; farther, the path passes over or under the track (a grade
+ * separation) and keeps its own height. A free end ("auto") pins the same way,
+ * to heights 35‰ reaches, unless magnetism is off (precision mode): that is
+ * the planner's vertical magnetism. After each pin the profile is computed
+ * again.
+ *
+ * Several heights within reach (a bridge over a track) are ranked, first
+ * wins: the height whose incoming piece (from the previous node, when that is
+ * the start or a pin) is an existing piece; then one whose outgoing piece to
+ * an existing height at the next node (or to the end height) is; then the
+ * nearest to the profile; then the lower. Only the authored heights, the
+ * terrain and the path decide, never insertion order, so the profile is
+ * deterministic.
+ */
+function profileOf(ctx: PlannerContext, from: NodeRef, heights: Heights, shapes: readonly Shape[]): number[] {
+  // The committed nodes on the drag's path (its start, a snapped port, track it retraces or extends): their chains'
+  // buffer ends count as clipped, as validation clips the nodes a command joins (`ground.ts`).
+  let clip: Set<string> | null = null;
+  if (ctx.ground && ctx.index.nodes.size > 0) {
+    let q = from.q;
+    let r = from.r;
+    const visit = (): void => {
+      for (const z of heightsAt(ctx.index, q, r)) (clip ??= new Set()).add(`${q},${r},${z}`);
+    };
+    visit();
+    for (const s of shapes) {
+      q += s.dq;
+      r += s.dr;
+      visit();
+    }
+  }
+  // "fixed" keeps D3's profile, a lift above the natural terrain ramped between pins: under existing track the
+  // effective ground is that track's own formation, which would zero every pin's offset. Auto-grade and straight
+  // lines follow the effective ground; validation always judges against it.
+  const path = pathOf(ctx, from, shapes, heights.mode === "fixed" ? null : clip, heights.mode !== "fixed");
+  const { n } = path;
+  if (heights.mode === "straight") return straightProfile(path, from.zMm, heights);
+  const fixed = new Map<number, number>([[0, from.zMm]]);
+  if (heights.endZMm !== null) fixed.set(n, heights.endZMm);
+  let z = solveHeights(path, fixed, heights.mode);
+  let p = 0;
+  for (let i = 1; i <= n; i++) {
+    if (i === n && (heights.endZMm !== null || !heights.endPins)) break;
+    const q = path.qs[i] ?? 0;
+    const r = path.rs[i] ?? 0;
+    const existing = heightsAt(ctx.index, q, r);
+    if (existing.length === 0) continue;
+    const zi = z[i] ?? 0;
+    const distOf = (h: number): number => Math.abs(h - zi);
+    let near = existing.filter((h) => distOf(h) < MIN_HEIGHT_SEPARATION_MM);
+    if (i === n) {
+      const [lo, hi] = reachRange(path, p, fixed.get(p) ?? 0, n);
+      near = near.filter((h) => h >= lo && h <= hi);
+    }
     const first = near[0];
     if (first === undefined) continue;
     let best = first;
     if (near.length > 1) {
       // Only now are piece keys looked up: one height within reach needs no ranking.
+      const zp = fixed.get(p) ?? 0;
       const incoming = shapes[i - 1];
       const outgoing = shapes[i];
-      const nextHeights = i + 1 === n ? [endZMm] : heightsAt(ctx.index, qs[i + 1] ?? 0, rs[i + 1] ?? 0);
+      const nextHeights = i + 1 === n ? [z[n] ?? 0] : heightsAt(ctx.index, path.qs[i + 1] ?? 0, path.rs[i + 1] ?? 0);
       const rankOf = (h: number): number =>
-        p === i - 1 && incoming && isExisting(ctx, specAt(incoming, qs[p] ?? 0, rs[p] ?? 0, zp, h))
+        p === i - 1 && incoming && isExisting(ctx, specAt(incoming, path.qs[p] ?? 0, path.rs[p] ?? 0, zp, h))
           ? 0
           : outgoing && nextHeights.some((h1) => isExisting(ctx, specAt(outgoing, q, r, h, h1)))
             ? 1
@@ -903,28 +1288,33 @@ function profileOf(ctx: PlannerContext, from: NodeRef, endZMm: number, shapes: r
         }
       }
     }
-    z[i] = best;
-    pins.push(i);
+    fixed.set(i, best);
     p = i;
-  }
-  pins.push(n);
-  for (let k = 1; k < pins.length; k++) {
-    const a = pins[k - 1] ?? 0;
-    const b = pins[k] ?? 0;
-    const offsetA = (z[a] ?? 0) - (g[a] ?? 0);
-    const offsetB = (z[b] ?? 0) - (g[b] ?? 0);
-    const steps = apportionMm(offsetB - offsetA, shapes.slice(a, b).map((s) => s.lengthMm));
-    let offset = offsetA;
-    for (let i = a; i < b - 1; i++) {
-      offset += steps[i - a] ?? 0;
-      z[i + 1] = (g[i + 1] ?? 0) + offset;
-    }
+    z = solveHeights(path, fixed, heights.mode);
   }
   return z;
 }
 
-function specsOf(ctx: PlannerContext, from: NodeRef, endZMm: number, shapes: readonly Shape[]): PieceSpec[] {
-  const z = profileOf(ctx, from, endZMm, shapes);
+/**
+ * The straight mode's profile (owner decision 2026-09-28, "One 'Straight line' tool"): one steady grade from the
+ * start to the end, whatever the ground does, apportioned by length (largest remainder, as `rampSegment`). The end
+ * is the drag's (the ground at the end node plus the height steps, from the tool) moved to the nearest height 35‰
+ * reaches from the start, so a straight line is never too steep; a snapped port keeps its own height, and a port
+ * out of reach gives a ramp that `preview` rejects as `grade-too-steep`. No pins, no water floors: bridges and
+ * tunnels come from structure inference.
+ */
+function straightProfile(path: Path, z0: number, heights: Heights): number[] {
+  const { n } = path;
+  const reach = path.reach[n] ?? 0;
+  const wanted = heights.endZMm ?? (path.g[n] ?? z0);
+  const end = heights.endPort ? wanted : clamp(wanted, z0 - reach, z0 + reach);
+  const z: number[] = Array.from({ length: n + 1 }, () => 0);
+  rampSegment(path, 0, n, z0, end, z);
+  return z;
+}
+
+function specsOf(ctx: PlannerContext, from: NodeRef, heights: Heights, shapes: readonly Shape[]): PieceSpec[] {
+  const z = profileOf(ctx, from, heights, shapes);
   const out: PieceSpec[] = [];
   let q = from.q;
   let r = from.r;
@@ -1025,21 +1415,20 @@ function finish(ctx: PlannerContext, chosen: Chosen, snapped: NodeRef | null): T
 }
 
 /** Ranks the candidates by `compareCandidates` and chooses among them. */
-function choose(ctx: PlannerContext, from: NodeRef, endZMm: number, candidates: readonly Candidate[]): Chosen {
-  return chooseRanked(ctx, from, endZMm, [...candidates].sort(compareCandidates));
+function choose(ctx: PlannerContext, from: NodeRef, heights: Heights, candidates: readonly Candidate[]): Chosen {
+  return chooseRanked(ctx, from, heights, [...candidates].sort(compareCandidates));
 }
 
 /** Returns the first valid candidate among the first `MAX_VALIDATIONS` of `ranked` (best first), else the top one. */
-function chooseRanked(ctx: PlannerContext, from: NodeRef, endZMm: number, ranked: readonly Candidate[]): Chosen {
-  const structure = resolveStructure("auto");
+function chooseRanked(ctx: PlannerContext, from: NodeRef, heights: Heights, ranked: readonly Candidate[]): Chosen {
   let top: Chosen | undefined;
   for (let i = 0; i < ranked.length && i < MAX_VALIDATIONS; i++) {
     const cand = ranked[i];
     if (!cand) break;
     const shapes = shapesOf(cand.segs);
-    const chosen: Chosen = { cand, shapes, specs: specsOf(ctx, from, endZMm, shapes) };
+    const chosen: Chosen = { cand, shapes, specs: specsOf(ctx, from, heights, shapes) };
     top ??= chosen;
-    if (validate(ctx, { kind: "build", specs: chosen.specs, structure }).ok) return chosen;
+    if (validate(ctx, { kind: "build", specs: chosen.specs, structure: heights.structure }).ok) return chosen;
   }
   if (!top) throw new Error("planner chose from no candidates");
   return top;
@@ -1313,14 +1702,14 @@ function startHeading(ctx: PlannerContext, from: NodeRef, fromHeading: Heading |
   return dx * back.x + dy * back.y > dx * ahead.x + dy * ahead.y ? port.heading : onward;
 }
 
-/** A plan that joins `port` exactly (position and heading), or undefined when no fit reaches it. */
-function planToPort(ctx: PlannerContext, drag: Drag, from: NodeRef, port: Port, rules: Rules, snapped: NodeRef | null): TrackPlan | undefined {
+/** A plan that joins `port` exactly (position, heading and height), or undefined when no fit reaches it. */
+function planToPort(ctx: PlannerContext, drag: Drag, from: NodeRef, port: Port, rules: Rules, snapped: NodeRef | null, heights: Heights): TrackPlan | undefined {
   const delta = sub(port.node, from);
   if (delta.q === 0 && delta.r === 0) return undefined;
   const d0 = startHeading(ctx, from, drag.fromHeading, planOf(port.node.q, port.node.r));
   const candidates = [...singleBend(d0, delta, port.heading, rules), ...twoBendFits(d0, delta, port.heading, rules)];
   if (candidates.length === 0) return undefined;
-  return finish(ctx, choose(ctx, from, port.node.zMm, candidates), snapped);
+  return finish(ctx, choose(ctx, from, { ...heights, endZMm: port.node.zMm, endPort: true }, candidates), snapped);
 }
 
 function assertDrag(drag: Drag): void {
@@ -1332,6 +1721,10 @@ function assertDrag(drag: Drag): void {
   }
   if (!Number.isSafeInteger(drag.dzMm)) throw new TypeError(`drag.dzMm must be a safe integer, not ${String(drag.dzMm)}`);
   if (drag.radiusCapM !== undefined && !isRadiusClass(drag.radiusCapM)) throw new TypeError(`drag.radiusCapM ${String(drag.radiusCapM)} is not a radius class`);
+  if (drag.heightMode !== undefined && drag.heightMode !== "auto" && drag.heightMode !== "fixed" && drag.heightMode !== "straight") {
+    throw new TypeError(`drag.heightMode ${String(drag.heightMode)} is not "auto", "fixed" or "straight"`);
+  }
+  if (drag.structure !== undefined) structureChoice(drag.structure);
   const precision = drag.precision;
   if (precision !== undefined) {
     if (typeof precision !== "object" || precision === null || !isRadiusClass(precision.radiusM)) {
@@ -1359,16 +1752,18 @@ export function planTrack(ctx: PlannerContext, drag: Drag): TrackPlan {
   const pointer: PlanXY = { x: drag.to.xMm, y: drag.to.yMm };
   const n = nearestNode({ x: drag.to.xMm / 1000, y: drag.to.yMm / 1000 });
   const endZMm = from.zMm + drag.dzMm;
+  const mode: HeightMode = drag.heightMode ?? "fixed";
+  const heights: Heights = { mode, endZMm: mode === "auto" ? null : endZMm, structure: drag.structure ?? "auto", endPins: magnetism };
 
   if (magnetism) {
     for (const port of portsNear(ctx, n, from, pointer)) {
-      const plan = planToPort(ctx, drag, from, port, rules, port.node);
+      const plan = planToPort(ctx, drag, from, port, rules, port.node, heights);
       if (plan) return plan;
     }
   } else if (precision?.endHeading === undefined) {
     const end = nodeRef(n.q, n.r, endZMm);
     const port = end.q === from.q && end.r === from.r && end.zMm === from.zMm ? undefined : portAt(ctx, end);
-    const plan = port ? planToPort(ctx, drag, from, port, rules, null) : undefined;
+    const plan = port ? planToPort(ctx, drag, from, port, rules, null, heights) : undefined;
     if (plan) return plan;
   }
 
@@ -1378,15 +1773,15 @@ export function planTrack(ctx: PlannerContext, drag: Drag): TrackPlan {
   const oneBend = (node: Axial): Candidate[] => singleBend(d0, sub(node, from), endHeading, rules);
   // One bend reaching the pointer's node: the selection as before the two-bend fallback, exactly.
   const atPointer = oneBend(n);
-  if (atPointer.length > 0) return finish(ctx, choose(ctx, from, endZMm, atPointer), null);
+  if (atPointer.length > 0) return finish(ctx, choose(ctx, from, heights, atPointer), null);
   // Else one bend a node off, before two bends (owner decision 2026-09-27, "prefer one bend, a node off").
   const halfway = reachesHalfway(pointer, from);
   const nodeOff = oneBendNodeOff(pointer, n, halfway, oneBend);
-  if (nodeOff.length > 0) return finish(ctx, choose(ctx, from, endZMm, nodeOff), null);
+  if (nodeOff.length > 0) return finish(ctx, choose(ctx, from, heights, nodeOff), null);
   // Otherwise two bends in one drag (owner decision 2026-09-27).
   const tau = arcTurn(pointer, from, d0);
   const twoAtPointer = bestTwoBend(d0, sub(n, from), endHeading, rules, tau);
-  if (twoAtPointer.length > 0) return finish(ctx, chooseRanked(ctx, from, endZMm, twoAtPointer), null);
+  if (twoAtPointer.length > 0) return finish(ctx, chooseRanked(ctx, from, heights, twoAtPointer), null);
   const uTurns = endHeading === undefined || endHeading === opposite(d0);
   let target: Axial | undefined;
   if (uTurns && frameOf(pointer, from, d0).ahead < 0) {
@@ -1404,6 +1799,6 @@ export function planTrack(ctx: PlannerContext, drag: Drag): TrackPlan {
     );
   }
   const atTarget = oneBend(target);
-  if (atTarget.length > 0) return finish(ctx, choose(ctx, from, endZMm, atTarget), null);
-  return finish(ctx, chooseRanked(ctx, from, endZMm, bestTwoBend(d0, sub(target, from), endHeading, rules, tau)), null);
+  if (atTarget.length > 0) return finish(ctx, choose(ctx, from, heights, atTarget), null);
+  return finish(ctx, chooseRanked(ctx, from, heights, bestTwoBend(d0, sub(target, from), endHeading, rules, tau)), null);
 }

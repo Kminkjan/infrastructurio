@@ -1,12 +1,14 @@
 import { type MouseEvent, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
-import type { HudActions, HudState, HudStore, HudTooltip } from "./store";
+import type { HudActions, HudState, HudStore, HudTool, HudTooltip } from "./store";
 
 /**
  * The React HUD (architecture "UI (HUD)", ADR 0009): the construction
  * tooltip, the toast, the aria-live status line and a minimal bottom
- * toolbar (Track and undo/redo; later slices add the other tools). It
- * renders only when the store publishes, never per frame.
+ * toolbar (Track and Straight line, then undo/redo; later slices add the
+ * other tools), with a chip over it naming the occlusion aids in effect (H,
+ * U; keyboard only, announced on the status line). It renders only when the
+ * store publishes, never per frame.
  *
  * Colours come from `palette.ts` as CSS custom properties the app sets on
  * the mount (`--hud-parchment`, `--hud-border`, `--hud-ink`, `--hud-brass`,
@@ -49,6 +51,16 @@ const CSS = /* css */ `
 .hud-tooltip .counts { font-weight: 600; }
 .hud-tooltip .hint { opacity: 0.72; font-size: 12px; }
 .hud-tooltip .precision { font-weight: 600; }
+.hud-tooltip .held { font-weight: 600; }
+.hud-tooltip .held::before {
+  content: "";
+  display: inline-block;
+  width: 3px;
+  height: 11px;
+  margin-right: 7px;
+  background: var(--hud-amber);
+  vertical-align: -1px;
+}
 .hud-tooltip .invalid { font-weight: 600; margin-top: 2px; }
 .hud-tooltip .invalid::before {
   content: "";
@@ -99,6 +111,16 @@ const CSS = /* css */ `
 .hud-toolbar button:disabled { opacity: 0.45; cursor: default; }
 .hud-toolbar .sep { width: 1px; margin: 4px 2px; background: var(--hud-border); }
 .hud-toolbar kbd { font: inherit; font-size: 11px; opacity: 0.7; margin-left: 6px; }
+.hud-views {
+  position: fixed;
+  left: 50%;
+  bottom: 58px;
+  z-index: 11;
+  transform: translateX(-50%);
+  padding: 2px 10px;
+  font-size: 12px;
+  pointer-events: none;
+}
 .hud-toast {
   position: fixed;
   left: 50%;
@@ -143,6 +165,7 @@ export function TooltipPanel({ tip }: { readonly tip: HudTooltip }) {
   return (
     <div className="hud-panel hud-tooltip" data-testid="construction-tooltip" aria-hidden="true">
       <div className="line counts">{tip.counts}</div>
+      {tip.structure && <div className="line structure">{tip.structure}</div>}
       {m && (
         <div className="line metrics">
           {m.length} ·{" "}
@@ -152,6 +175,7 @@ export function TooltipPanel({ tip }: { readonly tip: HudTooltip }) {
           · {m.minRadius} · {m.endHeight}
         </div>
       )}
+      {tip.held && <div className="line held">{tip.held}</div>}
       {tip.note && <div className="line note">{tip.note}</div>}
       {tip.invalid && <div className="line invalid">Can't build: {tip.invalid.reason}</div>}
       {tip.invalid?.fix && <div className="line fix">{tip.invalid.fix}</div>}
@@ -192,23 +216,32 @@ function keepFocus(e: MouseEvent): void {
   e.preventDefault();
 }
 
+/** The tool buttons: label, key and tooltip. */
+const TOOLS: readonly { readonly tool: Exclude<HudTool, "select">; readonly label: string; readonly key: string; readonly title: string }[] = [
+  { tool: "track", label: "Track", key: "1", title: "Track (1): follows the ground; Esc returns to Select" },
+  { tool: "straight", label: "Straight", key: "5", title: "Straight line (5): one steady grade from start to end; bridges and tunnels as needed" },
+];
+
 export function Toolbar({ store, actions }: { readonly store: HudStore; readonly actions: HudActions }) {
   const tool = useHud(store, (s) => s.tool);
   const canUndo = useHud(store, (s) => s.canUndo);
   const canRedo = useHud(store, (s) => s.canRedo);
-  const track = tool === "track";
   return (
     <div className="hud-panel hud-toolbar" role="toolbar" aria-label="Construction">
-      <button
-        type="button"
-        aria-pressed={track}
-        aria-keyshortcuts="1"
-        title="Track (1); Esc returns to Select"
-        onMouseDown={keepFocus}
-        onClick={() => actions.selectTool(track ? "select" : "track")}
-      >
-        Track<kbd>1</kbd>
-      </button>
+      {TOOLS.map((t) => (
+        <button
+          key={t.tool}
+          type="button"
+          aria-pressed={tool === t.tool}
+          aria-keyshortcuts={t.key}
+          title={t.title}
+          onMouseDown={keepFocus}
+          onClick={() => actions.selectTool(tool === t.tool ? "select" : t.tool)}
+        >
+          {t.label}
+          <kbd>{t.key}</kbd>
+        </button>
+      ))}
       <span className="sep" aria-hidden="true" />
       <button
         type="button"
@@ -234,6 +267,20 @@ export function Toolbar({ store, actions }: { readonly store: HudStore; readonly
   );
 }
 
+/** Names the occlusion aids in effect; the status line announces each toggle, so this stays out of the accessibility tree. */
+export function ViewChip({ store }: { readonly store: HudStore }) {
+  const views = useHud(store, (s) => s.views);
+  const parts: string[] = [];
+  if (views.decksHidden) parts.push("Decks hidden (H)");
+  if (views.xray) parts.push("Underground x-ray (U)");
+  if (parts.length === 0) return null;
+  return (
+    <div className="hud-panel hud-views" data-testid="view-chip" aria-hidden="true">
+      {parts.join(" · ")}
+    </div>
+  );
+}
+
 export function Hud({ store, actions }: { readonly store: HudStore; readonly actions: HudActions }) {
   return (
     <>
@@ -241,6 +288,7 @@ export function Hud({ store, actions }: { readonly store: HudStore; readonly act
       <Tooltip store={store} />
       <Toast store={store} />
       <StatusLine store={store} />
+      <ViewChip store={store} />
       <Toolbar store={store} actions={actions} />
     </>
   );

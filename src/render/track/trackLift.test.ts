@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type PieceSpec, resolvePiece } from "../../core/sim/api";
+import { type PieceSpec, groundMmAt, resolvePiece } from "../../core/sim/api";
 import { diorama, groundPlans } from "../../../tests/support/groundPlans";
 import { sampleTerrainHeightM } from "../terrain/heightfieldRay";
 import { BALLAST_DEPTH_M, BALLAST_TOP_HALF_M, RAIL_HEIGHT_M, RAIL_OFFSET_M, SLEEPER_HEIGHT_M, TRACK_LIFT_M, type TrackCentreline, sampleCentreline } from "./trackGeometry";
@@ -8,7 +8,10 @@ import { BALLAST_DEPTH_M, BALLAST_TOP_HALF_M, RAIL_HEIGHT_M, RAIL_OFFSET_M, SLEE
  * A dev measurement, not a gate (ADR 0010, "Findings (2026-09-27, D3 ground following)"):
  * how far the rendered terrain rises above ground-following track between its nodes on the
  * diorama map, and how much of the track each render lift leaves buried. The ADR's table
- * came from this code with PLANS = 3000 (about 5 s); the suite runs 300.
+ * came from this code with PLANS = 3000 (about 5 s); the suite runs 300. Since D4's auto-grade
+ * (2026-09-28) the planner leaves the ground where it is steeper than 35‰, and the earthworks
+ * conform those pieces, so the lift is measured on the pieces whose two nodes still lie on the
+ * ground, the ones it was chosen for (until D4 every node of these plans did).
  */
 const PLANS = 300;
 /** Across the track: the rails, the ballast top's edges and the shoulders' base. */
@@ -32,10 +35,17 @@ describe("track render lift over ground-following track (a dev measurement)", ()
     // Terrain minus track height (m), every 0.25 m along each piece's rendered centreline, by piece class.
     type Samples = { centre: number[]; rails: number[]; ballast: number[]; shoulder: number[] };
     const classes = new Map<string, Samples>();
+    let onGround = 0;
+    let offGround = 0;
     for (const plan of plans) {
       for (const spec of plan.pieces) {
         const res = resolvePiece(spec);
         if (!res.ok) throw new Error(res.failure.message);
+        if (!res.piece.ends.every((e) => e.node.zMm === groundMmAt(terrain, e.node))) {
+          offGround += 1;
+          continue;
+        }
+        onGround += 1;
         const c: TrackCentreline = { prims: res.piece.prims, z0M: res.piece.ends[0].node.zMm / 1000, z1M: res.piece.ends[1].node.zMm / 1000 };
         const cls = classOf(spec);
         const out = classes.get(cls) ?? { centre: [], rails: [], ballast: [], shoulder: [] };
@@ -77,6 +87,7 @@ describe("track render lift over ground-following track (a dev measurement)", ()
       );
       lines.push(`${cls} (${s.centre.length} samples, centre > 1 m under ${fmt(pct(s.centre, (d) => d > 1))}): ${cells.join("; ")}`);
     }
+    await annotate(`${onGround} pieces with both nodes on the ground measured, ${offGround} off it left to the earthworks`);
     for (const line of lines) await annotate(line);
 
     // Guards (set after the 2026-09-27 measurement; not gates). On straights the planner lays both ends on

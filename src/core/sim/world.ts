@@ -10,6 +10,7 @@ import {
   emptyAuthored,
   isEmptyDiff,
 } from "../track/authored";
+import { EffectiveGround, type GroundView } from "../track/ground";
 import { EMPTY_HISTORY, type History, recordEdit, stepHistory } from "../track/history";
 import { type Drag, type TrackPlan, planTrack } from "../track/planner";
 import {
@@ -23,7 +24,7 @@ import {
   createTrackIndex,
   indexAdd,
   indexRemove,
-  resolveStructure,
+  structureChoice,
   validate,
 } from "../track/validate";
 import { deepFreeze } from "../util/freeze";
@@ -48,6 +49,11 @@ import { deepFreeze } from "../util/freeze";
  * Only the contents are player-reachable (the specs a drag resolved to, the
  * keys a pick named: off the map, malformed or stale), and those are always
  * rejected with a reason, never thrown.
+ *
+ * A build's `structure` applies to the pieces it adds (a reused piece keeps
+ * its own): `auto` infers each one's from the terrain under it (D4, rule 4 in
+ * `track/validate.ts`), and ground, bridge or tunnel forces it (the Bridge and
+ * Tunnel tools). The inferred structures are in the result's `diff.added`.
  */
 export type Command =
   | { readonly type: "build-track"; readonly pieces: readonly PieceSpec[]; readonly structure: StructureChoice }
@@ -81,12 +87,19 @@ export interface World {
   /** Reads the authored state, never changes it. */
   plan(drag: Drag): TrackPlan;
   network(): NetworkView;
+  /** The revision's earthworks (`track/ground.ts`): the same object until an edit changes the track. */
+  ground(): GroundView;
+  /** The effective ground at a lattice node in integer mm (the water surface over a lower bed); undefined off the map. */
+  groundMm(q: number, r: number): number | undefined;
 }
 
 export function createWorld(terrain: Terrain, init?: WorldInit): World {
   let authored: AuthoredState = init ? authoredFromRecords(init.records, init.rev ?? 0) : emptyAuthored();
   let history: History = init?.history ?? EMPTY_HISTORY;
   const index: TrackIndex = createTrackIndex(authored.pieces.values());
+  // The effective ground (D4 feel-check fixes, 2026-09-28): the committed track's earthworks, which the planner,
+  // validation and the renderer read, kept in step with each commit.
+  const ground = new EffectiveGround(terrain, authored.pieces.values(), { nodes: index.nodes, pieces: authored.pieces });
   let view: NetworkView | undefined;
 
   function commitDiff(diff: Diff): void {
@@ -96,15 +109,25 @@ export function createWorld(terrain: Terrain, init?: WorldInit): World {
       const piece = before.pieces.get(r.key);
       if (piece) indexRemove(index, piece);
     }
+    const added = [];
+    const removed = [];
+    for (const r of diff.removed) {
+      const piece = before.pieces.get(r.key);
+      if (piece) removed.push(piece);
+    }
     for (const r of diff.added) {
       const piece = authored.pieces.get(r.key);
-      if (piece) indexAdd(index, piece);
+      if (piece) {
+        indexAdd(index, piece);
+        added.push(piece);
+      }
     }
+    ground.apply(removed, added, { nodes: index.nodes, pieces: authored.pieces });
   }
 
   function run(cmd: Command, commit: boolean): Result {
     assertCommandShape(cmd);
-    const ctx: TrackContext = { terrain, authored, index };
+    const ctx: TrackContext = { terrain, authored, index, ground };
     let accepted: Accepted;
     let next: History;
     switch (cmd.type) {
@@ -112,7 +135,7 @@ export function createWorld(terrain: Terrain, init?: WorldInit): World {
       case "demolish": {
         const verdict =
           cmd.type === "build-track"
-            ? validate(ctx, { kind: "build", specs: cmd.pieces, structure: resolveStructure(cmd.structure) })
+            ? validate(ctx, { kind: "build", specs: cmd.pieces, structure: structureChoice(cmd.structure) })
             : validate(ctx, { kind: "demolish", keys: cmd.pieces });
         if (!verdict.ok) return rejected(verdict);
         accepted = verdict;
@@ -150,7 +173,14 @@ export function createWorld(terrain: Terrain, init?: WorldInit): World {
     return view;
   }
 
-  return Object.freeze({ terrain, run, plan: (drag: Drag) => planTrack({ terrain, authored, index }, drag), network });
+  return Object.freeze({
+    terrain,
+    run,
+    plan: (drag: Drag) => planTrack({ terrain, authored, index, ground }, drag),
+    network,
+    ground: () => ground.view(authored.rev),
+    groundMm: (q: number, r: number) => ground.nodeMm(q, r),
+  });
 }
 
 /** Throws a TypeError naming the fault when a command breaks the shape contract (see `Command`). */
@@ -159,7 +189,7 @@ function assertCommandShape(cmd: Command): void {
   switch (cmd.type) {
     case "build-track":
       if (!Array.isArray(cmd.pieces)) throw new TypeError(`build-track needs a pieces array, not ${String(cmd.pieces)}`);
-      resolveStructure(cmd.structure);
+      structureChoice(cmd.structure);
       return;
     case "demolish":
       if (!Array.isArray(cmd.pieces)) throw new TypeError(`demolish needs a pieces array of keys, not ${String(cmd.pieces)}`);

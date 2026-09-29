@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { diorama } from "../../tests/support/groundPlans";
 import { makeTerrain } from "../../tests/support/makeTerrain";
-import { type Drag, type Sim, type Terrain, generateTerrain, groundMmAt } from "../core/sim/api";
+import { type Drag, type Sim, type Terrain, generateTerrain, waterDeckMm } from "../core/sim/api";
 import { createWorld } from "../core/sim/world";
-import { HINT_LINE } from "./format";
+import { HINT_LINE, STRAIGHT_HINT_LINE, formatHeight } from "./format";
 import { pickAtNode } from "./picks";
 import { createPreviewMemo } from "./previewMemo";
 import { DRAG_THRESHOLD_PX, type TrackToolState, initialTrackState, reduceTrackTool } from "./trackTool";
@@ -20,6 +21,8 @@ function simOn(terrain: Terrain): Sim {
     preview: (cmd) => w.run(cmd, false),
     execute: (cmd) => w.run(cmd, true),
     network: () => w.network(),
+    ground: () => w.ground(),
+    groundMm: (q, r) => w.groundMm(q, r),
   };
 }
 
@@ -31,8 +34,8 @@ function simOn(terrain: Terrain): Sim {
  * at height 0 (no water), so heights read as whole steps; otherwise the
  * seeded terrain applies.
  */
-function session({ flat = false }: { flat?: boolean } = {}) {
-  const terrain = flat ? makeTerrain(TERRAIN.columns, TERRAIN.rows, () => 0, -100) : generateTerrain(TERRAIN);
+function session({ flat = false, terrain: given }: { flat?: boolean; terrain?: Terrain } = {}) {
+  const terrain = given ?? (flat ? makeTerrain(TERRAIN.columns, TERRAIN.rows, () => 0, -100) : generateTerrain(TERRAIN));
   const sim: Sim = simOn(terrain);
   const counts = { previews: 0 };
   const drags: Drag[] = [];
@@ -43,7 +46,8 @@ function session({ flat = false }: { flat?: boolean } = {}) {
     },
     () => sim.network().rev,
   );
-  const groundZmm = (q: number, r: number): number | undefined => groundMmAt(terrain, { q, r });
+  // The app's ground: the sim's effective ground (the terrain as the track's earthworks shape it; D4 feel-check fixes).
+  const groundZmm = (q: number, r: number): number | undefined => sim.groundMm(q, r);
   const ctx = (): ToolCtx => ({
     network: sim.network(),
     planTrack: (drag) => {
@@ -52,6 +56,7 @@ function session({ flat = false }: { flat?: boolean } = {}) {
     },
     preview: memo.preview,
     groundZmm,
+    waterDeckZmm: (q, r) => waterDeckMm(terrain, { q, r }),
     settings: { heightStepMm: STEP_MM, radiusCapM: undefined },
   });
   let state: TrackToolState = initialTrackState();
@@ -413,12 +418,15 @@ describe("track tool: height, precision and keyboard", () => {
 
   it("takes an existing node's height when the plan ends on it within half a step", () => {
     const t = session({ flat: true });
-    // A run on flat ground rising one step (0 → 1000 mm) over six pieces: (12, 12) sits near 333 mm.
-    t.down(10, 12);
-    t.move(16, 12);
-    t.send({ type: "height", delta: 1 });
-    t.up(16, 12);
-    t.send({ type: "escape" });
+    // A deck on flat ground rising one step (0 → 1000 mm) over six pieces: (12, 12) sits near 333 mm. A bridge, so the
+    // ground under it stays the terrain (a ground run's formation would be the effective ground there, and the end
+    // on the ground would take the run's height even in precision; D4 feel-check fixes).
+    const rises = [167, 167, 167, 167, 166, 166];
+    const deck = rises.map((dz, i) => {
+      const z0 = rises.slice(0, i).reduce((a, b) => a + b, 0);
+      return { kind: "straight", from: { q: 10 + i, r: 12, zMm: z0 }, heading: 0, z1Mm: z0 + dz } as const;
+    });
+    expect(t.sim.execute({ type: "build-track", pieces: deck, structure: "bridge" }).ok).toBe(true);
     const node = t.sim.network().nodes.find((n) => n.q === 12 && n.r === 12)?.zMm ?? Number.NaN;
     expect(Math.abs(node - 333)).toBeLessThanOrEqual(1);
     // From the ground, a plan ending on that node: within half a 1000 mm step of 0, so it takes the node's height.
@@ -430,6 +438,30 @@ describe("track tool: height, precision and keyboard", () => {
     expect(t.state.plan?.end?.node.zMm).toBe(0);
   });
 
+  it("plans with auto-grade while no height steps are pressed, and with fixed heights once they are (D4)", () => {
+    // The seeded map is steep: from (25, 14) the ground falls 1.4 m over 20 m, more than 35‰ reaches, so auto ends
+    // off the ground.
+    const t = session();
+    t.down(25, 14);
+    let fx = t.move(29, 14);
+    expect(t.drags.at(-1)?.heightMode).toBe("auto");
+    const plan = t.state.plan;
+    const end = plan?.end?.node;
+    if (!plan || !end) throw new Error("no plan");
+    expect(plan.pieces.every((p) => Math.abs(p.z1Mm - p.from.zMm) * 1000 <= 35 * 5000)).toBe(true);
+    const aboveMm = end.zMm - (t.groundZmm(end.q, end.r) ?? 0);
+    expect(aboveMm).not.toBe(0);
+    // One plan, no re-plan to the ground: the tooltip shows where the end actually sits.
+    expect(tooltipOf(fx)?.metrics?.endHeight).toBe(`End height ${formatHeight(aboveMm)}`);
+    fx = t.send({ type: "height", delta: 1 });
+    expect(t.drags.at(-1)?.heightMode).toBe("fixed");
+    expect(t.state.plan?.end?.node.zMm).toBe((t.groundZmm(29, 14) ?? 0) + STEP_MM);
+    expect(tooltipOf(fx)?.metrics?.endHeight).toBe("End height +1 m");
+    t.send({ type: "height", delta: -1 });
+    expect(t.drags.at(-1)?.heightMode).toBe("auto");
+    expect(t.state.plan?.end?.node).toEqual(end);
+  });
+
   it("ignores height keys until a track is started", () => {
     const t = session();
     const fx = t.send({ type: "height", delta: 1 });
@@ -438,14 +470,18 @@ describe("track tool: height, precision and keyboard", () => {
   });
 
   it("keeps the height above ground when chaining", () => {
-    const t = session();
+    // On flat ground, and 35 m long so one 1 m step stays within 35‰ (until D4: 20 m on the seeded map, which the
+    // grade rule now rejects).
+    const t = session({ flat: true });
+    // The ground before the build: afterwards the effective ground at the end is the new track's own formation.
+    const ground = t.groundZmm(17, 10) ?? 0;
     t.down(10, 10);
-    t.move(14, 10);
+    t.move(17, 10);
     t.send({ type: "height", delta: 1 });
-    t.up(14, 10);
+    t.up(17, 10);
     expect(t.state.heightSteps).toBe(1);
-    const end = t.sim.network().nodes.find((n) => n.q === 14 && n.r === 10);
-    expect(end?.zMm).toBe((t.groundZmm(14, 10) ?? 0) + STEP_MM);
+    const end = t.sim.network().nodes.find((n) => n.q === 17 && n.r === 10);
+    expect(end?.zMm).toBe(ground + STEP_MM);
   });
 
   it("maps precision mode, the radius wheel and Q/E onto the drag", () => {
@@ -525,5 +561,319 @@ describe("track tool: height, precision and keyboard", () => {
       { type: "highlight", keys: [] },
     ]);
     expect(t.state.phase).toBe("idle");
+  });
+});
+
+/** Flat dry land at 0 m with a 15 m cliff from q = 12 east (row-independent): a straight line into it tunnels. */
+const CLIFF = makeTerrain(TERRAIN.columns, TERRAIN.rows, (q) => (q >= 12 ? 150 : 0), -100);
+
+/** Land at 11 m with a lake (bed 7 m, water level 10 m) from q = 20 east: water nodes carry the deck at 14 m. */
+const LAKE = makeTerrain(TERRAIN.columns, TERRAIN.rows, (q) => (q >= 20 ? 70 : 110), 100);
+
+/** Land at 20 m with a dry valley 10 m deep for q 16–26 (row-independent): a level straight line bridges it. */
+const VALLEY = makeTerrain(TERRAIN.columns, TERRAIN.rows, (q) => (q >= 16 && q <= 26 ? 100 : 200), -100);
+
+describe("track tool: Straight line mode (owner decision 2026-09-28, \"One 'Straight line' tool\")", () => {
+  /** A straight line from (q0, 10) to (q1, 10) with the tool in mode "straight". */
+  function straightLine(terrain: Terrain | undefined, q0: number, q1: number) {
+    const t = terrain ? session({ terrain }) : session({ flat: true });
+    t.send({ type: "activate", mode: "straight" });
+    expect(t.state.mode).toBe("straight");
+    t.down(q0, 10);
+    const fx = t.move(q1, 10);
+    return { t, fx };
+  }
+
+  /** Every piece rises by the same share of the height change (a steady grade, largest-remainder rounding). */
+  function steady(pieces: readonly { from: { zMm: number }; z1Mm: number }[]): boolean {
+    const rises = pieces.map((p) => p.z1Mm - p.from.zMm);
+    return Math.max(...rises) - Math.min(...rises) <= 1;
+  }
+
+  it("bridges a valley on a level line, ground at both ends", () => {
+    const { t, fx } = straightLine(VALLEY, 6, 36);
+    expect(t.drags.at(-1)?.heightMode).toBe("straight");
+    const plan = t.state.plan;
+    if (!plan) throw new Error("no plan");
+    expect(plan.pieces.every((p) => p.from.zMm === 20_000 && p.z1Mm === 20_000)).toBe(true);
+    const kinds = ghostOf(fx)?.pieces.map((p) => p.structure) ?? [];
+    expect(kinds[0]).toBe("ground");
+    expect(kinds.at(-1)).toBe("ground");
+    expect(kinds).toContain("bridge");
+    expect(kinds).not.toContain("tunnel");
+    expect(ghostOf(fx)?.valid).toBe(true);
+    const tip = tooltipOf(fx);
+    expect(tip?.structure).toMatch(/^Structure: \d+ bridge, \d+ ground$/);
+    expect(tip?.hint).toBe(STRAIGHT_HINT_LINE);
+    const exec = last(t.up(36, 10), "execute");
+    expect(exec?.command).toMatchObject({ type: "build-track", structure: "auto" });
+    expect(t.sim.network().pieces.some((p) => p.structure === "bridge")).toBe(true);
+  });
+
+  it("tunnels through a hill: the end the ground wants is out of 35‰ reach, so it stops where 35‰ reaches", () => {
+    // 26 pieces (130 m) from the plain at 0 m to the cliff top at 15 m: 35‰ reaches 4.55 m, and the line holds
+    // that grade into the cliff, a tunnel under 10 m and more of rock.
+    const { t, fx } = straightLine(CLIFF, 4, 30);
+    const plan = t.state.plan;
+    if (!plan?.end) throw new Error("no plan");
+    expect(plan.end.node.zMm).toBe(26 * 175);
+    expect(steady(plan.pieces)).toBe(true);
+    const kinds = ghostOf(fx)?.pieces.map((p) => p.structure) ?? [];
+    expect(kinds.slice(0, 7).every((k) => k === "ground")).toBe(true);
+    expect(kinds.filter((k) => k === "tunnel").length).toBeGreaterThan(10);
+    expect(ghostOf(fx)?.valid).toBe(true);
+    // The end sits 10.5 m under the ground there, and the tooltip says so.
+    expect(tooltipOf(fx)?.metrics?.endHeight).toBe(formatHeight(26 * 175 - 15_000).replace(/^/, "End height "));
+  });
+
+  it("lays ground on flat land, and the height keys raise the end on a steady grade", () => {
+    const { t, fx } = straightLine(undefined, 10, 20);
+    expect(ghostOf(fx)?.pieces.every((p) => p.structure === "ground")).toBe(true);
+    expect(tooltipOf(fx)?.structure).toBe("Structure: ground");
+    t.send({ type: "height", delta: 1 });
+    const plan = t.state.plan;
+    expect(plan?.end?.node.zMm).toBe(STEP_MM);
+    expect(steady(plan?.pieces ?? [])).toBe(true);
+    expect(t.drags.at(-1)?.heightMode).toBe("straight");
+    // No structure is forced on the planner (the Bridge and Tunnel tools are gone).
+    expect(t.drags.at(-1)?.structure).toBeUndefined();
+  });
+
+  it("crosses a lake as a bridge from a start on the water, at the deck height", () => {
+    const t = session({ terrain: LAKE });
+    t.send({ type: "activate", mode: "straight" });
+    t.down(22, 10);
+    const drag = t.move(34, 10);
+    // The deck start (M2) is 14 m. Asked down to the water surface, 35‰ over 60 m holds the end 1.9 m above it; since
+    // "Keep the limit, show it" (2026-09-28) ] steps from the held end, so three presses put it at +2, +3, then +4 m
+    // over the water: a level deck. (Before, the first press changed nothing and a fourth was needed.)
+    expect(tooltipOf(drag)?.held).toBe("End held 1.9 m above the water by the 3.5 % limit");
+    for (let i = 0; i < 3; i++) t.send({ type: "height", delta: 1 });
+    expect(t.state.heightSteps).toBe(4);
+    const fx = t.move(34, 10);
+    expect(t.state.plan?.pieces.every((p) => p.from.zMm === 14_000 && p.z1Mm === 14_000)).toBe(true);
+    const ghost = ghostOf(fx) ?? ghostOf(t.all);
+    expect(ghost?.pieces.every((p) => p.structure === "bridge")).toBe(true);
+    expect(ghost?.valid).toBe(true);
+  });
+
+  it("starts a free drag on water at the deck height, the water level + 4.0 m, still auto-graded (M2)", () => {
+    const t = session({ terrain: LAKE });
+    // (22, 10) is water: the ground there is the water surface at 10 m, the deck at 14 m.
+    expect(t.groundZmm(22, 10)).toBe(10_000);
+    t.down(22, 10);
+    let fx = t.move(30, 10);
+    const drag = t.drags.at(-1);
+    expect(drag?.from).toEqual({ q: 22, r: 10, zMm: 14_000 });
+    expect(drag?.heightMode).toBe("auto");
+    expect(t.state.heightSteps).toBe(0);
+    // A level deck over the water, every piece a bridge, and the end height is the deck over the water surface.
+    expect(t.state.plan?.pieces.every((p) => p.from.zMm === 14_000 && p.z1Mm === 14_000)).toBe(true);
+    expect(ghostOf(fx)?.pieces.every((p) => p.structure === "bridge")).toBe(true);
+    expect(tooltipOf(fx)?.metrics?.endHeight).toBe("End height +4 m");
+    // Back onto the land at 11 m: 3 m above it at the shore, the deck comes down at 35‰ (86 m) to the ground.
+    fx = t.move(12, 10);
+    expect(t.state.plan?.end?.node).toEqual({ q: 12, r: 10, zMm: 14_000 - 7 * 175 });
+    expect(tooltipOf(fx)?.metrics?.endHeight).toBe(`End height ${formatHeight(14_000 - 7 * 175 - 11_000)}`);
+    fx = t.move(0, 10);
+    expect(t.state.plan?.end?.node).toEqual({ q: 0, r: 10, zMm: 11_000 });
+    expect(tooltipOf(fx)?.metrics?.endHeight).toBe("End height 0 m");
+    const done = t.up(0, 10);
+    expect(last(done, "execute")?.command).toMatchObject({ type: "build-track", structure: "auto" });
+    // On dry land the start stays on the ground, as before.
+    const land = session({ terrain: LAKE });
+    land.down(15, 10);
+    land.move(18, 10);
+    expect(land.drags.at(-1)?.from).toEqual({ q: 15, r: 10, zMm: 11_000 });
+  });
+
+  it("reads each new piece's structure from the preview's diff, and a reused piece's from the network", () => {
+    const t = session({ terrain: VALLEY });
+    // Ground track first (Track mode), then a straight line that runs back over it and on across the valley.
+    t.drag([8, 10], [11, 10]);
+    t.send({ type: "escape" });
+    t.send({ type: "escape" });
+    t.send({ type: "deactivate" });
+    t.send({ type: "activate", mode: "straight" });
+    t.down(8, 10);
+    const fx = t.move(30, 10);
+    const ghost = ghostOf(fx);
+    const labels = ghost?.pieces.map((p) => `${p.status}:${p.structure}`) ?? [];
+    expect(labels.slice(0, 3)).toEqual(["reused:ground", "reused:ground", "reused:ground"]);
+    expect(labels).toContain("new:bridge");
+  });
+
+  it("keeps the Track tool's tooltip as it was for all-ground plans, and starts each activation in its own mode", () => {
+    const t = session({ flat: true });
+    t.down(10, 10);
+    const tip = tooltipOf(t.move(14, 10));
+    expect(tip?.structure).toBeNull();
+    expect(tip?.lines[1]).toMatch(/^Length /);
+    expect(tip?.hint).toBe(HINT_LINE);
+    expect(ghostOf(t.all)?.pieces.every((p) => p.structure === "ground")).toBe(true);
+    t.send({ type: "deactivate" });
+    expect(t.state.mode).toBe("follow");
+    t.send({ type: "activate", mode: "straight" });
+    t.send({ type: "deactivate" });
+    t.send({ type: "activate" });
+    expect(t.state.mode).toBe("follow");
+  });
+});
+
+describe("track tool: a Straight line end held by the 3.5 % limit (owner decision 2026-09-28, \"Keep the limit, show it\")", () => {
+  /** A straight line from (q0, r) to (q1, r), still dragging, with the tool in mode "straight". */
+  function held(terrain: Terrain, q0: number, q1: number, r = 10) {
+    const t = session({ terrain });
+    t.send({ type: "activate", mode: "straight" });
+    t.down(q0, r);
+    const fx = t.move(q1, r);
+    return { t, fx };
+  }
+
+  const SCENE_B = "End held 11.2 m below the ground by the 3.5 % limit";
+
+  it("says where the limit holds the end, draws its drop line, and keeps the steps for keys pressed into the limit (diorama scene B)", () => {
+    // The diagnosis' scene B: (220, 140) → (236, 140) on the diorama, 16 pieces (80 m). 35‰ reaches 2.8 m, and the
+    // ground at the end stands 14 m above the start, so the line ends 11.2 m under the hill (a dead-end tunnel).
+    const { t, fx } = held(diorama().terrain, 220, 236, 140);
+    expect(t.state.phase).toBe("dragging");
+    const tip = tooltipOf(fx);
+    expect(tip?.metrics?.endHeight).toBe("End height −11.2 m");
+    expect(tip?.held).toBe(SCENE_B);
+    // Under the metrics line (after the counts and the structure line), and in the announcement.
+    expect(tip?.lines.indexOf(SCENE_B)).toBe(3);
+    expect(last(fx, "announce")?.text).toContain(`End height −11.2 m. ${SCENE_B}. `);
+    expect(ghostOf(fx)?.endHeld).toBe(true);
+    expect(ghostOf(fx)?.valid).toBe(true);
+    const plan = t.state.plan;
+
+    // ] asks for a higher end, which 35‰ cannot reach either: 16 presses, 16 announcements, no step and no re-plan.
+    const planned = t.drags.length;
+    for (let i = 0; i < 16; i++) {
+      expect(t.send({ type: "height", delta: 1 })).toEqual([{ type: "announce", text: `Height unchanged: end held 11.2 m below the ground by the 3.5 % limit.` }]);
+      expect(t.state.heightSteps).toBe(0);
+    }
+    expect(t.drags.length).toBe(planned);
+    expect(t.state.plan).toBe(plan);
+
+    // Laid and chained: the next drag starts with no hidden steps (before, the 16 presses carried +16 into it).
+    t.up(236, 140);
+    expect(t.sim.network().pieces).toHaveLength(16);
+    expect(t.state.phase).toBe("anchored");
+    expect(t.state.heightSteps).toBe(0);
+  });
+
+  it("steps a held end from where it is held when a key presses away from the limit", () => {
+    const { t, fx } = held(diorama().terrain, 220, 236, 140);
+    expect(tooltipOf(fx)?.held).toBe(SCENE_B);
+    const ground = t.groundZmm(236, 140) ?? 0;
+    // [ lowers the end at once, to the first whole step under it: 12 m below the ground, which 35‰ reaches.
+    const down = t.send({ type: "height", delta: -1 });
+    expect(t.state.heightSteps).toBe(-12);
+    expect(t.state.plan?.end?.node.zMm).toBe(ground - 12_000);
+    expect(tooltipOf(down)?.metrics?.endHeight).toBe("End height −12 m");
+    expect(tooltipOf(down)?.held).toBeNull();
+    expect(ghostOf(down)?.endHeld).toBe(false);
+    // Then one step at a time, as anywhere else.
+    t.send({ type: "height", delta: -1 });
+    expect(t.state.heightSteps).toBe(-13);
+    expect(t.state.plan?.end?.node.zMm).toBe(ground - 13_000);
+  });
+
+  it("holds an end above the ground as well: from a cliff top down to the plain", () => {
+    // 10 pieces (50 m) from the cliff top at 15 m to the plain at 0 m: 35‰ reaches 1.75 m, so the end stays at 13.25 m.
+    const { t, fx } = held(CLIFF, 14, 4);
+    expect(t.state.plan?.end?.node.zMm).toBe(15_000 - 1750);
+    expect(tooltipOf(fx)?.metrics?.endHeight).toBe("End height +13.3 m");
+    expect(tooltipOf(fx)?.held).toBe("End held 13.3 m above the ground by the 3.5 % limit");
+    expect(ghostOf(fx)?.endHeld).toBe(true);
+    // [ asks for a lower end still: the limit. ] steps up from the held end, to 14 m.
+    expect(t.send({ type: "height", delta: -1 })).toEqual([{ type: "announce", text: "Height unchanged: end held 13.3 m above the ground by the 3.5 % limit." }]);
+    expect(t.state.heightSteps).toBe(0);
+    const up = t.send({ type: "height", delta: 1 });
+    expect(t.state.heightSteps).toBe(14);
+    expect(t.state.plan?.end?.node.zMm).toBe(14_000);
+    expect(tooltipOf(up)?.held).toBeNull();
+  });
+
+  it("counts an end as held exactly when it lies more than half a step off the ground plus the steps", () => {
+    // 4 pieces (20 m): 35‰ reaches 0.7 m. A 1.2 m rise at the end leaves the end 0.5 m short (half a step: not held);
+    // a 1.3 m rise leaves it 0.6 m short (held).
+    const rise = (dm: number) => makeTerrain(TERRAIN.columns, TERRAIN.rows, (q) => (q >= 14 ? dm : 0), -100);
+    const half = held(rise(12), 10, 14);
+    expect(half.t.state.plan?.end?.node.zMm).toBe(700);
+    expect(tooltipOf(half.fx)?.held).toBeNull();
+    expect(ghostOf(half.fx)?.endHeld).toBe(false);
+    const more = held(rise(13), 10, 14);
+    expect(more.t.state.plan?.end?.node.zMm).toBe(700);
+    expect(tooltipOf(more.fx)?.held).toBe("End held 0.6 m below the ground by the 3.5 % limit");
+    expect(ghostOf(more.fx)?.endHeld).toBe(true);
+    // ] asks for more still: the limit, so the steps stay.
+    more.t.send({ type: "height", delta: 1 });
+    expect(more.t.state.heightSteps).toBe(0);
+    // A Track drag over the same rise never counts as held: auto-grade chooses its end, and steps fix it.
+    const track = session({ terrain: rise(13) });
+    track.down(10, 10);
+    const fx = track.move(14, 10);
+    expect(tooltipOf(fx)?.held).toBeNull();
+    expect(ghostOf(fx)?.endHeld).toBe(false);
+  });
+
+  it("measures an end held over water from the water surface", () => {
+    // From the land at 11 m out to the lake (water level 10 m), 4 pieces: 35‰ reaches 0.7 m, so an end asked down to
+    // the water surface stays 0.3 m above it, within half a step (not held). One step down asks for 9 m: the end
+    // still stays at 10.3 m, now held; a second step presses into the limit.
+    const { t, fx } = held(LAKE, 16, 20);
+    expect(t.groundZmm(20, 10)).toBe(10_000);
+    expect(t.state.plan?.end?.node.zMm).toBe(10_300);
+    expect(tooltipOf(fx)?.held).toBeNull();
+    const first = t.send({ type: "height", delta: -1 });
+    expect(t.state.heightSteps).toBe(-1);
+    expect(tooltipOf(first)?.held).toBe("End held 0.3 m above the water by the 3.5 % limit");
+    expect(t.send({ type: "height", delta: -1 })).toEqual([{ type: "announce", text: "Height unchanged: end held 0.3 m above the water by the 3.5 % limit." }]);
+    expect(t.state.heightSteps).toBe(-1);
+  });
+
+  it("keeps the steps for both keys when the line is aimed at a raised track end it cannot reach, and chains with none", () => {
+    // Verification finding (2026-09-29): a 10 m raised track (10 bridge pieces) east from (30, 10) on flat 0 m ground,
+    // and a straight line from (16, 12) with the pointer on its buffer end. The tool asks for that end's 10 m, which
+    // 35‰ cannot reach, and magnetism does not fit, so the line ends on the end's (q, r) at 2.33 m. Before, the held
+    // check measured that end against the ground plus the steps (2.3 m "above the ground"), so the first ] jumped the
+    // steps 0 -> 3 without moving the end or saying so, and the hidden +3 m carried into the chained drag.
+    const t = session({ flat: true });
+    const raised = Array.from({ length: 10 }, (_, i) => ({ kind: "straight", from: { q: 30 + i, r: 10, zMm: 10_000 }, heading: 0, z1Mm: 10_000 }) as const);
+    expect(t.sim.execute({ type: "build-track", pieces: raised, structure: "auto" }).ok).toBe(true);
+    t.send({ type: "activate", mode: "straight" });
+    t.down(16, 12);
+    t.move(17, 13);
+    const fx = t.move(30, 10);
+    const plan = t.state.plan;
+    expect(plan?.snapped).toBeNull();
+    expect(plan?.end?.node).toEqual({ q: 30, r: 10, zMm: 2330 });
+    const HELD = "End held 7.7 m below the track end at (30, 10) by the 3.5 % limit";
+    expect(tooltipOf(fx)?.held).toBe(HELD);
+    expect(tooltipOf(fx)?.metrics?.endHeight).toBe("End height +2.3 m");
+    expect(ghostOf(fx)?.endHeld).toBe(true);
+    expect(ghostOf(fx)?.valid).toBe(true);
+    // No key changes the height asked for on a track end: both announce the limit and keep the steps, with no re-plan.
+    const planned = t.drags.length;
+    for (const delta of [1, 1, 1, -1, -1, -1, -1, 1] as const) {
+      expect(t.send({ type: "height", delta })).toEqual([{ type: "announce", text: `Height unchanged: ${HELD.charAt(0).toLowerCase()}${HELD.slice(1)}.` }]);
+      expect(t.state.heightSteps).toBe(0);
+    }
+    expect(t.drags.length).toBe(planned);
+    expect(t.state.plan).toBe(plan);
+    // Laid below the raised end (not joined: it ends at 2.33 m), the chain goes on with no hidden steps.
+    t.up(30, 10);
+    expect(t.state.phase).toBe("anchored");
+    expect(t.state.anchor?.node).toEqual({ q: 30, r: 10, zMm: 2330 });
+    expect(t.state.heightSteps).toBe(0);
+    const next = t.move(30, 20);
+    const end = t.state.plan?.end?.node;
+    if (!end) throw new Error("no chained plan");
+    // The chained drag asks for the ground (0 m) plus no steps, so its end is the nearest height 35‰ reaches from 2.33 m.
+    expect(t.drags.at(-1)?.dzMm).toBe(end.zMm - 2330);
+    expect(end.zMm).toBeLessThan(2330);
+    expect(tooltipOf(next)?.metrics?.endHeight).not.toBe("End height +3 m");
   });
 });

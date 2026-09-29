@@ -1,5 +1,5 @@
-import { type Counts, type NodeRef, type PieceSpec, type Reason, type TrackPlan, resolvePiece } from "../core/sim/api";
-import type { GradeLevel, TooltipMetrics, TooltipModel } from "./types";
+import { type Counts, type NodeRef, type PieceSpec, type Reason, type Structure, type TrackPlan, resolvePiece } from "../core/sim/api";
+import type { GradeLevel, TooltipMetrics, TooltipModel, TrackMode } from "./types";
 
 /**
  * Tooltip text (issue #67 "Presentation"). Display units (m, %) appear only
@@ -12,6 +12,8 @@ import type { GradeLevel, TooltipMetrics, TooltipModel } from "./types";
  */
 
 export const HINT_LINE = "Hold Ctrl (⌥ on Mac) for precision · [ ] change height";
+/** The Straight line tool's hint (owner decision 2026-09-28, "One 'Straight line' tool"). */
+export const STRAIGHT_HINT_LINE = "Straight line: bridges and tunnels as needed · [ ] change end height";
 export const PRECISION_CONTROLS = "wheel radius · Q/E end heading";
 
 /** Grade colour bands in ‰: green ≤ 1.5 %, amber up to the 35‰ (3.5 %) maximum, red above it. */
@@ -64,10 +66,42 @@ export function steepestPermille(pieces: readonly PieceSpec[]): number {
 export function formatHeight(mm: number): string {
   const tenths = Math.round(mm / 100);
   if (tenths === 0) return "0 m";
-  const sign = tenths > 0 ? "+" : "−";
-  const abs = Math.abs(tenths);
-  const text = abs % 10 === 0 ? String(abs / 10) : (abs / 10).toFixed(1);
-  return `${sign}${text} m`;
+  return `${tenths > 0 ? "+" : "−"}${tenthsText(Math.abs(tenths))} m`;
+}
+
+/** Whole tenths of a metre as text, trailing zeros trimmed: 112 → "11.2", 40 → "4". */
+function tenthsText(abs: number): string {
+  return abs % 10 === 0 ? String(abs / 10) : (abs / 10).toFixed(1);
+}
+
+/** What a held end is measured from: the ground, or the water surface on a water node. */
+export type HeldSurface = "ground" | "water";
+
+/**
+ * The Straight line's held-end line (owner decision 2026-09-28, "Keep the limit, show it"): where the end that
+ * the 3.5 % limit holds off the height the tool asked for (the ground there plus the height steps) stands against
+ * the ground, for example "End held 11.2 m below the ground by the 3.5 % limit". It rounds as the metrics line's
+ * end height does (`formatHeight`), so both show the same number.
+ */
+export function formatHeld(endHeightMm: number, surface: HeldSurface = "ground"): string {
+  const tenths = Math.round(endHeightMm / 100);
+  const where = tenths === 0 ? `at the ${surface}` : `${tenthsText(Math.abs(tenths))} m ${tenths > 0 ? "above" : "below"} the ${surface}`;
+  return `End held ${where} by the ${formatGrade(MAX_GRADE_PERMILLE)} limit`;
+}
+
+/**
+ * The held-end line for a Straight line aimed at a track end it cannot reach: the tool asks for that end's height,
+ * and the 3.5 % limit holds the line `offsetMm` off it, for example "End held 7.7 m below the track end at (30, 10)
+ * by the 3.5 % limit". A held end lies more than half a step off, so the offset never rounds to 0 m.
+ */
+export function formatHeldOffEnd(offsetMm: number, at: { readonly q: number; readonly r: number }): string {
+  const tenths = Math.round(offsetMm / 100);
+  return `End held ${tenthsText(Math.abs(tenths))} m ${tenths > 0 ? "above" : "below"} the track end at (${at.q}, ${at.r}) by the ${formatGrade(MAX_GRADE_PERMILLE)} limit`;
+}
+
+/** The announcement for a height key pressed further into the limit that holds the end: "Height unchanged: end held …". */
+export function heightLimitText(held: string): string {
+  return `Height unchanged: ${held.charAt(0).toLowerCase()}${held.slice(1)}.`;
 }
 
 /**
@@ -104,6 +138,21 @@ export function splitReason(reason: Pick<Reason, "message">): { reason: string; 
   return { reason: text.slice(0, at), fix: fix.charAt(0).toUpperCase() + fix.slice(1) };
 }
 
+/**
+ * The tooltip's structure line (D4): "Structure: bridge" when every piece shares one structure, counts
+ * when they mix ("Structure: 2 bridge, 1 tunnel, 3 ground", zeros left out), and nothing for a Track
+ * plan that is all ground (the D3 tooltip, unchanged). A straight line always shows it.
+ */
+export function formatStructures(mode: TrackMode, structures: readonly Structure[]): string | null {
+  if (structures.length === 0) return null;
+  const counts: Record<Structure, number> = { bridge: 0, tunnel: 0, ground: 0 };
+  for (const s of structures) counts[s] += 1;
+  if (counts.ground === structures.length && mode === "follow") return null;
+  const kinds = (["bridge", "tunnel", "ground"] as const).filter((k) => counts[k] > 0);
+  if (kinds.length === 1) return `Structure: ${kinds[0]}`;
+  return `Structure: ${kinds.map((k) => `${counts[k]} ${k}`).join(", ")}`;
+}
+
 export interface TooltipInput {
   readonly plan: TrackPlan;
   /** End height above the terrain at the plan's end, integer mm. */
@@ -112,24 +161,35 @@ export interface TooltipInput {
   readonly rejection: Pick<Reason, "message"> | null;
   readonly precision: boolean;
   readonly anchor: NodeRef | null;
+  /** The structure line (`formatStructures`), or null. */
+  readonly structure?: string | null;
+  /** The tool's mode: the Straight line tool has its own hint line. */
+  readonly mode?: TrackMode;
+  /** The held-end line (`formatHeld`) when the 3.5 % limit holds a Straight line's end, or null. */
+  readonly held?: string | null;
 }
 
 export function buildTooltip(input: TooltipInput): TooltipModel {
   const { plan } = input;
   const empty = plan.fit === "none";
   const counts = formatCounts(plan.counts);
+  const structure = empty ? null : (input.structure ?? null);
   const metrics = empty ? null : formatMetrics(plan, input.endHeightMm);
+  const held = empty ? null : (input.held ?? null);
   const invalid = input.rejection ? splitReason(input.rejection) : null;
   const note = empty ? plan.note : null;
   const precision = input.precision ? `Precision: ${plan.label} · ${PRECISION_CONTROLS}` : null;
   const lines: string[] = [counts];
+  if (structure) lines.push(structure);
   if (metrics) lines.push(metricsLine(metrics));
+  if (held) lines.push(held);
   if (note) lines.push(note);
   if (invalid) {
     lines.push(`Can't build: ${invalid.reason}`);
     if (invalid.fix) lines.push(invalid.fix);
   }
   if (precision) lines.push(precision);
-  lines.push(HINT_LINE);
-  return { counts, metrics, note, invalid, precision, hint: HINT_LINE, lines, anchor: input.anchor };
+  const hint = input.mode === "straight" ? STRAIGHT_HINT_LINE : HINT_LINE;
+  lines.push(hint);
+  return { counts, structure, metrics, held, note, invalid, precision, hint, lines, anchor: input.anchor };
 }

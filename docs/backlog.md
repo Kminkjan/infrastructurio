@@ -399,6 +399,13 @@ stacked track readable and pickable.
   - tunnel when h − z > 4 m.
 
   The Bridge and Tunnel tools force the structure.
+  *(2026-09-28: the owner replaced the Bridge and Tunnel tools with one Straight line tool, key 5, which lays a steady grade; structures are always inferred.)*
+  *Thresholds changed by the owner decision 2026-09-28, "M2" (as relayed): the band is ±8 m,
+  a bridge deck may sit up to 2 m into the bank within 15 m of an abutment, and a drag
+  starting on water begins at the deck height; 6 m of cover, the 10 m portal zone and the
+  4.0 m water clearance stay. Built on branch `codex/d4-structures`. The issue body still
+  states ±4 m; amending it and ticking criteria are the owner's
+  ([ADR 0010 M2 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-thresholds-m2)).*
 - [ ] Negative fixtures:
   - `grade-too-steep`, `needs-bridge`, `needs-tunnel`, `bridge-below-ground`;
   - `bridge-too-low-over-water` (below water + 4.0 m);
@@ -410,6 +417,9 @@ stacked track readable and pickable.
 - [ ] A fixture shows ordinary seeded hills still admit a tunnel given the 4 m ground band
   and 6 m cover rule
   ([simulation model open point 4](simulation-model.md#19-open-points-2026-09-26)).
+  *At the ±8 m band of the owner decision 2026-09-28 "M2", the committed fixture finds 300
+  lines only a tunnel can take and the planner builds all of them. This does not tick the
+  criterion.*
 
 *Render*
 - [ ] Structures follow rules:
@@ -429,12 +439,24 @@ stacked track readable and pickable.
 - [ ] Occlusion aids: H hides decks, U shows an underground x-ray and C cycles stacked hits.
   Proxy picking uses the DECK and TUNNEL layer bits.
 - [ ] The Bridge and Tunnel toolbar modes reuse the D3 track tool with a forced structure.
+  *(2026-09-28: the owner replaced the Bridge and Tunnel tools with one Straight line tool, key 5, which lays a steady grade; structures are always inferred.)*
 
 **Dependencies.** D2.
 
 **Notes.**
 - The toolbar wiring presumes D3 has landed, while the core rules do not.
 - Grade effects on speed (balancing speed on 35‰) are verified in D8.
+- *2026-09-28, the D4 tunnel and portal iteration (branch `codex/d4-structures`, draft PR
+  [#84](https://github.com/Kminkjan/infrastructurio/pull/84)): after the owner's second D4 feel
+  check ("Not yet"), the owner answered four questions: "Needs 10 m somewhere" (an inferred
+  tunnel run must lie at least 10 m under the ground somewhere, else it is a cutting up to
+  10 m deep), "Compact backfill" (behind low portal faces), "Splayed wing walls" (30° toward
+  the approach) and "Keep the limit, show it" (the Straight line's held end is shown, and the
+  height keys keep their steps at the limit). All four are built, and portals now retain the
+  hill in the core's effective ground. The 10 m rule changes the inference criterion above;
+  the issue body, its amendment and every checkbox stay the owner's, and nothing here is a
+  feel-check or Look Gate result
+  ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-tunnel-and-portal-iteration)).*
 
 ## D5 — Turnouts and diamond crossings
 

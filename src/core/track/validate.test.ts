@@ -3,7 +3,7 @@ import { type PieceSpec, resolvePiece } from "../geometry/piece";
 import { CURVE_TEMPLATES } from "../geometry/templates";
 import { generateTerrain, nodeOfOffset, offsetOfNode, terrainBoundsM } from "../terrain";
 import { emptyAuthored } from "./authored";
-import { REASON_CODES, RULES, RULE_ORDER, createTrackIndex, heightsAt, indexAdd, indexRemove, resolveStructure, validate } from "./validate";
+import { REASON_CODES, RULES, RULE_ORDER, createTrackIndex, heightsAt, indexAdd, indexRemove, structureChoice, validate } from "./validate";
 
 const terrain = generateTerrain({ seed: "d2-validate", columns: 60, rows: 52 });
 const ctx = () => ({ terrain, authored: emptyAuthored(), index: createTrackIndex() });
@@ -15,10 +15,10 @@ describe("construction validator", () => {
     for (const code of REASON_CODES) expect(code).toMatch(/^[a-z]+(-[a-z]+)*$/);
   });
 
-  it("resolves auto to ground until D4 infers structures", () => {
-    expect(resolveStructure("auto")).toBe("ground");
-    expect(resolveStructure("bridge")).toBe("bridge");
-    expect(() => resolveStructure("viaduct" as "ground")).toThrow(TypeError);
+  it("accepts the four structure choices and treats any other as a programmer error", () => {
+    // Until D4 this resolved auto to ground; D4 infers each added piece's structure in rule 4 instead.
+    for (const choice of ["ground", "bridge", "tunnel", "auto"] as const) expect(structureChoice(choice)).toBe(choice);
+    expect(() => structureChoice("viaduct" as "ground")).toThrow(TypeError);
   });
 
   it("rejects a curve whose nodes are on the map but whose centreline leaves it", () => {

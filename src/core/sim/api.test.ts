@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { flatTerrain, simOn } from "../../../tests/support/simOn";
 import type { PieceSpec } from "../geometry/piece";
 import type { Heading } from "../lattice";
-import { type Command, HISTORY_DEPTH, type Result, createSim } from "./api";
+import { type Command, GROUND_BAND_MM, HISTORY_DEPTH, type Result, createSim, generateTerrain, groundMmAt, isPortal } from "./api";
 
-const TERRAIN = { seed: "d2-api", columns: 60, rows: 52 } as const;
-const sim = () => createSim({ terrain: TERRAIN });
+// Flat dry ground at 0 m, so track at z = 0 lies on it (until D4, the seeded map "d2-api", whose ground at
+// 10–40 m the D4 terrain rules now judge: track at z = 0 lay under it).
+const TERRAIN = flatTerrain(60, 52);
+const sim = () => simOn(TERRAIN);
 
 function straight(q: number, r: number, heading: Heading = 0, zMm = 0, z1Mm = zMm): PieceSpec {
   return { kind: "straight", from: { q, r, zMm }, heading, z1Mm };
@@ -79,6 +82,7 @@ describe("createSim construction commands", () => {
 
   it("demolishes by key (from either end) and restores with undo, then redoes", () => {
     const s = sim();
+    // A forced bridge on flat ground: its deck is not below the terrain, so it builds.
     ok(s.execute(build([straight(5, 5), straight(6, 5)], "bridge")));
     const gone = ok(s.execute({ type: "demolish", pieces: ["S:7,5,0:6:0"] }));
     expect(gone.diff).toEqual({ added: [], removed: [{ key: "S:6,5,0:0:0", structure: "bridge" }] });
@@ -107,19 +111,31 @@ describe("createSim construction commands", () => {
     expect(s.execute({ type: "undo" })).toMatchObject({ ok: false, reason: { code: "undo-empty" } });
   });
 
-  it("resolves structure auto to ground and keeps an existing piece's structure on reuse", () => {
+  it("infers structure auto from the terrain and keeps an existing piece's structure on reuse", () => {
+    // Until D4 auto resolved to ground and a forced tunnel on flat ground built; D4 infers the structure and
+    // rejects a tunnel that is nowhere deeper than a cutting, so the forced structure here is a bridge.
     const s = sim();
     ok(s.execute(build([straight(5, 5)], "auto")));
-    ok(s.execute(build([straight(5, 5), straight(6, 5)], "tunnel")));
-    expect(s.network().pieces.map((p) => p.structure)).toEqual(["ground", "tunnel"]);
+    ok(s.execute(build([straight(5, 5), straight(6, 5)], "bridge")));
+    expect(s.network().pieces.map((p) => p.structure)).toEqual(["ground", "bridge"]);
+    // Beyond the ±8 m band (owner decision 2026-09-28 "M2"; 4.5 m and −6 m until then), and a tunnel at least 10 m
+    // down somewhere (owner decision 2026-09-28, "Needs 10 m somewhere"; −9 m was a tunnel until then).
+    ok(s.execute(build([straight(10, 5, 0, 8500), straight(20, 5, 0, -10_000)], "auto")));
+    expect(s.network().pieces.map((p) => [p.key, p.structure])).toEqual([
+      ["S:10,5,8500:0:8500", "bridge"],
+      ["S:20,5,-10000:0:-10000", "tunnel"],
+      ["S:5,5,0:0:0", "ground"],
+      ["S:6,5,0:0:0", "bridge"],
+    ]);
   });
 
   it("never connects nodes at the same (q, r) but different heights", () => {
     const s = sim();
     ok(s.execute(build([straight(5, 5)])));
-    ok(s.execute(build([straight(6, 5, 0, 7000)])));
+    // 9 m over the ground: a bridge (auto) since D4 (beyond the ±8 m band); ground there would need one.
+    ok(s.execute(build([straight(6, 5, 0, 9000)], "auto")));
     const view = s.network();
-    expect(view.nodes.filter((n) => n.q === 6 && n.r === 5).map((n) => n.zMm)).toEqual([0, 7000]);
+    expect(view.nodes.filter((n) => n.q === 6 && n.r === 5).map((n) => n.zMm)).toEqual([0, 9000]);
     expect(view.nodes.every((n) => n.kind === "buffer")).toBe(true);
     expect(view.sections).toHaveLength(2);
   });
@@ -150,7 +166,7 @@ describe("createSim construction commands", () => {
   });
 
   it("treats a malformed command shape as a programmer error, in preview and execute alike", () => {
-    const s = sim();
+    const s = createSim({ terrain: { seed: "d2-api", columns: 60, rows: 52 } });
     const bad: [unknown, RegExp][] = [
       [{ type: "spawn-train" }, /unknown command type spawn-train/],
       [{ type: "build-track", pieces: [straight(5, 5)], structure: "viaduct" }, /unknown structure viaduct/],
@@ -174,5 +190,19 @@ describe("createSim construction commands", () => {
     // Found in review: a height past 2^53 used to commit with an inexact grade.
     expect(s.execute(build([straight(5, 5, 0, 0, Number.MAX_SAFE_INTEGER)]))).toMatchObject({ ok: false, reason: { code: "out-of-bounds" } });
     expect(s.network().pieces).toHaveLength(0);
+  });
+});
+
+describe("the core's portal definition (D4 second feel-check fixes, 2026-09-28)", () => {
+  it("exposes isPortal: a tunnel node within the ±8 m band of cover, over the natural terrain without a ground query", () => {
+    expect(isPortal(TERRAIN, { q: 5, r: 5, zMm: -GROUND_BAND_MM })).toBe(true);
+    expect(isPortal(TERRAIN, { q: 5, r: 5, zMm: -GROUND_BAND_MM - 1 })).toBe(false);
+    // The dead end of the Straight line (220, 140) → (236, 140) on the diorama lies under 11.2 m of natural cover: no
+    // portal in the core, where the renderer's buffer-end rule (`PORTAL_BUFFER_MAX_COVER_M`, 12 m) opens one.
+    const diorama = generateTerrain({ seed: "baltic-diorama", columns: 400, rows: 346 });
+    const end = { q: 236, r: 140 };
+    const zMm = (groundMmAt(diorama, end) ?? 0) - 11_200;
+    expect(isPortal(diorama, { ...end, zMm })).toBe(false);
+    expect(isPortal(diorama, { ...end, zMm: zMm + 3200 })).toBe(true);
   });
 });

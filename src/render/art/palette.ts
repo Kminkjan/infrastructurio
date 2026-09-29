@@ -35,6 +35,14 @@ const BASE = {
   // earthworks-lite (2026-09-27): cut and fill faces, and the formation (bed) beside the ballast
   earthworkFace: 0x9e8a6c,
   earthworkBed: 0x7b705e,
+  // structures (D4, 2026-09-28, in-house): stone for viaducts, piers, abutments and portals (masonry near rock,
+  // with a darker course for soffits and plinths and a dressed-stone light for coping and voussoirs), painted
+  // steel for trusses and girders (near loco, lighter so thin members read), and the dark of a tunnel bore
+  masonry: 0xa59d8c,
+  masonryDark: 0x857e70,
+  masonryLight: 0xc5bda9,
+  steel: 0x3b4541,
+  tunnelMouth: 0x242520,
   // fields
   rye: 0xc9b26b,
   hay: 0xbfb27a,
@@ -96,6 +104,8 @@ const BASE = {
   ghostInvalid: 0xe0584c,
   ghostReused: 0x7fd1e8,
   snap: 0x8fd694,
+  // D4: the underground x-ray (U) and the outline of hidden decks (H)
+  xray: 0x9eb6f2,
   // block overlay (the colour-blind-safe set has no values yet: D7 picks them)
   block1: 0xf2c94c,
   block2: 0x4fc3d9,

@@ -9,6 +9,7 @@ import type {
   PlanPointMm,
   RadiusClassM,
   Result,
+  Structure,
   TrackPlan,
 } from "../core/sim/api";
 
@@ -52,8 +53,17 @@ export interface ToolPick {
   readonly pieceKey?: PieceKey;
 }
 
+/**
+ * How a track-family tool lays its heights (architecture "Tools"; owner decision 2026-09-28, "One 'Straight
+ * line' tool", which replaced the Bridge and Tunnel tools): Track ("follow") follows the ground within 35‰
+ * (auto-grade); Straight line ("straight") lays one steady grade from the start to the end, ignoring the
+ * ground. Both build with structure "auto", so the core infers each piece's bridge, tunnel or ground.
+ */
+export type TrackMode = "follow" | "straight";
+
 export type ToolEvent =
-  | { readonly type: "activate" }
+  /** The tool took over; `mode` picks Track ("follow", the default) or Straight line ("straight"). */
+  | { readonly type: "activate"; readonly mode?: TrackMode }
   | { readonly type: "deactivate" }
   /** The pointer moved; `pick` is null off the map. */
   | { readonly type: "pointer-move"; readonly pick: ToolPick | null; readonly screen: ScreenPoint }
@@ -86,12 +96,24 @@ export type GhostStatus = "new" | "reused";
 export interface GhostPiece {
   readonly spec: PieceSpec;
   readonly status: GhostStatus;
+  /**
+   * The piece's structure as it would be built: a new piece's from the preview's `diff.added` (the core's
+   * resolved structure, so the ghost shows what inference chose), a reused piece's from the network, and
+   * ground when the preview rejected the plan.
+   */
+  readonly structure: Structure;
 }
 
 /** The planned track as the ghost draws it; `valid` false draws every piece red and dashed. */
 export interface GhostModel {
   readonly pieces: readonly GhostPiece[];
   readonly valid: boolean;
+  /**
+   * True when the 3.5 % limit holds a Straight line's free end more than half a height step off the height the
+   * tool asked for (the ground there plus the height steps): the ghost draws a drop line from that end to the
+   * ground (owner decision 2026-09-28, "Keep the limit, show it").
+   */
+  readonly endHeld: boolean;
 }
 
 /** The hover snap ring: filled on an endpoint, hollow on a free node, a turnout icon on track. */
@@ -115,11 +137,16 @@ export interface TooltipMetrics {
 /**
  * The construction tooltip (issue #67 "Presentation"): line 1 the counts,
  * line 2 the metrics, line 3 the controls hint; an invalid plan adds "Can't
- * build: <reason>" and the fix hint; precision mode adds the live label.
+ * build: <reason>" and the fix hint; precision mode adds the live label; a
+ * Straight line whose end the 3.5 % limit holds adds the held-end line.
  */
 export interface TooltipModel {
   readonly counts: string;
+  /** What the plan builds when it is not all ground: "Structure: bridge", "Structure: 2 bridge, 3 ground"; else null. */
+  readonly structure: string | null;
   readonly metrics: TooltipMetrics | null;
+  /** "End held 11.2 m below the ground by the 3.5 % limit" (owner decision 2026-09-28, "Keep the limit, show it"); else null. */
+  readonly held: string | null;
   /** The planner's note when nothing fits (for example "Drag farther to lay track"). */
   readonly note: string | null;
   readonly invalid: { readonly reason: string; readonly fix: string | null } | null;
@@ -164,6 +191,12 @@ export interface ToolCtx {
    * surface over a lower bed: the planner's `groundMmAt`); undefined off the map.
    */
   groundZmm(q: number, r: number): number | undefined;
+  /**
+   * The lowest deck a bridge may carry at a water node in integer mm, the water level + 4.0 m (the core's
+   * `waterDeckMm`); undefined on dry land or off the map. A free drag starting on water begins there (D4,
+   * owner decision 2026-09-28 "M2").
+   */
+  waterDeckZmm(q: number, r: number): number | undefined;
   readonly settings: ToolSettings;
 }
 

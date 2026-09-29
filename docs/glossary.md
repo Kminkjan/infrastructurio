@@ -61,6 +61,18 @@ blocked. Carried in `FrameView.signalAspect`.
 - **Runtime state** (trains, holdings, the operator, time) is neither. It never enters undo
   history.
 
+### Auto-grade
+
+The planner's height mode for a drag with no height steps (`Drag.heightMode: "auto"`, owner
+decision 2026-09-28, D4): track follows the ground wherever it can within 35‰, the end
+included, and the rest becomes cuttings and embankments (±8 m since the owner decision
+2026-09-28 "M2", ±4 m before) or, beyond that, the bridges and tunnels
+[structure](#structure-ground-bridge-tunnel) inference picks. A free drag starting on water
+begins at the deck height, the water level + 4.0 m (M2). The end may sit
+above or below the ground, and the tooltip shows by how much. With height steps pressed the
+mode is "fixed": the end sits that many steps above the ground, and the inner nodes are
+fitted to 35‰ the same way. See [the simulation model §8](simulation-model.md#8-planner).
+
 ## B
 
 ### Block
@@ -184,6 +196,17 @@ place, bunker-first, with a 30 s dwell.
 
 ## E
 
+### Effective ground
+
+The terrain as the committed track's cuttings and embankments shape it (D4 feel-check fixes,
+2026-09-28): the core keeps it per revision (`sim.ground()`, `sim.groundMm`), and rule 4,
+auto-grade, the track tool's start and end heights and the renderer's earthworks all read it,
+so a drag through an existing cutting is judged against the cutting as drawn. Water stays
+natural. Behind a tunnel portal it is the natural hill, retained up to 0.25 m over the face
+top (2026-09-28, the D4 tunnel and portal iteration; until then the approach's headwall
+carved a 3–5 m pit there). The renderer's terrain mesh keeps the earlier headwall behind
+portals as an underlay and draws the retained hill as the portal's plug ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-tunnel-and-portal-iteration)).
+
 ### Elevation
 
 Integer millimetres per node (z, `zMm`). Node identity is (q, r, z), so tracks at
@@ -191,12 +214,11 @@ different heights never share a node. Terrain heights are Int16 dm at lattice no
 convert at the terrain boundary. Millimetres are a default since 2026-09-26: dm could not
 hold 35‰ on a 5 m straight, while mm gives exactly 175 mm
 ([ADR 0010 D2 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d2-track-model)).
-Track follows the ground (owner decision, 2026-09-27, for D3; D4 revisits it with the 35‰
-rule): each planned node sits on the ground (the terrain, or the water surface over a lower
-bed) plus an offset. The planner spreads the offset along a drag by length with
-largest-remainder rounding, between the heights of existing nodes the drag passes within
-6.5 m, so retracing sloped track reuses it. A curve or shift has one grade, so only its ends
-follow the ground.
+Track follows the ground within 35‰ (owner decisions 2026-09-27 for D3 and 2026-09-28 for
+D4, [auto-grade](#auto-grade)): planned nodes lie on the ground (the terrain, or the water
+surface over a lower bed) wherever 35‰ allows, and deviate as little as they can where the
+ground is steeper. Existing nodes the drag passes within 6.5 m pin its height, so retracing
+sloped track reuses it. A curve or shift has one grade, so only its ends follow the ground.
 
 ### End of authority (EOA)
 
@@ -229,7 +251,9 @@ See [snapshot](#snapshot-networkview-frameview).
 ### Ghost
 
 The construction preview drawn before commit: white for new pieces, cyan for reused, red
-dashed for invalid. Elevated ghosts get drop lines every 20 m and end-height tags. It
+dashed for invalid. Elevated ghosts get drop lines every 20 m and end-height tags; a
+[Straight line](#straight-line-tool) end the 3.5 % limit holds gets an amber drop line to the
+ground (2026-09-28). It
 comes from `sim.preview`, which shares the `execute` code path but mutates nothing and
 consumes no IDs.
 
@@ -354,8 +378,9 @@ straights. It solves a 2×2 integer system over about 100 candidates and chooses
 largest radius under the user cap → shortest → smallest |turn| → left before right. A
 two-bend fit joins into existing ports, and, where no single bend reaches a free drag's
 end or a node next to it, two bends in one drag turn up to 180° (U-turns, hairpins,
-S-curves; owner decisions 2026-09-27). Commands carry the resolved pieces, so tuning the
-planner never breaks replays.
+S-curves; owner decisions 2026-09-27). It also sets the node heights, within 35‰ (D4,
+[auto-grade](#auto-grade)). Commands carry the resolved pieces, so tuning the planner never
+breaks replays.
 
 ### Platform
 
@@ -367,7 +392,14 @@ its shortest platform, and reversal is allowed at platform stops.
 ### Portal
 
 The mouth of a tunnel, where a tunnel piece meets the terrain surface; it is rendered with
-a hill plug. Within 10 m of a portal the 6 m minimum tunnel cover does not apply.
+a hill plug. Within 10 m of a portal the 6 m minimum tunnel cover does not apply. As built
+(D4): a node of a tunnel piece with the track within the ground band there (at most 8 m of
+cover since the owner decision 2026-09-28 "M2", 4 m before), and the 10 m are measured along
+the track, through neighbouring tunnel pieces. *(2026-09-28, the D4 tunnel and portal
+iteration: the core exports this definition as `isPortal`, and render's buffer-end portals use
+it; behind a portal the [effective ground](#effective-ground) is the retained hill; the portal's
+wing walls are splayed 30° toward the approach, and where the hill is lower than the 7.4 m
+face a compact backfill backs it ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-tunnel-and-portal-iteration)).)*
 
 ### Precision mode
 
@@ -490,15 +522,34 @@ See [block (stop) signal](#block-stop-signal).
 
 See [piece](#piece-straight-curve-shift).
 
+### Straight line (tool)
+
+The track tool's second mode, key 5 (owner decision 2026-09-28, "One 'Straight line' tool",
+which replaced the Bridge and Tunnel tools): a drag lays one steady grade from the start to
+the end, ignoring the ground, and the core infers each piece's
+[structure](#structure-ground-bridge-tunnel). The end is the ground at the end node plus the
+height steps, moved to the nearest height 35‰ reaches from the start. **Held end** (owner
+decision 2026-09-28, "Keep the limit, show it"): when the limit holds a free end more than
+half a step off that height, the tooltip and the announcement say so ("End held 11.2 m below
+the ground by the 3.5 % limit"), the [ghost](#ghost) draws an amber drop line from the end to
+the ground, and a height key pressed further into the limit keeps the steps ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-tunnel-and-portal-iteration)).
+
 ### Structure (ground, bridge, tunnel)
 
-A per-piece property, inferred (`auto`) or forced by the Bridge and Tunnel tools. With
-terrain height h:
-- **ground** needs −4 m ≤ z − h ≤ +4 m and no water;
-- **bridge** is needed more than 4 m above terrain or over water, and must stay 4.0 m
-  above the water;
-- **tunnel** is needed more than 4 m below terrain, with at least 6 m cover except within
-  10 m of a [portal](#portal).
+A per-piece property, inferred (`auto`) or forced by the Bridge and Tunnel tools *(2026-09-28: the owner replaced the Bridge and Tunnel tools with one Straight line tool, key 5, which lays a steady grade; structures are always inferred.)* With
+terrain height h (the bed under water), judged along the whole piece (D4: straights exactly,
+curves and shifts every 0.5 m; the band ±8 m since the owner decision 2026-09-28 "M2",
+±4 m before):
+- **ground** needs −8 m ≤ z − h ≤ +8 m and no water;
+- **bridge** is needed more than 8 m above terrain or over water; its deck may dip at most
+  2 m below the terrain, and only within 15 m along the track of an abutment (a bridge node on
+  dry land within the band), and must stay 4.0 m above the water;
+- **tunnel** is needed more than 8 m below terrain or under water (below the bed), with at
+  least 6 m cover except within 10 m of a [portal](#portal). *(2026-09-28, owner decision
+  "Needs 10 m somewhere": an inferred tunnel run must lie at least 10 m under the ground
+  somewhere, else it is ground, a cutting up to 10 m deep; a run that joins a committed
+  tunnel, runs under or over water, or has a piece more than 8 m above the terrain stays a
+  tunnel.)*
 
 Rendering chooses a stone arch viaduct (4–20 m over land), a steel Warren truss (over water
 or spans > 30 m) or a plate-girder overpass.

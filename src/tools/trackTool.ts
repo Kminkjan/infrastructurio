@@ -8,16 +8,17 @@ import {
   RADIUS_CLASSES_M,
   type RadiusClassM,
   type Result,
+  type Structure,
   type TrackPlan,
   canonicalKey,
   opposite,
   rotateHeading,
   stepOf,
 } from "../core/sim/api";
-import { buildTooltip, formatCounts, formatHeight, splitReason } from "./format";
+import { buildTooltip, formatCounts, formatHeight, formatHeld, formatHeldOffEnd, formatStructures, heightLimitText, splitReason } from "./format";
 import { nodesAt, pickAtNode } from "./picks";
 import { commandKey } from "./previewMemo";
-import type { GhostModel, Reduced, ScreenPoint, ToolCtx, ToolEffect, ToolEvent, ToolPick } from "./types";
+import type { GhostModel, Reduced, ScreenPoint, ToolCtx, ToolEffect, ToolEvent, ToolPick, TrackMode } from "./types";
 
 /**
  * The track tool (issue #67 "Tool and input"), a pure reducer:
@@ -51,6 +52,28 @@ import type { GhostModel, Reduced, ScreenPoint, ToolCtx, ToolEffect, ToolEvent, 
  * own track (reused pieces) leaves it outward, so the chain goes on. A plan
  * ending on an existing node within half a step of that node's height takes
  * its height too (outside precision mode).
+ *
+ * Straight line (owner decision 2026-09-28, "One 'Straight line' tool", which
+ * replaced the Bridge and Tunnel tools): the same reducer in mode "straight".
+ * The drag plans one steady grade from the start to the end in the planner's
+ * "straight" height mode, ignoring the ground; the end sits `heightSteps` above
+ * the ground at the end node, moved by the planner to the nearest height 35‰
+ * reaches from the start, and the core infers each piece's structure (bridges
+ * over valleys and water, tunnels through hills). Both modes build with
+ * structure "auto".
+ *
+ * A held end is shown, not hidden (owner decision 2026-09-28, "Keep the limit,
+ * show it"): when the limit holds a straight line's free end more than half a
+ * step off the height the tool asked for (the ground plus the steps), the
+ * tooltip and the announcement add "End held 11.2 m below the ground by the
+ * 3.5 % limit" and the ghost draws a drop line from the end to the ground. A
+ * height key pressed further into the limit keeps the steps (nothing could
+ * move, so no hidden count drifts into the chained drags) and announces the
+ * limit; one pressed the other way steps from the held end, so it moves the
+ * end at once. On the track end the pointer is on, the tool asks for that
+ * end's height, which no key changes: when the limit holds the line off it
+ * ("End held 7.7 m below the track end at (30, 10) …"), both keys keep the
+ * steps and announce the limit.
  *
  * After a commit the app executes and sends `refresh`; that re-plan's
  * announcement leads with the build result, so a screen reader hears both.
@@ -98,9 +121,11 @@ export interface TrackToolState {
   readonly snapKey: string | null;
   /** A commit's "Built…" text, waiting to lead the announcement of the re-plan that follows it. */
   readonly built: string | null;
+  /** Track follows the ground; Straight line lays one steady grade (both build with structure "auto"). */
+  readonly mode: TrackMode;
 }
 
-export function initialTrackState(): TrackToolState {
+export function initialTrackState(mode: TrackMode = "follow"): TrackToolState {
   return {
     phase: "idle",
     target: null,
@@ -118,6 +143,7 @@ export function initialTrackState(): TrackToolState {
     viewKey: null,
     snapKey: null,
     built: null,
+    mode,
   };
 }
 
@@ -131,7 +157,7 @@ function step(s: TrackToolState, e: ToolEvent, ctx: ToolCtx, out: ToolEffect[]):
   switch (e.type) {
     case "activate":
       // Precision starts off: the modifier may have been released while the tool was inactive.
-      return present({ ...initialTrackState(), radiusM: s.radiusM }, ctx, out);
+      return present({ ...initialTrackState(e.mode ?? "follow"), radiusM: s.radiusM }, ctx, out);
 
     case "deactivate":
       out.push({ type: "ghost", ghost: null }, { type: "tooltip", tooltip: null }, { type: "snap", snap: null }, { type: "highlight", keys: [] });
@@ -223,7 +249,21 @@ function step(s: TrackToolState, e: ToolEvent, ctx: ToolCtx, out: ToolEffect[]):
         out.push({ type: "announce", text: "Start a track first; the height keys raise or lower its end." });
         return s;
       }
-      const n = present({ ...s, heightSteps: s.heightSteps + e.delta }, ctx, out);
+      const held = s.plan && s.target ? heldEnd(s, s.plan, s.target, ctx) : undefined;
+      if (held && (held.pinned || e.delta * held.offsetMm < 0)) {
+        // Further into the limit that holds the end, or an end asked for the height of the track end the pointer is
+        // on (which no key changes): nothing can move, so the steps stay as they are.
+        out.push({ type: "announce", text: heightLimitText(held.text) });
+        return s;
+      }
+      // Away from the limit, a held end steps from where it is held, not from the height the limit keeps it off.
+      const stepMm = ctx.settings.heightStepMm;
+      const heightSteps = !held
+        ? s.heightSteps + e.delta
+        : e.delta < 0
+          ? Math.ceil(held.endHeightMm / stepMm) - 1
+          : Math.floor(held.endHeightMm / stepMm) + 1;
+      const n = present({ ...s, heightSteps }, ctx, out);
       if (!n.plan || n.plan.fit === "none") out.push({ type: "announce", text: `End height ${formatHeight(n.heightSteps * ctx.settings.heightStepMm)} above the ground.` });
       return n;
     }
@@ -267,15 +307,26 @@ function step(s: TrackToolState, e: ToolEvent, ctx: ToolCtx, out: ToolEffect[]):
 
 /**
  * Anchors at a pick: its node (an existing node keeps its height) and its
- * height above ground in steps. No start heading is forced: on an existing
- * buffer end the planner itself picks continuing the track or running back
- * over it, whichever is nearer the drag direction; elsewhere it follows the
- * drag. Only a chained start carries the previous plan's end heading.
+ * height above ground in steps. A free node on water starts at the deck
+ * height instead, the water level + 4.0 m (`ctx.waterDeckZmm`; D4, owner
+ * decision 2026-09-28 "M2"), with no height steps, so the drag still plans in
+ * "auto" and its first piece can clear the water as a bridge; the end height
+ * the tooltip shows stays the end above the ground there. No start heading is
+ * forced: on an existing buffer end the planner itself picks continuing the
+ * track or running back over it, whichever is nearer the drag direction;
+ * elsewhere it follows the drag. Only a chained start carries the previous
+ * plan's end heading.
  */
 function startAt(s: TrackToolState, pick: ToolPick, ctx: ToolCtx): TrackToolState {
+  const deck = pick.kind === "node" ? ctx.waterDeckZmm(pick.node.q, pick.node.r) : undefined;
+  if (deck !== undefined && pick.node.zMm < deck) {
+    return { ...s, anchor: { node: { q: pick.node.q, r: pick.node.r, zMm: deck }, heading: undefined }, heightSteps: 0, endHeading: undefined, viewKey: null };
+  }
   const ground = ctx.groundZmm(pick.node.q, pick.node.r);
   const stepMm = ctx.settings.heightStepMm;
-  const heightSteps = ground === undefined ? 0 : Math.round((pick.node.zMm - ground) / stepMm);
+  // A straight line ends on the ground plus the steps pressed since it started (owner decision 2026-09-28), so it
+  // starts with none, whatever the start's own height; Track keeps the start's height above ground.
+  const heightSteps = s.mode === "straight" || ground === undefined ? 0 : Math.round((pick.node.zMm - ground) / stepMm);
   return {
     ...s,
     anchor: { node: pick.node, heading: undefined },
@@ -366,26 +417,83 @@ function present(s: TrackToolState, ctx: ToolCtx, out: ToolEffect[], lead: strin
   const ground = end ? ctx.groundZmm(end.node.q, end.node.r) : undefined;
   const endHeightMm = end ? end.node.zMm - (ground ?? end.node.zMm) : 0;
   const command: Command | null = plan.fit === "none" ? null : { type: "build-track", pieces: plan.pieces, structure: "auto" };
+  const held = heldEnd(s, plan, target, ctx)?.text ?? null;
   const tipAnchor = s.cursor ? target.node : null;
   const viewKey = [
     ctx.network.rev,
     command ? commandKey(command) : `none:${plan.note ?? ""}`,
     s.precision ? plan.label : "",
     endHeightMm,
+    held ?? "",
     tipAnchor ? `${tipAnchor.q},${tipAnchor.r}` : "",
   ].join("|");
   if (viewKey === s.viewKey) return { ...s, snapKey, plan, command };
 
   const verdict = command ? ctx.preview(command) : null;
   const rejection = verdict && !verdict.ok ? verdict.reason : null;
-  const tooltip = buildTooltip({ plan, endHeightMm, rejection, precision: s.precision, anchor: tipAnchor });
+  const ghost = command ? ghostOf(plan, verdict, ctx.network, held !== null) : null;
+  const structure = ghost ? formatStructures(s.mode, ghost.pieces.map((p) => p.structure)) : null;
+  const tooltip = buildTooltip({ plan, endHeightMm, rejection, precision: s.precision, anchor: tipAnchor, structure, mode: s.mode, held });
   out.push(
-    { type: "ghost", ghost: command ? ghostOf(plan, verdict, ctx.network) : null },
+    { type: "ghost", ghost },
     { type: "tooltip", tooltip },
     { type: "highlight", keys: verdict && !verdict.ok ? existingKeys(ctx.network, verdict.highlight) : [] },
     { type: "announce", text: lead === null ? tooltip.lines.join(". ") : `${lead} ${tooltip.lines.join(". ")}` },
   );
   return { ...s, snapKey, plan, command, verdict, viewKey };
+}
+
+/** A Straight line end the 3.5 % limit holds: how far off the asked height, where it stands, and the tooltip line. */
+interface HeldEnd {
+  /** The end minus the height the tool asked for (`askedHeight`), integer mm: negative when held below it. */
+  readonly offsetMm: number;
+  /** The end above the ground there, integer mm (the tooltip's end height). */
+  readonly endHeightMm: number;
+  /**
+   * True when the asked height is the track end the pointer is on, which the height steps do not change: no key
+   * can move the end, so both keys keep the steps and announce the limit.
+   */
+  readonly pinned: boolean;
+  /** "End held 11.2 m below the ground by the 3.5 % limit", or "… below the track end at (30, 10) …". */
+  readonly text: string;
+}
+
+/**
+ * Whether the 3.5 % limit holds the plan's end (owner decision 2026-09-28, "Keep the limit, show it"): in Straight
+ * line mode, a free end (not snapped by magnetism) that the planner moved more than half a height step off the
+ * height the tool asked for there (`askedHeight`, the same height `planFor` asks for: the ground plus the height
+ * steps, or the height of the track end the pointer is on). Magnetism joins the track the player aimed at, and
+ * vertical magnetism moves an end by at most half a step, so neither alone counts as held. Undefined otherwise,
+ * and always for Track: its "fixed" ends never move, and auto-grade chooses its end.
+ */
+function heldEnd(s: TrackToolState, plan: TrackPlan, target: ToolPick, ctx: ToolCtx): HeldEnd | undefined {
+  const end = plan.end?.node;
+  if (s.mode !== "straight" || !end || plan.snapped) return undefined;
+  const ground = ctx.groundZmm(end.q, end.r);
+  if (ground === undefined) return undefined;
+  const asked = askedHeight(s, target, end, ctx);
+  const offsetMm = end.zMm - asked.zMm;
+  if (Math.abs(offsetMm) * 2 <= ctx.settings.heightStepMm) return undefined;
+  const endHeightMm = end.zMm - ground;
+  if (asked.pinned) return { offsetMm, endHeightMm, pinned: true, text: formatHeldOffEnd(offsetMm, end) };
+  const surface = ctx.waterDeckZmm(end.q, end.r) === undefined ? "ground" : "water";
+  return { offsetMm, endHeightMm, pinned: false, text: formatHeld(endHeightMm, surface) };
+}
+
+/**
+ * The height the tool asks the planner for at an end node (q, r), integer mm: on the track end the pointer is on,
+ * that end's height (`pinned`: the height steps do not change it); elsewhere the ground there plus the height
+ * steps, or, outside precision, the height of existing track within half a step of that (vertical magnetism, like
+ * the planner's), so the plan meets the node instead of passing it.
+ */
+function askedHeight(s: TrackToolState, target: ToolPick, end: { readonly q: number; readonly r: number }, ctx: ToolCtx): { readonly zMm: number; readonly pinned: boolean } {
+  if (target.kind === "endpoint" && end.q === target.node.q && end.r === target.node.r) return { zMm: target.node.zMm, pinned: true };
+  const stepMm = ctx.settings.heightStepMm;
+  const free = (ctx.groundZmm(end.q, end.r) ?? s.anchor?.node.zMm ?? 0) + s.heightSteps * stepMm;
+  if (!s.precision) {
+    for (const node of nodesAt(ctx.network, end.q, end.r)) if (Math.abs(node.zMm - free) * 2 <= stepMm) return { zMm: node.zMm, pinned: false };
+  }
+  return { zMm: free, pinned: false };
 }
 
 /**
@@ -398,56 +506,57 @@ function present(s: TrackToolState, ctx: ToolCtx, out: ToolEffect[], lead: strin
  * track joins it.
  */
 function planFor(s: TrackToolState, anchor: Anchor, target: ToolPick, ctx: ToolCtx): TrackPlan {
-  const stepMm = ctx.settings.heightStepMm;
-  const lift = s.heightSteps * stepMm;
   const from = anchor.node;
-  const groundOr = (q: number, r: number): number => ctx.groundZmm(q, r) ?? from.zMm;
+  // D4 auto-grade: with no height steps the planner chooses the end height too (within 35‰), so no re-plan. A
+  // straight line takes the end the tool wants (the ground there plus the steps) and the planner keeps it in reach.
+  const heightMode = s.mode === "straight" ? "straight" : s.heightSteps === 0 ? "auto" : "fixed";
   const drag = (dzMm: number): Drag => ({
     from,
     ...(anchor.heading === undefined ? {} : { fromHeading: anchor.heading }),
     to: target.pointMm,
     dzMm,
+    heightMode,
     magnetism: !s.precision,
     ...(ctx.settings.radiusCapM === undefined ? {} : { radiusCapM: ctx.settings.radiusCapM }),
     ...(s.precision ? { precision: { radiusM: s.radiusM, ...(s.endHeading === undefined ? {} : { endHeading: s.endHeading }) } } : {}),
   });
-  const wanted = (end: NodeRef, snapped: NodeRef | null): number => {
-    if (snapped) return snapped.zMm;
-    if (target.kind === "endpoint" && end.q === target.node.q && end.r === target.node.r) return target.node.zMm;
-    const free = groundOr(end.q, end.r) + lift;
-    // Vertical magnetism (off in precision, like the planner's): ending on existing track within
-    // half a step of its height takes that height, so the plan meets the node instead of passing it.
-    if (!s.precision) {
-      for (const node of nodesAt(ctx.network, end.q, end.r)) if (Math.abs(node.zMm - free) * 2 <= stepMm) return node.zMm;
-    }
-    return free;
-  };
+  const wanted = (end: NodeRef, snapped: NodeRef | null): number => (snapped ? snapped.zMm : askedHeight(s, target, end, ctx).zMm);
   const first = wanted(target.node, null);
   const plan = ctx.planTrack(drag(first - from.zMm));
-  if (!plan.end) return plan;
+  if (!plan.end || heightMode === "auto") return plan;
   const want = wanted(plan.end.node, plan.snapped);
   return want === plan.end.node.zMm ? plan : ctx.planTrack(drag(want - from.zMm));
 }
 
-const keySets = new WeakMap<NetworkView, ReadonlySet<PieceKey>>();
+const keySets = new WeakMap<NetworkView, ReadonlyMap<PieceKey, Structure>>();
 
-function pieceKeys(network: NetworkView): ReadonlySet<PieceKey> {
+/** The network's pieces by key, with their structures. */
+function pieceKeys(network: NetworkView): ReadonlyMap<PieceKey, Structure> {
   let keys = keySets.get(network);
   if (!keys) {
-    keys = new Set(network.pieces.map((p) => p.key));
+    keys = new Map(network.pieces.map((p) => [p.key, p.structure]));
     keySets.set(network, keys);
   }
   return keys;
 }
 
-function ghostOf(plan: TrackPlan, verdict: Result | null, network: NetworkView): GhostModel {
+/**
+ * The ghost: each piece new or reused, with its structure as it would be built (a new piece's from the
+ * preview's `diff.added`, a reused piece's from the network, else ground), and whether the limit holds its end.
+ */
+function ghostOf(plan: TrackPlan, verdict: Result | null, network: NetworkView, endHeld: boolean): GhostModel {
   const existing = pieceKeys(network);
+  const added = verdict?.ok ? new Map(verdict.diff.added.map((r) => [r.key, r.structure])) : undefined;
+  const fallback: Structure = "ground";
   return {
     pieces: plan.pieces.map((spec) => {
       const key = canonicalKey(spec);
-      return { spec, status: key !== undefined && existing.has(key) ? "reused" : "new" };
+      const reused = key === undefined ? undefined : existing.get(key);
+      const structure = reused ?? (key === undefined ? undefined : added?.get(key)) ?? fallback;
+      return { spec, status: reused !== undefined ? "reused" : "new", structure };
     }),
     valid: verdict !== null && verdict.ok,
+    endHeld,
   };
 }
 

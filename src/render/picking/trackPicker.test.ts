@@ -1,12 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { Vector3 } from "three";
-import { createSim, toWorld } from "../../core/sim/api";
+import { makeTerrain } from "../../../tests/support/makeTerrain";
+import { simOn } from "../../../tests/support/simOn";
+import { toWorld } from "../../core/sim/api";
 import { ISO_PITCH_RAD, type IsoView, worldToScreen } from "../camera/isoMath";
 import { simToWorld } from "../coords";
-import { NODE_PICK_RADIUS_PX, PICK_LIFT_M, TRACK_PICK_RADIUS_PX, pickTrack } from "./trackPicker";
+import { NODE_PICK_RADIUS_PX, PICK_LIFT_M, TRACK_PICK_RADIUS_PX, pickTrack, pickTrackStack } from "./trackPicker";
+
+/**
+ * Flat dry land at 3 m, where the ground runs lie, with a 15 m hill on rows 28–32 from q = 9 east for the tunnel.
+ * Since D4 the sim judges each piece against the terrain (until then the seeded maps "d3-pick" and "d4-pick").
+ */
+const TERRAIN = makeTerrain(80, 60, (q, r) => (r >= 28 && r <= 32 && q >= 9 ? 150 : 30), -100);
 
 function setup() {
-  const sim = createSim({ terrain: { seed: "d3-pick", columns: 80, rows: 60 } });
+  const sim = simOn(TERRAIN);
   // A 20 m run east from (10, 20) at 3 m, and an elevated run at 12 m further north.
   sim.execute({
     type: "build-track",
@@ -63,5 +71,70 @@ describe("track picker", () => {
     const pick = pickTrack(sim.network(), view, 5, 5, { x: g.x + 0.4, y: g.y - 0.3 });
     expect(pick).toEqual({ kind: "ground", xM: g.x + 0.4, yM: g.y - 0.3, q: 30, r: 10 });
     expect(pickTrack(sim.network(), view, 5, 5, null)).toBeNull();
+  });
+
+  describe("occlusion aids and stacked hits (D4)", () => {
+    /**
+     * A ground track east at 3 m along r = 20, a bridge due north (heading 3) over it at 12.192 m through (11, 20),
+     * and a tunnel at 3 m along r = 30.
+     */
+    function crossing() {
+      const sim = simOn(TERRAIN);
+      const east = (q0: number, r: number, n: number, zMm: number) =>
+        Array.from({ length: n }, (_, i) => ({ kind: "straight", from: { q: q0 + i, r, zMm }, heading: 0, z1Mm: zMm }) as const);
+      const north = Array.from({ length: 8 }, (_, i) => ({ kind: "straight", from: { q: 13 - i, r: 16 + 2 * i, zMm: 12_192 }, heading: 3, z1Mm: 12_192 }) as const);
+      for (const [pieces, structure] of [
+        [east(8, 20, 8, 3000), "ground"],
+        [north, "bridge"],
+        [east(8, 30, 6, 3000), "tunnel"],
+      ] as const) {
+        const r = sim.execute({ type: "build-track", structure, pieces });
+        expect(r.ok, JSON.stringify(r)).toBe(true);
+      }
+      const centre = toWorld({ q: 12, r: 22 });
+      const view: IsoView = { target: { x: centre.x, z: -centre.y }, ppm: 8, yaw: 0, pitch: ISO_PITCH_RAD, cssWidth: 1000, cssHeight: 800 };
+      return { sim, view };
+    }
+
+    it("puts a bridge in front of the track it crosses, and C's next level behind it, then the ground", () => {
+      const { sim, view } = crossing();
+      const cross = toWorld({ q: 11, r: 20 });
+      // The bridge point drawn over the crossing node: 9.192 m higher, so 9.192 / tan(pitch) = 13.0 m south of it,
+      // half way between two bridge nodes.
+      const southM = 9.192 / Math.tan(ISO_PITCH_RAD);
+      const s = screenOf(view, cross.x, cross.y - southM, 12.192 + PICK_LIFT_M);
+      const ground = { x: cross.x, y: cross.y - southM - 17 };
+      const stack = pickTrackStack(sim.network(), view, s.x, s.y, ground);
+      expect(stack.map((p) => p.kind)).toEqual(["piece", "node", "ground"]);
+      expect(stack[0]?.kind === "piece" && stack[0].piece.structure).toBe("bridge");
+      expect(stack[1]?.kind === "node" && [stack[1].node.q, stack[1].node.r, stack[1].node.zMm]).toEqual([11, 20, 3000]);
+      // H hides the deck: the track under it comes first.
+      const hidden = pickTrackStack(sim.network(), view, s.x, s.y, ground, { visibility: { decks: false, tunnels: false } });
+      expect(hidden.map((p) => p.kind)).toEqual(["node", "ground"]);
+    });
+
+    it("picks tunnels only under the underground x-ray", () => {
+      const { sim, view } = crossing();
+      const p = toWorld({ q: 10, r: 30 });
+      const s = screenOf(view, p.x + 2.5, p.y, 3 + PICK_LIFT_M);
+      const plain = pickTrack(sim.network(), view, s.x, s.y, { x: p.x + 2.5, y: p.y });
+      expect(plain?.kind).toBe("ground");
+      const xray = pickTrack(sim.network(), view, s.x, s.y, { x: p.x + 2.5, y: p.y }, { visibility: { decks: true, tunnels: true } });
+      expect(xray?.kind).toBe("piece");
+      if (xray?.kind === "piece") expect(xray.piece.structure).toBe("tunnel");
+    });
+
+    it("takes a deck's proxy hit where no centreline is near (a click on the parapet at Close)", () => {
+      const { sim, view } = crossing();
+      const bridge = sim.network().pieces.find((p) => p.structure === "bridge" && p.nodes.every((id) => (sim.network().nodes[id]?.r ?? 0) >= 26));
+      expect(bridge).toBeDefined();
+      const far = toWorld({ q: 40, r: 50 });
+      const s = screenOf(view, far.x, far.y, 0);
+      const pick = pickTrack(sim.network(), view, s.x, s.y, far, { proxies: [{ key: bridge?.key ?? "", zM: 12 }] });
+      expect(pick?.kind).toBe("piece");
+      if (pick?.kind === "piece") expect(pick.piece.key).toBe(bridge?.key);
+      // Under H the deck's proxy is ignored.
+      expect(pickTrack(sim.network(), view, s.x, s.y, far, { proxies: [{ key: bridge?.key ?? "", zM: 12 }], visibility: { decks: false, tunnels: false } })?.kind).toBe("ground");
+    });
   });
 });

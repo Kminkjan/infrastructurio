@@ -1,7 +1,7 @@
 import type { Heading, NodeRef } from "../core/sim/api";
 import type { CameraController } from "../render/camera/CameraController";
 import type { ToolEvent, ToolPick } from "../tools/types";
-import { type CursorDirection, type KeyContext, WheelStepper, classifyKey, precisionHeld } from "./keymap";
+import { type CursorDirection, type KeyContext, type KeyTool, WheelStepper, classifyKey, precisionHeld } from "./keymap";
 
 /**
  * DOM input → camera and tool events (architecture "Tools", issue #67 "Tool
@@ -9,14 +9,21 @@ import { type CursorDirection, type KeyContext, WheelStepper, classifyKey, preci
  * each gesture goes to the camera first (right/middle drag, wheel zoom,
  * WASD, Q/E, +/−, Home; left drag too while no tool is active), and the rest
  * becomes interpreted tool events that carry the pick under the pointer and
- * the precision modifier. Undo/redo, tool selection, labels and the perf
- * overlay go to app actions. The key and wheel rules live in `keymap.ts`.
+ * the precision modifier. Undo/redo, tool selection, the occlusion aids
+ * (H, U, C), labels and the perf overlay go to app actions. The key and wheel
+ * rules live in `keymap.ts`.
  */
 
 export interface InputRouterActions {
   undo(): void;
   redo(): void;
-  selectTrack(): void;
+  selectTool(tool: KeyTool): void;
+  /** H: hide or show bridge decks. */
+  toggleDecks(): void;
+  /** U: the underground x-ray. */
+  toggleXray(): void;
+  /** C: the next stacked pick under the pointer. */
+  cyclePick(): void;
   toggleLabels(): void;
   togglePerf(): void;
 }
@@ -90,13 +97,15 @@ export class InputRouter {
   }
 
   /**
-   * Re-picks under a still pointer after the camera moved, so the ghost follows the ground under it.
-   * Not while the keyboard cursor leads: a camera move (its own keep-in-view pan included) never hands
-   * the target back to the mouse; a real pointer move does.
+   * Re-picks under a still pointer after the camera moved (or C chose another stacked pick, or H or U
+   * changed what can be picked), so the ghost follows what is under it. Not while the keyboard cursor
+   * leads: a camera move (its own keep-in-view pan included) never hands the target back to the mouse; a
+   * real pointer move does. Returns whether it re-picked.
    */
-  repick(): void {
-    if (!this.pointer.inside || !this.o.trackActive() || this.o.camera.panning || this.o.cursorLeads()) return;
+  repick(): boolean {
+    if (!this.pointer.inside || !this.o.trackActive() || this.o.camera.panning || this.o.cursorLeads()) return false;
     this.o.dispatch({ type: "pointer-move", pick: this.o.pick(this.pointer.x, this.pointer.y), screen: { x: this.pointer.x, y: this.pointer.y } });
+    return true;
   }
 
   dispose(): void {
@@ -140,8 +149,18 @@ export class InputRouter {
         e.preventDefault();
         actions.redo();
         return;
-      case "select-track":
-        if (!e.repeat) actions.selectTrack();
+      case "select-tool":
+        if (!e.repeat) actions.selectTool(action.tool);
+        return;
+      case "toggle-decks":
+        if (!e.repeat) actions.toggleDecks();
+        return;
+      case "toggle-xray":
+        if (!e.repeat) actions.toggleXray();
+        return;
+      case "cycle-pick":
+        e.preventDefault();
+        if (!e.repeat) actions.cyclePick();
         return;
       case "escape":
         if (this.o.trackActive() && !e.repeat) dispatch({ type: "escape" });

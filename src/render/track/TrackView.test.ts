@@ -1,17 +1,26 @@
 import { describe, expect, it } from "vitest";
 import { BatchedMesh, type Group } from "three";
-import { type PieceSpec, createSim } from "../../core/sim/api";
+import { makeTerrain } from "../../../tests/support/makeTerrain";
+import { simOn } from "../../../tests/support/simOn";
+import type { PieceSpec } from "../../core/sim/api";
 import { createArtUniforms, createTrackMaterials } from "../art/materials";
 import { TrackView } from "./TrackView";
 
 const bounds = { minX: 0, minZ: -500, maxX: 2000, maxZ: 0 };
+
+/**
+ * Flat dry land at 0 m, where the runs lie on the ground, with a 10 m hill on rows 18–22 from q = 18 to 22 for the
+ * tunnel. Since D4 the sim judges each piece against the terrain (until then a seeded map, "d3-track-view", whose
+ * ground lay metres from the runs at 0 m).
+ */
+const TERRAIN = makeTerrain(360, 40, (q, r) => (r >= 18 && r <= 22 && q >= 18 && q <= 22 ? 100 : 0), -100);
 
 function straights(q0: number, r: number, n: number): PieceSpec[] {
   return Array.from({ length: n }, (_, i) => ({ kind: "straight", from: { q: q0 + i, r, zMm: 0 }, heading: 0, z1Mm: 0 }) as const);
 }
 
 function setup(multiDraw: boolean, clockStepMs = 0, budgetMs?: number) {
-  const sim = createSim({ terrain: { seed: "d3-track-view", columns: 360, rows: 40 } });
+  const sim = simOn(TERRAIN);
   const materials = createTrackMaterials(createArtUniforms(bounds));
   let t = 0;
   let frames = 0;
@@ -154,5 +163,44 @@ describe("track view", () => {
     t.view.sync(t.sim.network());
     expect(t.view.stats.pieces).toBe(5);
     t.view.dispose();
+  });
+
+  it("draws bridge track in its own batches, which H hides, and never draws track inside a tunnel", () => {
+    const t = setup(true);
+    // On row 20, into the hill from its foot at q = 17: a tunnel needs to be deeper than a cutting (D4).
+    for (const [pieces, structure] of [
+      [straights(10, 20, 4), "ground"],
+      [straights(14, 20, 3), "bridge"],
+      [straights(17, 20, 5), "tunnel"],
+    ] as const) {
+      const r = t.sim.execute({ type: "build-track", pieces, structure });
+      expect(r.ok, JSON.stringify(r)).toBe(true);
+    }
+    t.view.sync(t.sim.network());
+    expect(t.view.stats).toMatchObject({ pieces: 7, bridgePieces: 3, tunnelPieces: 5, pending: 0 });
+    const ground = layer(t.view, "track ballast") as BatchedMesh;
+    const bridge = layer(t.view, "bridge track ballast") as BatchedMesh;
+    const bridgeSleepers = layer(t.view, "bridge track sleepers") as BatchedMesh;
+    expect(ground.visible && bridge.visible && bridgeSleepers.visible).toBe(true);
+    t.view.setDecksHidden(true);
+    expect(bridge.visible || bridgeSleepers.visible).toBe(false);
+    expect(ground.visible).toBe(true);
+    // The far LOD still hides sleepers once H is off again.
+    t.view.setLod(1);
+    t.view.setDecksHidden(false);
+    expect(bridge.visible).toBe(true);
+    expect(bridgeSleepers.visible).toBe(false);
+    t.view.setLod(8);
+    expect(bridgeSleepers.visible).toBe(true);
+    // Undo the tunnel: nothing drawn changes; undo the bridge: its batches empty.
+    t.sim.execute({ type: "undo" });
+    t.view.sync(t.sim.network());
+    expect(t.view.stats).toMatchObject({ pieces: 7, tunnelPieces: 0 });
+    t.sim.execute({ type: "undo" });
+    t.view.sync(t.sim.network());
+    expect(t.view.stats).toMatchObject({ pieces: 4, bridgePieces: 0 });
+    expect(bridge.visible).toBe(false);
+    t.view.dispose();
+    t.materials.dispose();
   });
 });

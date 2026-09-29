@@ -5,8 +5,28 @@
  * - Undo Ctrl/Cmd+Z; redo Ctrl/Cmd+Shift+Z or Ctrl+Y; letters compared
  *   case-insensitively (Shift turns `z` into `Z`), by `key`, so they follow
  *   the keyboard layout. They work in every tool.
- * - 1 selects Track; Esc steps the track tool back one level, and from Idle
- *   returns to Select.
+ * - 1 selects Track and 5 Straight line (the tool-set keys, architecture
+ *   "Tools"; 2–4 stay reserved for Signal, Station and Depot and 7 for
+ *   Demolish, unbound until those tools exist). Straight line took 5, Bridge's
+ *   old key, when it replaced the Bridge (5) and Tunnel (6) tools (owner
+ *   decision 2026-09-28, "One 'Straight line' tool"), so the planned 1–7 order
+ *   keeps; 6 is unbound now. A digit matches by character (Shift allowed, for
+ *   layouts like AZERTY that shift for digits), or unshifted by physical key
+ *   (top row or numpad), except where that key types the camera's zoom
+ *   characters (+ = − _: AZERTY's 6 key is its "−", which keeps zooming out;
+ *   AZERTY's 5 key types "(", so it selects Straight line by physical key).
+ *   Never with Ctrl, Cmd or Alt. Esc steps the track tool back one level, and
+ *   from Idle returns to Select.
+ * - Occlusion aids (D4), unmodified letters in every tool: H hides bridge
+ *   decks, U toggles the underground x-ray, C cycles the stacked picks under
+ *   the pointer (a track-family tool only). They match by character (`key`),
+ *   case-insensitively, so they follow the layout like undo's letters, with
+ *   two rules: the camera's physical keys win (WASD, Q/E by `code`), so a
+ *   layout that types h, u or c on one of those keys (Workman types h on the
+ *   D key) keeps panning; and a layout without Latin letters (Cyrillic, Greek)
+ *   gets them by physical key. With Ctrl, Cmd or Alt held they are left to the
+ *   browser (Ctrl+H is history, Ctrl+C copy) and never fire, so they never
+ *   take precision's modifier either.
  * - While Track is active: arrows move the keyboard lattice cursor (instead
  *   of panning; WASD still pans), Enter starts and commits, PgUp/PgDn and
  *   `]`/`[` step the height. They also work with the precision modifier held
@@ -55,10 +75,16 @@ export interface KeyContext {
 
 export type CursorDirection = "up" | "down" | "left" | "right";
 
+/** Tools a key selects. */
+export type KeyTool = "track" | "straight";
+
 export type KeyAction =
   | { readonly kind: "undo" }
   | { readonly kind: "redo" }
-  | { readonly kind: "select-track" }
+  | { readonly kind: "select-tool"; readonly tool: KeyTool }
+  | { readonly kind: "toggle-decks" }
+  | { readonly kind: "toggle-xray" }
+  | { readonly kind: "cycle-pick" }
   | { readonly kind: "escape" }
   | { readonly kind: "enter" }
   | { readonly kind: "cursor"; readonly direction: CursorDirection }
@@ -68,6 +94,25 @@ export type KeyAction =
   | { readonly kind: "perf" }
   /** Not ours: offer it to the camera. */
   | { readonly kind: "camera" };
+
+/** The tool-set keys (architecture "Tools": Track 1, Straight line 5), by digit. */
+const TOOL_KEYS: Readonly<Record<string, KeyTool>> = { "1": "track", "5": "straight" };
+/** The camera's zoom characters (`CameraController`), which a digit's physical key never takes. */
+const ZOOM_CHARS: ReadonlySet<string> = new Set(["+", "=", "-", "_"]);
+/** The camera's physical keys (`CameraController`): pan and rotate. */
+const CAMERA_CODES: ReadonlySet<string> = new Set(["KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE"]);
+/** The occlusion aids by letter. */
+const AID_KEYS: Readonly<Record<string, "toggle-decks" | "toggle-xray" | "cycle-pick">> = { h: "toggle-decks", u: "toggle-xray", c: "cycle-pick" };
+
+/** An occlusion aid's letter: by character, or by physical key where the layout types no Latin letter there. */
+function aidLetter(e: KeyInput): string | undefined {
+  if (CAMERA_CODES.has(e.code)) return undefined;
+  const ch = e.key.length === 1 ? e.key.toLowerCase() : "";
+  if (ch in AID_KEYS) return ch;
+  if (/^[a-z]$/.test(ch)) return undefined;
+  const physical = /^Key([A-Z])$/.exec(e.code)?.[1]?.toLowerCase();
+  return physical !== undefined && physical in AID_KEYS ? physical : undefined;
+}
 
 const ARROWS: Readonly<Record<string, CursorDirection>> = {
   ArrowUp: "up",
@@ -100,9 +145,16 @@ export function classifyKey(e: KeyInput, ctx: KeyContext): KeyAction {
     }
   }
 
+  if (!command && !e.altKey) {
+    const digit = e.shiftKey || ZOOM_CHARS.has(e.key) ? undefined : /^(?:Digit|Numpad)([0-9])$/.exec(e.code)?.[1];
+    const tool = TOOL_KEYS[e.key] ?? (digit === undefined ? undefined : TOOL_KEYS[digit]);
+    if (tool) return { kind: "select-tool", tool };
+  }
   if (!command && !e.altKey && !e.shiftKey) {
-    if (e.key === "1" || e.code === "Digit1" || e.code === "Numpad1") return { kind: "select-track" };
     if (e.code === "KeyL") return { kind: "labels" };
+    const aid = aidLetter(e);
+    if (aid === "c") return ctx.trackActive ? { kind: "cycle-pick" } : { kind: "camera" };
+    if (aid) return { kind: AID_KEYS[aid] as "toggle-decks" | "toggle-xray" };
   }
   if (e.code === "F3") return { kind: "perf" };
   return { kind: "camera" };

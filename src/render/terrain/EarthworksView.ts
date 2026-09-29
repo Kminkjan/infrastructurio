@@ -1,20 +1,11 @@
-import type { NetworkView, Terrain } from "../../core/sim/api";
+import { type CentrelineIndex, centrelineIndex, nearestOnCentreline } from "../../core/geometry/sample";
+import { BAND_EDGE_RING_M, type GroundQuery, type GroundView, type NetworkView, type Terrain, conformedHeightM, earthworkPieces, groundMmAt, heightDmAt, networkAdjacency, toWorld } from "../../core/sim/api";
 import type { SceneryClearance } from "../scenery/clearance";
-import {
-  ChunkPass,
-  DrawnHeightfield,
-  type EarthworkPiece,
-  FORMATION_HALF_WIDTH_M,
-  chunksTouching,
-  conforms,
-  earthworkPiece,
-  MAX_REACH_M,
-  mayNeighbour,
-  nearestOnPiece,
-  piecesTouching,
-  settleReaches,
-  settledPiece,
-} from "./earthworks";
+import { type PortalFrame, frameLocal } from "../structures/plug";
+import { BACKFILL_REACH_U_M, backfillV, behindFront } from "../structures/portalOutline";
+import { RunPath } from "../structures/runPath";
+import { isPortalEnd, structureRuns } from "../structures/runs";
+import { ChunkPass, DrawnHeightfield, type EarthworkPiece, type Envelope, FORMATION_HALF_WIDTH_M, chunksTouching, earthworkPotential, encodeEarthworkPotential, envelopeAt, lodLattice, naturalHeightM, nearestOnPiece, piecesTouching } from "./earthworks";
 import { type buildEarthworkChunk, earthworkChunkSteps } from "./earthworkMesh";
 import type { TerrainLod } from "./offsetGrid";
 import { type MeshData, buildChunkData } from "./terrainGeometry";
@@ -23,10 +14,12 @@ import type { TerrainShading } from "./terrainShading";
 /**
  * Keeps the terrain's earthworks in step with `NetworkView` snapshots
  * (architecture "Per-frame order", step 3, beside `TrackView`). On a new
- * revision it diffs ground pieces by key and settles the reaches beside the
- * edit (a piece's reach depends on its neighbours' beds, PR #83 re-review);
- * the reach boxes of pieces that left, arrived or changed reach mark the
- * terrain chunks (both LODs) to rebuild, LOD0 first. Each rebuild runs the
+ * revision it takes the core's settled earthwork pieces (`sim.ground()`, since
+ * the D4 feel-check fixes, 2026-09-28: the core settles the reaches beside
+ * each edit and clips the chains at bridges and tunnels, and judges new track
+ * against the same surface) and diffs them by object: the reach boxes of
+ * pieces that left, arrived or changed mark the terrain chunks (both LODs) to
+ * rebuild, LOD0 first. Each rebuild runs the
  * chunk pass over every current piece near the chunk, so a chunk is always
  * rebuilt from scratch: undo gives back the natural chunk exactly, and the
  * incremental result equals a fresh view's. Rebuilds are time-sliced like the
@@ -54,6 +47,25 @@ export const EARTHWORKS_BUDGET_MS = 8;
 export const SCENERY_CLEARANCE_M = FORMATION_HALF_WIDTH_M + 2;
 /** Scenery also clears where the drawn ground moved more than this. */
 export const SCENERY_MOVED_M = 0.1;
+/**
+ * Bridges and tunnels are never conformed (the earthworks move ground only for ground track), but scenery gives
+ * way to them too (D4): trees and props within SCENERY_CLEARANCE_M of a bridge's centreline would stand in its
+ * deck or piers, and within this radius of a portal node in its face and wings.
+ */
+export const PORTAL_SCENERY_CLEARANCE_M = 9;
+
+/** A bridge piece or a portal the scenery gives way to: a centreline or a disc (and a portal's backfill), and its plan box. */
+interface Clearing {
+  readonly index: CentrelineIndex | null;
+  readonly x: number;
+  readonly y: number;
+  /** A portal's frame: its backfill (`portalOutline.ts`) buries what stands under it. */
+  readonly portal?: PortalFrame;
+  readonly minX: number;
+  readonly minY: number;
+  readonly maxX: number;
+  readonly maxY: number;
+}
 
 /** What the view needs of the terrain's chunk meshes (`TerrainView` has this shape). */
 export interface EarthworkChunkTarget {
@@ -96,6 +108,8 @@ export class EarthworksView {
   /** The drawn LOD1 surface (tests and checks). */
   readonly heightfieldLod1: DrawnHeightfield;
   private readonly pieces = new Map<string, EarthworkPiece>();
+  /** Bridges and portals scenery clears around (by `b:<key>` and `p:<node>`); never conformed. */
+  private readonly clearing = new Map<string, Clearing>();
   /** Pending steps as `${order}:${x}:${y}` (order: STEP_*), sorted so LOD0 goes first. */
   private readonly queue: string[] = [];
   private readonly queued = new Set<string>();
@@ -111,12 +125,15 @@ export class EarthworksView {
   private maxCutM = 0;
   private maxFillM = 0;
   private readonly near = { d: 0, s: 0 };
+  private readonly local = { s: 0, u: 0 };
+  private readonly lat0;
   /** The step in flight: its queue key (still at the queue's head) and its remaining slices. */
   private current: { readonly key: string; readonly work: Generator<void, void, void> } | undefined;
 
   constructor(private readonly options: EarthworksViewOptions) {
     this.heightfield = new DrawnHeightfield(options.terrain, 0);
     this.heightfieldLod1 = new DrawnHeightfield(options.terrain, 1);
+    this.lat0 = lodLattice(options.terrain, 0);
     this.budgetMs = options.budgetMs ?? EARTHWORKS_BUDGET_MS;
     this.target = options.target;
     this.scenery = options.scenery;
@@ -158,13 +175,13 @@ export class EarthworksView {
    * Brings the earthworks toward `network`. Call once per frame; it costs a
    * revision compare when nothing changed. Returns true when the scene changed.
    */
-  sync(network: NetworkView, budgetMs = this.budgetMs): boolean {
+  sync(network: NetworkView, ground?: GroundView, budgetMs = this.budgetMs): boolean {
     if (!this.enabled) return false;
     if (network.rev !== this.targetRev) {
       this.targetRev = network.rev;
       // A step in flight may read pieces the revision replaced: it starts again (its key stays queued).
       this.current = undefined;
-      this.applyRevision(network);
+      this.applyRevision(network, ground && ground.rev === network.rev ? ground : undefined);
     }
     if (this.queue.length === 0) return false;
     const now = this.options.now;
@@ -201,11 +218,115 @@ export class EarthworksView {
     this.current = undefined;
     this.plain.clear();
     for (const key of this.drawnWithEarthworks) this.enqueue(key);
-    // Scenery on chunks near pieces must be re-cleared too, even where the ground did not move.
+    // Scenery on chunks near pieces must be re-cleared too, even where the ground did not move (bridges and portals too).
     for (const p of this.pieces.values()) this.enqueueBox(p);
+    if (this.scenery) for (const c of this.clearing.values()) chunksTouching(this.options.terrain, 0, c, (x, y) => this.enqueue(`${STEP_SCENERY}:${x}:${y}`));
     this.sortQueue();
     if (this.queue.length > 0) this.options.requestFrame();
   }
+
+  /**
+   * The lowest cut envelope (m) of the earthwork pieces reaching into a plan box, as a function of (x, y) (Infinity
+   * where none reaches), leaving out the chains whose fixed clip plane is at one of the node keys in `except` (a
+   * tunnel run's portals: both approaches, whose headwalls the faces stand in). In `"ground"` mode, as the core
+   * judges: the hill plugs' backfill is capped by it (`plug.ts`), and the wings retain the hill as it leaves it.
+   */
+  cutEnvelopeIn(box: { minX: number; minY: number; maxX: number; maxY: number }, except: readonly string[]): (x: number, y: number) => number {
+    const pieces = piecesTouching(this.pieces.values(), box).filter((p) => !p.planes.some((c) => c.fixed && except.includes(c.key)));
+    const near = { d: 0, s: 0 };
+    const e: Envelope = { u: 0, l: 0, d: 0, band: 0 };
+    return (x, y) => {
+      let u = Number.POSITIVE_INFINITY;
+      for (const p of pieces) {
+        if (x < p.minX || x > p.maxX || y < p.minY || y > p.maxY) continue;
+        if (envelopeAt(p, p, x, y, null, near, e, "ground") && e.u < u) u = e.u;
+      }
+      return u;
+    };
+  }
+
+  /**
+   * The core's effective ground (m) over a plan box, as a function of (x, y): the conformed height of every piece
+   * reaching into the box in `"ground"` mode (`core/track/earthworks.ts`, "Portals retain the hill"), NaN off the map.
+   * Behind a tunnel portal it is the hill the portal retains, where the terrain mesh keeps the underlay (the 45°
+   * headwall from the track bed); the hill plug draws it (`plug.ts`). Elsewhere it equals the drawn ground.
+   */
+  effectiveIn(box: { minX: number; minY: number; maxX: number; maxY: number }): (x: number, y: number) => number {
+    const pieces = piecesTouching(this.pieces.values(), box);
+    const lat = this.lat0;
+    const terrain = this.options.terrain;
+    return (x, y) => conformedHeightM(pieces, x, y, naturalHeightM(terrain, lat, x, y), 0, null, "ground");
+  }
+
+  /**
+   * The terrain mesh's `earthwork` attribute (m) at plan points over a box, as the chunk pass writes it
+   * (`ChunkPass.attributesAt`): the encoded potential (from the core's `"ground"`-mode cut envelope, so it follows the
+   * visible ground behind tunnel portals), the drawn departure `drawn − natural` and the plan distance to the nearest
+   * centreline; zeros where no piece reaches. The hill plug gives it to the vertices where it lies on the terrain, so
+   * its outline matches the terrain's colours and facets (`plug.ts`).
+   */
+  attributeIn(box: { minX: number; minY: number; maxX: number; maxY: number }): (x: number, y: number, natural: number, drawn: number, out: Float64Array) => void {
+    const pieces = piecesTouching(this.pieces.values(), box);
+    const near = { d: 0, s: 0 };
+    const e: Envelope = { u: 0, l: 0, d: 0, band: 0 };
+    return (x, y, natural, drawn, out) => {
+      let u = Number.POSITIVE_INFINITY;
+      let l = Number.NEGATIVE_INFINITY;
+      let d = Number.POSITIVE_INFINITY;
+      for (const p of pieces) {
+        if (x < p.minX || x > p.maxX || y < p.minY || y > p.maxY) continue;
+        if (!envelopeAt(p, p, x, y, null, near, e, "ground")) continue;
+        if (e.u < u) u = e.u;
+        if (e.l > l) l = e.l;
+        if (e.d < d) d = e.d;
+      }
+      if (u === Number.POSITIVE_INFINITY) {
+        out[0] = 0;
+        out[1] = 0;
+        out[2] = 0;
+        return;
+      }
+      out[0] = encodeEarthworkPotential(earthworkPotential(natural, u, l));
+      out[1] = Math.abs(drawn - natural) > 1e-6 ? drawn - natural : 0;
+      out[2] = d;
+    };
+  }
+
+  /**
+   * The plan box of the pieces whose chains end at a tunnel plane through node key `key` (a portal's approach): where
+   * the underlay's headwall can notch the hill behind that portal. Undefined when none does.
+   */
+  notchBox(key: string): { minX: number; minY: number; maxX: number; maxY: number } | undefined {
+    let box: { minX: number; minY: number; maxX: number; maxY: number } | undefined;
+    for (const p of this.pieces.values()) {
+      if (!p.planes.some((c) => c.fixed && c.tunnel && c.key === key)) continue;
+      box = box ? { minX: Math.min(box.minX, p.minX), minY: Math.min(box.minY, p.minY), maxX: Math.max(box.maxX, p.maxX), maxY: Math.max(box.maxY, p.maxY) } : { minX: p.minX, minY: p.minY, maxX: p.maxX, maxY: p.maxY };
+    }
+    return box;
+  }
+
+  /**
+   * The core's effective ground at points and nodes over the view's pieces, for the core's portal definition at
+   * buffer ends (`isPortal`): the same rule and rounding as the world's `EffectiveGround`, without its caches.
+   */
+  readonly ground: GroundQuery = {
+    heightM: (x, y) => conformedHeightM(this.pieces.values(), x, y, naturalHeightM(this.options.terrain, this.lat0, x, y), 0, null, "ground"),
+    nodeMm: (q, r) => {
+      const t = this.options.terrain;
+      const water = groundMmAt(t, { q, r });
+      if (water === undefined) return undefined;
+      const bedDm = heightDmAt(t, { q, r }) ?? 0;
+      return water > bedDm * 100 ? water : this.ground.nodeEarthMm(q, r);
+    },
+    nodeEarthMm: (q, r) => {
+      const dm = heightDmAt(this.options.terrain, { q, r });
+      if (dm === undefined) return undefined;
+      const w = toWorld({ q, r });
+      const h = this.ground.heightM(w.x, w.y);
+      return Number.isNaN(h) ? dm * 100 : Math.round(h * 1000);
+    },
+    meets: (minX, minY, maxX, maxY) => piecesTouching(this.pieces.values(), { minX, minY, maxX, maxY }, 0, 0).length > 0,
+  };
 
   /** A ground piece's current reach at LOD0 and LOD1 (settled beside its neighbours), or undefined (tests, checks). */
   reachOf(key: string): readonly [number, number] | undefined {
@@ -213,80 +334,125 @@ export class EarthworksView {
     return p ? [p.reachM, p.lod1.reachM] : undefined;
   }
 
-  /** Whether earthworks claim plan (x, y) for scenery: on a formation, or where the drawn ground moved. */
-  clearsScenery(x: number, y: number, near: readonly EarthworkPiece[]): boolean {
+  /**
+   * Whether earthworks claim plan (x, y) for scenery: on a formation, under a bridge, at a portal, or where the visible
+   * ground moved. The visible ground is the drawn one, except behind a tunnel portal, where the hill plug draws the
+   * core's effective ground (the hill the portal retains) and the backfill over the underlay's notch: scenery there
+   * stays on the hill unless the backfill buries it (D4 second feel-check fixes; tested against the underlay, the
+   * notch was a treeless chevron behind every portal).
+   */
+  clearsScenery(x: number, y: number, near: readonly EarthworkPiece[], clearing: readonly Clearing[] = []): boolean {
     for (const p of near) {
       if (x < p.minX || x > p.maxX || y < p.minY || y > p.maxY) continue;
       if (nearestOnPiece(p, x, y, this.near).d <= SCENERY_CLEARANCE_M) return true;
     }
-    if (this.heightfield.triangles.size === 0) return false;
-    const drawn = this.heightfield.heightAtM(x, y);
     const natural = this.heightfield.naturalAtM(x, y);
+    let visible = Number.NEGATIVE_INFINITY;
+    for (const c of clearing) {
+      if (x < c.minX || x > c.maxX || y < c.minY || y > c.maxY) continue;
+      if (c.index) {
+        if (nearestOnCentreline(c.index, x, y, this.near).d <= SCENERY_CLEARANCE_M) return true;
+        continue;
+      }
+      if (Math.hypot(x - c.x, y - c.y) <= PORTAL_SCENERY_CLEARANCE_M) return true;
+      const f = c.portal;
+      if (!f) continue;
+      const l = frameLocal(f, x, y, this.local);
+      if (behindFront(l.s, l.u) >= 0) visible = Math.max(visible, f.z + backfillV(l.s, l.u));
+    }
+    if (this.heightfield.triangles.size === 0 && visible === Number.NEGATIVE_INFINITY) return false;
+    let drawn = this.heightfield.heightAtM(x, y);
+    if (drawn < natural - SCENERY_MOVED_M && this.behindTunnelPlane(x, y, near)) {
+      const effective = conformedHeightM(near, x, y, natural, 0, null, "ground");
+      if (effective > drawn) drawn = effective;
+    }
+    if (visible > drawn) drawn = visible;
     return Math.abs(drawn - natural) > SCENERY_MOVED_M;
   }
 
-  private applyRevision(network: NetworkView): void {
-    const terrain = this.options.terrain;
-    const next = new Set<string>();
-    const added: EarthworkPiece[] = [];
-    for (const p of network.pieces) {
-      if (!conforms(p)) continue;
-      next.add(p.key);
-      if (!this.pieces.has(p.key)) added.push(earthworkPiece(terrain, p));
+  /** Whether (x, y) lies past a tunnel end's clip plane of a piece whose reach box holds it. */
+  private behindTunnelPlane(x: number, y: number, near: readonly EarthworkPiece[]): boolean {
+    for (const p of near) {
+      if (x < p.minX || x > p.maxX || y < p.minY || y > p.maxY) continue;
+      for (const c of p.planes) if (c.fixed && c.tunnel && (x - c.x) * c.tx + (y - c.y) * c.ty > 0) return true;
     }
-    let removed = false;
+    return false;
+  }
+
+  /**
+   * Takes the revision's earthwork pieces: the core's (`ground`), or, for a caller without a sim (tests), the same
+   * rule applied to the whole network afresh, keeping the pieces that did not change. A piece that left, arrived or
+   * changed (its reach, cap rise or clip planes) queues the chunks of its old and new boxes.
+   */
+  private applyRevision(network: NetworkView, ground: GroundView | undefined): void {
+    const next = ground?.pieces ?? this.fresh(network);
     for (const [key, piece] of this.pieces) {
-      if (next.has(key)) continue;
-      this.pieces.delete(key);
+      if (next.get(key) === piece) continue;
       this.enqueueBox(piece);
-      removed = true;
+      if (!next.has(key)) this.pieces.delete(key);
     }
-    if (added.length > 0 || removed) this.settle(added, removed);
+    for (const [key, piece] of next) {
+      if (this.pieces.get(key) === piece) continue;
+      this.pieces.set(key, piece);
+      this.enqueueBox(piece);
+    }
+    this.syncClearing(network);
     this.rebuild = { chunks: 0, slices: 0, totalMs: 0, longestSliceMs: 0 };
     this.sortQueue();
   }
 
-  /**
-   * Re-derives the reaches beside the edit (`settleReaches`: a piece's reach depends on its neighbours' beds) and
-   * queues the chunks of every piece whose reach changed, old and new box, plus the added pieces'. After a removal
-   * every piece a neighbour had raised starts again from its natural reach, so the result equals a fresh settle.
-   */
-  private settle(added: readonly EarthworkPiece[], removed: boolean): void {
-    const kept = this.pieces.size;
-    const list = [...this.pieces.values(), ...added];
-    const reach0 = Float64Array.from(list, (p) => p.reachM);
-    const reach1 = Float64Array.from(list, (p) => p.lod1.reachM);
-    const work: number[] = [];
-    for (let i = 0; i < kept; i++) {
-      const p = list[i];
-      if (!p) continue;
-      if (removed && (p.reachM !== p.naturalReachM[0] || p.lod1.reachM !== p.naturalReachM[1])) {
-        reach0[i] = p.naturalReachM[0];
-        reach1[i] = p.naturalReachM[1];
-        work.push(i);
-        continue;
-      }
-      // A piece whose box meets an arrival's may fold in its beds.
-      for (const a of added) {
-        if (mayNeighbour(p, a)) {
-          work.push(i);
-          break;
-        }
+  /** The rule over the whole network, reusing each current piece whose settled form is the same. */
+  private fresh(network: NetworkView): ReadonlyMap<string, EarthworkPiece> {
+    const out = new Map<string, EarthworkPiece>();
+    for (const p of earthworkPieces(this.options.terrain, network.pieces, networkAdjacency(network))) {
+      const old = this.pieces.get(p.key);
+      out.set(p.key, old && sameSettled(old, p) ? old : p);
+    }
+    return out;
+  }
+
+  /** Bridges and portals: the scenery on the chunks of any that came or went is re-tested. */
+  private syncClearing(network: NetworkView): void {
+    const wanted = new Map<string, () => Clearing>();
+    const m = SCENERY_CLEARANCE_M;
+    for (const p of network.pieces) {
+      if (p.structure !== "bridge") continue;
+      wanted.set(`b:${p.key}`, () => {
+        const index = centrelineIndex(p);
+        return { index, x: 0, y: 0, minX: index.minX - m, minY: index.minY - m, maxX: index.maxX + m, maxY: index.maxY + m };
+      });
+    }
+    for (const run of structureRuns(network)) {
+      if (run.structure !== "tunnel") continue;
+      for (const end of [0, 1] as const) {
+        if (!isPortalEnd(this.options.terrain, run, end, this.ground)) continue;
+        const n = run.nodes[end];
+        const { x, y } = toWorld(n);
+        // The disc around the face and the wings' roots, and the backfill's reach behind the face.
+        const r = Math.max(PORTAL_SCENERY_CLEARANCE_M, BACKFILL_REACH_U_M + 1);
+        wanted.set(`p:${n.q},${n.r},${n.zMm}:${run.key}`, () => {
+          const path = RunPath.ofRun(run.pieces);
+          const p = { x: 0, y: 0, z: 0, tx: 1, ty: 0 };
+          path.at(end === 0 ? 0 : path.lengthM, p);
+          const dir = end === 0 ? 1 : -1;
+          return { index: null, x, y, portal: { x: p.x, y: p.y, z: p.z, tx: dir * p.tx, ty: dir * p.ty }, minX: x - r, minY: y - r, maxX: x + r, maxY: y + r };
+        });
       }
     }
-    for (let i = kept; i < list.length; i++) work.push(i);
-    settleReaches(this.options.terrain, list, reach0, reach1, work);
-    for (let i = 0; i < list.length; i++) {
-      const p = list[i];
-      if (!p) continue;
-      // A capped piece's cap rise depends on its neighbours even when its reach stays at the cap.
-      const capped = (reach0[i] ?? 0) >= MAX_REACH_M || (reach1[i] ?? 0) >= MAX_REACH_M || p.capRiseM > 0 || p.lod1.capRiseM > 0;
-      if (i < kept && !capped && reach0[i] === p.reachM && reach1[i] === p.lod1.reachM) continue;
-      const settled = settledPiece(this.options.terrain, list, reach0, reach1, i) ?? p;
-      if (i < kept && settled === p) continue;
-      if (i < kept) this.enqueueBox(p);
-      this.pieces.set(p.key, settled);
-      this.enqueueBox(settled);
+    const t = this.options.terrain;
+    const touch = (c: Clearing): void => {
+      if (this.scenery) chunksTouching(t, 0, c, (x, y) => this.enqueue(`${STEP_SCENERY}:${x}:${y}`));
+    };
+    for (const [key, c] of this.clearing) {
+      if (wanted.has(key)) continue;
+      this.clearing.delete(key);
+      touch(c);
+    }
+    for (const [key, make] of wanted) {
+      if (this.clearing.has(key)) continue;
+      const c = make();
+      this.clearing.set(key, c);
+      touch(c);
     }
   }
 
@@ -295,14 +461,18 @@ export class EarthworksView {
     this.queue.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   }
 
-  /** Queues the chunks (and their scenery) a piece's reach meets, at each LOD's reach. */
+  /**
+   * Queues the chunks (and their scenery) a piece's reach meets, at each LOD's reach, grown by BAND_EDGE_RING_M: a
+   * portal's wider band reads every piece within that of its reach (`reachEdgeWeight`), so an edit there can move
+   * ground the piece's own earthworks do not reach.
+   */
   private enqueueBox(piece: EarthworkPiece): void {
     const t = this.options.terrain;
-    chunksTouching(t, 0, piece, (x, y) => {
+    chunksTouching(t, 0, ringed(piece), (x, y) => {
       this.enqueue(`${STEP_LOD0}:${x}:${y}`);
       if (this.scenery) this.enqueue(`${STEP_SCENERY}:${x}:${y}`);
     });
-    chunksTouching(t, 1, piece.lod1, (x, y) => this.enqueue(`${STEP_LOD1}:${x}:${y}`));
+    chunksTouching(t, 1, ringed(piece.lod1), (x, y) => this.enqueue(`${STEP_LOD1}:${x}:${y}`));
   }
 
   private enqueue(key: string): void {
@@ -322,8 +492,10 @@ export class EarthworksView {
     const y = Number(yText);
     const terrain = this.options.terrain;
     if (step === STEP_SCENERY) {
-      const near = piecesTouching(this.pieces.values(), ChunkPass.chunkBox(terrain, 0, x, y));
-      this.scenery?.update(x, y, (px, py) => this.clearsScenery(px, py, near));
+      const box = ChunkPass.chunkBox(terrain, 0, x, y);
+      const near = piecesTouching(this.pieces.values(), box);
+      const clearing = [...this.clearing.values()].filter((c) => !(c.maxX < box.minX || c.minX > box.maxX || c.maxY < box.minY || c.minY > box.maxY));
+      this.scenery?.update(x, y, (px, py) => this.clearsScenery(px, py, near, clearing));
       return;
     }
     const lod: TerrainLod = step === STEP_LOD0 ? 0 : 1;
@@ -350,4 +522,19 @@ export class EarthworksView {
     this.maxFillM = Math.max(this.maxFillM, pass.stats.maxFillM);
     (lod === 0 ? this.heightfield : this.heightfieldLod1).setChunk(pass);
   }
+}
+
+/** Whether two preparations of one piece draw the same: equal reaches, cap rises and clip planes (a tunnel plane's too). */
+/** A reach box grown by BAND_EDGE_RING_M. */
+function ringed(r: { readonly minX: number; readonly minY: number; readonly maxX: number; readonly maxY: number }): { minX: number; minY: number; maxX: number; maxY: number } {
+  return { minX: r.minX - BAND_EDGE_RING_M, minY: r.minY - BAND_EDGE_RING_M, maxX: r.maxX + BAND_EDGE_RING_M, maxY: r.maxY + BAND_EDGE_RING_M };
+}
+
+function sameSettled(a: EarthworkPiece, b: EarthworkPiece): boolean {
+  if (a.reachM !== b.reachM || a.lod1.reachM !== b.lod1.reachM || a.capRiseM !== b.capRiseM || a.lod1.capRiseM !== b.lod1.capRiseM) return false;
+  if (a.planes.length !== b.planes.length) return false;
+  return a.planes.every((p, i) => {
+    const q = b.planes[i];
+    return q !== undefined && p.x === q.x && p.y === q.y && p.tx === q.tx && p.ty === q.ty && p.fixed === q.fixed && p.key === q.key && p.tunnel === q.tunnel && p.zM === q.zM;
+  });
 }

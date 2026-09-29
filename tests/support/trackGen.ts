@@ -17,9 +17,12 @@ import { pick } from "./forall";
 
 /** Small radii dominate: large ones rarely fit a small test map. */
 const RADII: readonly RadiusClassM[] = [60, 60, 60, 90, 90, 120, 180];
-/** Most track is level; some climbs, and one grade-separated level. */
+/**
+ * Most track is level; some climbs, and one grade-separated level, beyond the ±8 m ground band (D4, owner decision
+ * 2026-09-28 "M2"; it was 7 m), so on flat ground it is a bridge under structure auto and `needs-bridge` under ground.
+ */
 const Z_STEPS = [0, 0, 0, 0, 175, -175, 100];
-const LEVELS = [0, 0, 0, 7000];
+const LEVELS = [0, 0, 0, 9000];
 
 export interface MapSize {
   readonly columns: number;

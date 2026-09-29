@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { forAll, shuffled } from "../../../tests/support/forall";
+import { flatTerrain, simOn } from "../../../tests/support/simOn";
 import { type PlanStep, learnKeys, randomPlan, toCommand } from "../../../tests/support/trackGen";
 import { parseKey } from "../geometry/piece";
 import { hashCanonical } from "../util/hash";
-import { type NetworkView, type Result, type Sim, createSim } from "./api";
+import type { NetworkView, Result, Sim } from "./api";
 
 /**
  * Seeded properties over random command sequences (simulation model §17).
@@ -11,11 +12,15 @@ import { type NetworkView, type Result, type Sim, createSim } from "./api";
  * real and missing keys, undo and redo on a 400 × 300 m map, so every D2 rule
  * family rejects some commands. All D2 codes appear except `limit-reached`
  * and `undo-blocked`, which need 5,000 pieces or a loaded history; their
- * negative fixtures cover them.
+ * negative fixtures cover them. Since D4 the map is flat dry ground at 0 m
+ * (until D4 the seeded map "d2-properties", whose ground at 10–40 m the D4
+ * terrain rules would judge the generator's track at 0 m against): the
+ * generator's track lies on it, and its level at 9 m (7 m until the ±8 m
+ * band) is a bridge under structure auto and `needs-bridge` under ground.
  */
 
 const SIZE = { columns: 80, rows: 70 } as const;
-const TERRAIN = { seed: "d2-properties", ...SIZE } as const;
+const TERRAIN = flatTerrain(SIZE.columns, SIZE.rows);
 
 /** The network without its revision: the state a hash should compare. */
 function stateHash(view: NetworkView): string {
@@ -39,8 +44,8 @@ describe("construction properties", () => {
       { seed: "preview-then-execute", runs: 30 },
       (prng) => randomPlan(prng, SIZE, 40),
       (plan) => {
-        const a = createSim({ terrain: TERRAIN });
-        const b = createSim({ terrain: TERRAIN });
+        const a = simOn(TERRAIN);
+        const b = simOn(TERRAIN);
         const knownA: string[] = [];
         const knownB: string[] = [];
         for (const step of plan) {
@@ -68,6 +73,7 @@ describe("construction properties", () => {
       "tracks-too-close",
       "undo-empty",
       "redo-empty",
+      "needs-bridge",
     ]) {
       expect(codes.has(code), code).toBe(true);
     }
@@ -78,8 +84,8 @@ describe("construction properties", () => {
       { seed: "preview-never-mutates", runs: 20 },
       (prng) => ({ plan: randomPlan(prng, SIZE, 30), probes: randomPlan(prng, SIZE, 30) }),
       ({ plan, probes }) => {
-        const a = createSim({ terrain: TERRAIN });
-        const b = createSim({ terrain: TERRAIN });
+        const a = simOn(TERRAIN);
+        const b = simOn(TERRAIN);
         const known: string[] = [];
         plan.forEach((step, i) => {
           const view = a.network();
@@ -112,7 +118,7 @@ describe("construction properties", () => {
       { seed: "undo-redo-roundtrip", runs: 30 },
       (prng) => randomPlan(prng, SIZE, 40),
       (plan) => {
-        const s = createSim({ terrain: TERRAIN });
+        const s = simOn(TERRAIN);
         play(s, plan);
         const end = stateHash(s.network());
         const trail = [end];
@@ -141,20 +147,20 @@ describe("construction properties", () => {
     forAll(
       { seed: "derive-order-commands", runs: 8 },
       (prng) => {
-        const s = createSim({ terrain: TERRAIN });
+        const s = simOn(TERRAIN);
         play(s, randomPlan(prng, SIZE, 40));
         const records = s.network().pieces.map((p) => ({ key: p.key, structure: p.structure }));
         return { records, orders: [shuffled(prng, records), shuffled(prng, records), [...records].reverse()] };
       },
       ({ records, orders }) => {
-        const reference = createSim({ terrain: TERRAIN });
+        const reference = simOn(TERRAIN);
         for (const r of records) {
           const spec = parseKey(r.key);
           if (!spec) throw new Error(`bad key ${r.key}`);
           expect(reference.execute({ type: "build-track", pieces: [spec], structure: r.structure }).ok).toBe(true);
         }
         for (const order of orders) {
-          const s = createSim({ terrain: TERRAIN });
+          const s = simOn(TERRAIN);
           for (const r of order) {
             const spec = parseKey(r.key);
             if (!spec) throw new Error(`bad key ${r.key}`);

@@ -161,22 +161,69 @@ describe("earthworks and terrain bake output (a byte pin)", () => {
       shadingB: fnv([b.normals, b.colors, b.dryColors, b.waterDistance]),
       splat: fnv([splat.splat, splat.field, splat.ao]),
     };
+    // Re-recorded 2026-09-28 for D4 (owner decision "M2"), deliberately: the pinned network changed, not the conform.
+    // The 40 plans are auto-graded under D4's rules, so some pieces are bridges and tunnels the conform leaves alone
+    // (411 ground pieces until D4, when every plan followed the ground and nothing was judged); since M2 the band is
+    // ±8 m and a drag on water starts at the deck height. The bridges near the ground now take a cut
+    // (`cutsUnderDeck`). Checked before re-recording: under the D4 core half's rules (±4 m, no dip at abutments, no
+    // deck start) this code with bridge cuts disabled drew every hash of the merged head c21e941 exactly (299 pieces,
+    // 5,406 refined), so the refactor itself moved no byte; with bridge cuts on, one deck within 0.6 m of the ground
+    // there added 7 refined triangles. The terrain bakes (shading, splat) are unchanged.
+    // Re-recorded again 2026-09-28 (D4 feel-check fixes), deliberately: the chains' earthworks now stop at the plane
+    // through each end where a bridge or a tunnel goes on (`ClipPlane`, a 45° headwall past it), so the approach
+    // cones no longer run under a bridge's first span or into the hill behind a portal. Refined LOD0 triangles
+    // 6,670 → 6,275; the deepest cut and fill 8.49 m and 8.75 m → 8.00 m and 7.86 m (only those cones went past the
+    // ±8 m band); 12 fewer scenery items cleared. Checked before re-recording: with the clip planes disabled, the rule
+    // moved into `core/track/earthworks.ts` drew every hash of 3a4c2f5 exactly (the pieces, reaches and nearest points
+    // are unchanged here too), so moving the rule into the core moved no byte.
+    // Re-recorded again 2026-09-28 (D4 second feel-check fixes), deliberately, the normals and the earthwork attribute
+    // only (the 2nd and 4th hash of each LOD): behind a tunnel portal the attribute's potential and the normals' tilt
+    // now read the core's "ground"-mode conform (the hill the portal retains, which the hill plug draws), so the
+    // shading, the colour weights and the relief's facet fading follow the visible ground at the plug's outline
+    // instead of the underlay's notch under it. Only pieces with a tunnel plane evaluate it, and the modes differ only
+    // past such a plane. The drawn heights keep the underlay: positions, colours, indices, both heightfields, the
+    // reaches, the nearest points, the scenery and the bakes are byte-identical (checked: lod0 normals ef2655d1 →
+    // 17c1cc93 and attribute 778ca5e3 → e8933918, lod1 normals e2453d1e → 0f96eea6 and attribute 4ed5d1ee →
+    // 8dbbfbbb; nothing else moved).
+    // Re-recorded again 2026-09-29 (D4 verification fixes), deliberately, the drawn heights only: inside a bore's
+    // footprint behind a tunnel plane (4.5 m deep and 2.6 m each side of the track, grown by one sub-lattice step) the
+    // underlay stands no higher than the track bed (`boreBedAt`), where its 45° headwall had filled the arch with a
+    // sunlit slope. So the positions (1st hash of each LOD), the attribute's departure (4th), both heightfields, the
+    // sampled surfaces and the deepest drawn cut (8.00 → 9.97 m, under the plug over a bore) moved; the normals, the
+    // colours, the indices, the refined triangles (6,275), the scenery, the reaches, the nearest points and the bakes
+    // did not. Checked before re-recording: with only the clamp disabled, the chunk pass's other change (the "ground"
+    // envelope evaluated only past a tunnel plane, for the rebuild time) drew every hash of 4dd917a exactly.
+    // Re-recorded again 2026-09-29 (D4 portal wedges, owner decision "Round it off"), deliberately: past a tunnel plane
+    // beyond the wing ends the cut is now the fan round the V where the retained skyline meets the section, met with a
+    // smooth maximum, not the 45° headwall; the underlay draws it where it is lower than the headwall; and there the
+    // smooth clamp's band widens to 2.5 m. So the drawn heights, the normals, colours, attribute and indices of both
+    // LODs, both heightfields and the sampled surfaces moved, and 21 more LOD0 triangles are refined (6,275 → 6,296);
+    // the pieces, reaches, nearest points, scenery, the deepest cut and fill and the bakes did not. Checked before
+    // re-recording: with the old envelope restored in the new code path (the band folded, `conformRule`'s band
+    // argument, the chunk pass's band array), every hash of 2ae19ab was drawn exactly; that check found the band first
+    // kept in a Float32Array, whose 0.6000000238 moved every conformed height by float noise, now a Float64Array.
+    // Re-recorded again 2026-09-29 (verification of the D4 portal wedges), deliberately, LOD0's drawn heights only: the
+    // wider band past a tunnel plane gives way within a metre of any piece's reach edge whose cut or fill could change
+    // it (`reachEdgeWeight`), where another track's earthworks ending had stepped the ground by up to 0.175 m. So LOD0's
+    // positions, normals and attribute (1st, 2nd and 4th hash), its heightfield and the sampled surfaces moved (the
+    // pinned network's drawn LOD0 ground at 40 of its 0.625 m samples, by at most 0.022 m); LOD1, the colours, the
+    // indices, the refined triangles, the reaches, the scenery and the bakes did not. Checked before re-recording:
+    // with the weight held at 1, the code path (the foot shared with `envelopeAt`, the pieces a ring wider, the chunks
+    // queued a ring wider) drew every hash of 8c7dca9 exactly.
     expect(hashes).toEqual({
-      pieces: 411,
-      refined: 6458,
-      withEarthworks: 38,
-      cleared: 255,
-      maxCutFill: [4.316668701171871, 6.461734008789062],
-      // Positions, normals, colours and indices as recorded at 81663f8; the earthwork attributes since the PR #83
-      // review's seam corners (both LODs) and converged LOD1 reach (LOD1 only).
-      lod0: "ae0326d8 f61ad335 68f93f83 ef0087f3 172c603b",
-      lod1: "de4c69ec 0b3769cb f7cf5dc0 f0d18e12 3d8f5a3b",
-      heightfield0: "46021029",
-      heightfield1: "9278cb59",
-      reach: "9951e90e",
-      nearest: "f56f9205",
-      clearedFlags: "d62db300",
-      surfaces: "7ff955c6",
+      pieces: 327,
+      refined: 6296,
+      withEarthworks: 37,
+      cleared: 294,
+      maxCutFill: [9.966000366210938, 7.86400032043457],
+      lod0: "4a1b903d 23b6e06b 971b9172 0806040a c89f0516",
+      lod1: "1923d351 777d470c 0ac514e9 0f346ef9 0a7e2fa8",
+      heightfield0: "a9d5f737",
+      heightfield1: "ac60058b",
+      reach: "10a1303f",
+      nearest: "ccf44728",
+      clearedFlags: "4e0c0685",
+      surfaces: "110ddb0e",
       shadingD11a: "ab72930b",
       shadingB: "aed09c41",
       splat: "d14a2fa6",

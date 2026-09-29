@@ -8,12 +8,28 @@
  * layer depends on react and its own store only.
  */
 
-export type HudTool = "select" | "track";
+export type HudTool = "select" | "track" | "straight";
+
+/**
+ * The track-family tools: Track (follows the ground) and Straight line (one steady grade; owner decision
+ * 2026-09-28, "One 'Straight line' tool", which replaced Bridge and Tunnel). Both let the core infer structures.
+ */
+export function isTrackTool(tool: HudTool): tool is "track" | "straight" {
+  return tool === "track" || tool === "straight";
+}
+
+/** The occlusion aids' state (presentation only): H hides decks, U shows the underground x-ray. */
+export interface HudViews {
+  readonly decksHidden: boolean;
+  readonly xray: boolean;
+}
 
 export type HudGradeLevel = "green" | "amber" | "red";
 
 export interface HudTooltip {
   readonly counts: string;
+  /** D4: what the plan builds when it is not all ground ("Structure: bridge"). */
+  readonly structure?: string | null;
   readonly metrics: {
     readonly length: string;
     readonly grade: string;
@@ -21,6 +37,8 @@ export interface HudTooltip {
     readonly minRadius: string;
     readonly endHeight: string;
   } | null;
+  /** D4: "End held 11.2 m below the ground by the 3.5 % limit" when the limit holds a Straight line's end. */
+  readonly held?: string | null;
   readonly note: string | null;
   readonly invalid: { readonly reason: string; readonly fix: string | null } | null;
   readonly precision: string | null;
@@ -42,6 +60,7 @@ export interface HudState {
   readonly status: string;
   readonly canUndo: boolean;
   readonly canRedo: boolean;
+  readonly views: HudViews;
 }
 
 export interface HudStore {
@@ -58,6 +77,7 @@ export const INITIAL_HUD_STATE: HudState = Object.freeze({
   status: "",
   canUndo: false,
   canRedo: false,
+  views: Object.freeze({ decksHidden: false, xray: false }),
 });
 
 export function createHudStore(initial: HudState = INITIAL_HUD_STATE): HudStore {

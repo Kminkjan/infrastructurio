@@ -17,6 +17,8 @@ describe("palette", () => {
       soil: 0xa88f6a, dirtRoad: 0xb8a07a, cobble: 0xa39c90, cobbleDark: 0x8e877b, rock: 0x9a9486,
       // earthworks-lite (2026-09-27, in-house like forestFloor; recorded in art direction)
       earthworkFace: 0x9e8a6c, earthworkBed: 0x7b705e,
+      // structures (D4, 2026-09-28, in-house; recorded in art direction)
+      masonry: 0xa59d8c, masonryDark: 0x857e70, masonryLight: 0xc5bda9, steel: 0x3b4541, tunnelMouth: 0x242520,
       rye: 0xc9b26b, hay: 0xbfb27a, crop: 0x9dae6a, fallow: 0xa38b62,
       ballast: 0x8c8578, ballastShoulder: 0x7a7368, sleeper: 0x5a4636, railTop: 0xb7b3aa, railSide: 0x55524d,
       stucco: 0xe9dfc8, ochre: 0xe3cfa6, blush: 0xd9c3b0, sage: 0xc9d3c5, limeWhite: 0xf1ece0, brick: 0x9c5a44, timber: 0x8a6e55, timberDark: 0x6c5a48,
@@ -26,7 +28,7 @@ describe("palette", () => {
       haze: 0xdcdccb, steam: 0xf4f2ec, steamEnd: 0xcfcac0, smoke: 0xb9b4aa,
       sky: 0xd6e4ec, groundBounce: 0x6b6a4e, sun: 0xffe8c2, latticeLine: 0xf2f0e6,
       uiParchment: 0xf3ede0, uiBorder: 0xd8ccb4, uiInk: 0x3b3a36, signalRed: 0xc8453a, signalGreen: 0x5e9c5a, signalAmber: 0xd9a13b,
-      ghostValid: 0xffffff, ghostInvalid: 0xe0584c, ghostReused: 0x7fd1e8, snap: 0x8fd694,
+      ghostValid: 0xffffff, ghostInvalid: 0xe0584c, ghostReused: 0x7fd1e8, snap: 0x8fd694, xray: 0x9eb6f2,
       block1: 0xf2c94c, block2: 0x4fc3d9, block3: 0xd65db1, block4: 0xf08a4b, block5: 0x8c7ae6, block6: 0xf4f4f4,
     };
     for (const [key, value] of Object.entries(table)) expect(palette[key as keyof typeof palette], key).toBe(value);

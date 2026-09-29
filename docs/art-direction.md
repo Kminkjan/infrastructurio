@@ -108,13 +108,23 @@ above it; signal green and red are the outer bands), so the table now has 71 tok
 `forestFloor`). Chosen in-house, not yet judged at a look gate. The ghost, snap ring, drop
 lines, end-height tags, rejection highlight and undo flash use the existing build-state and
 UI tokens; the HUD reads them as CSS custom properties that `src/app` sets from `palette.ts`
-at start-up (`src/ui` never imports render).
+at start-up (`src/ui` never imports render). **2026-09-28 (the D4 tunnel and portal
+iteration):** `signalAmber` also colours the ghost's held-end drop line and the tooltip's
+held-end marker (the end the 3.5 % limit holds, the grade band's amber); no token was added.
 
 **Earthworks-lite (2026-09-27):** two in-house tokens join the ground group:
 **earthwork face `#9E8A6C`** (`earthworkFace`, cut and fill slopes) and **earthwork bed
 `#7B705E`** (`earthworkBed`, the formation beside the ballast, darker so the ballast reads
 on it). The table now has 73 tokens, 74 with `forestFloor`. They were chosen in-house and
 are not yet judged at a look gate. See [Terrain and water](#terrain-and-water).
+
+**D4 structures (2026-09-28):** six in-house tokens join the table (79 tokens, 80 with
+`forestFloor`), none judged at a look gate. World (muted): **masonry `#A59D8C`**, **masonry
+dark `#857E70`** (soffits, plinths), **masonry light `#C5BDA9`** (dressed stone: copings,
+voussoirs, string courses), **steel `#3B4541`** (trusses and girders, near loco but lighter so
+thin members read) and **tunnel mouth `#242520`** (the dark bore). Information: **x-ray
+`#9EB6F2`** (the underground x-ray and hidden decks' outlines). See
+[Structures (D4 render)](#structures-d4-render-2026-09-28).
 
 | Group | Colours |
 |---|---|
@@ -123,6 +133,7 @@ are not yet judged at a look gate. See [Terrain and water](#terrain-and-water).
 | ground | soil `#A88F6A`, dirt road `#B8A07A`, cobbles `#A39C90`/`#8E877B`, rock `#9A9486`, forest floor `#71704F` (D11a, in-house), earthwork face `#9E8A6C` and bed `#7B705E` (earthworks-lite, in-house) |
 | fields | rye `#C9B26B`, hay `#BFB27A`, crop `#9DAE6A`, fallow `#A38B62` |
 | track | ballast `#8C8578`/`#7A7368`, sleepers `#5A4636`, rail top `#B7B3AA`, sides `#55524D` |
+| structures (D4, in-house) | masonry `#A59D8C`, dark `#857E70`, light `#C5BDA9`; steel `#3B4541`; tunnel mouth `#242520` |
 | walls | stucco `#E9DFC8`, ochre `#E3CFA6`, blush `#D9C3B0`, sage `#C9D3C5`, lime white `#F1ECE0`, brick `#9C5A44`, timber `#8A6E55`/`#6C5A48` |
 | roofs | tile `#C0643F`/`#B45A3A`/`#CD7650`, slate `#5E6166`, shingle `#7D6B5A` |
 | water | `#6F9AA0`, deep `#4D7A84`, foam `#D8E3DC` |
@@ -130,7 +141,7 @@ are not yet judged at a look gate. See [Terrain and water](#terrain-and-water).
 | air | haze `#DCDCCB`, steam `#F4F2EC` → `#CFCAC0`, smoke `#B9B4AA` |
 | light and grid | sky `#D6E4EC`, ground bounce `#6B6A4E`, sun `#FFE8C2`, lattice line `#F2F0E6` |
 | UI | parchment `#F3EDE0`, border `#D8CCB4`, ink `#3B3A36`, brass `#B08D57`, signal red `#C8453A`, green `#5E9C5A`, amber `#D9A13B` (D3) |
-| build states | ghost valid `#FFFFFF`, invalid `#E0584C` (dashed), reused `#7FD1E8`, snap `#8FD694` |
+| build states | ghost valid `#FFFFFF`, invalid `#E0584C` (dashed), reused `#7FD1E8`, snap `#8FD694`, x-ray `#9EB6F2` (D4, in-house) |
 | block overlay | `#F2C94C`, `#4FC3D9`, `#D65DB1`, `#F08A4B`, `#8C7AE6`, `#F4F4F4`, plus a colour-blind-safe set; one-way blocks always get chevrons |
 
 - **World groups** (grass through air) are muted. **Information groups** (build states,
@@ -304,8 +315,9 @@ and arcs of the `NetworkView` render prims. Curves are sampled through
 
 ## Structures
 
-Where a piece's structure is bridge (it sits more than 4 m above terrain, or crosses water),
-choose the type per span, first match wins:
+Where a piece's structure is bridge (it sits more than 8 m above terrain since the owner
+decision 2026-09-28 "M2", 4 m before, or crosses water), choose the type per span, first match
+wins:
 
 1. over water → **steel Warren truss**;
 2. clear span over 30 m → **steel Warren truss**;
@@ -462,6 +474,14 @@ true bogies.
   plan under the natural ground show only through the 0.2 see-through pass until the plan
   is built, and then the terrain is cut under them. On the diorama that is 25% of
   zero-step curve ribbon samples, and 0.3% of straight ones.
+- **Held end (2026-09-28, owner decision "Keep the limit, show it"; look not judged):** when
+  the 3.5 % limit holds a Straight line's end off the ground, the ghost draws a 1 px line in
+  `signalAmber` from the end straight up or down to the drawn ground, with a bar across the
+  track there, see-through at 0.85 and depth-tested at 0.95, so a buried end reads through the
+  hill; the tooltip's held-end line carries a small amber bar, and its text says the same
+  (colour is not the only signal). Since then the ghost's end-height tags and drop-line
+  stations also read each piece in travel order: on a drag west or south they stood at the
+  inner ends of the end pieces ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-tunnel-and-portal-iteration)).
 - Recommended: give ribbons a minimum screen width so blocks still read at Region and Far.
   D7 sets the value.
 
@@ -657,9 +677,9 @@ slice named.
 | Item | Owner slice |
 |---|---|
 | Shadow radius per preset: 3 (recipe) vs 2 (Medium) | D11b |
-| Masonry and structural-steel palette tokens; bridge type over land above 20 m | D4 |
+| Masonry and structural-steel palette tokens; bridge type over land above 20 m (2026-09-28: set in code by D4's render half, truss on masonry piers; not judged, see [Structures (D4 render)](#structures-d4-render-2026-09-28)) | D4 |
 | A palette token for the chain signal's partial aspect; the dot → arm switch-over ppm; the colour-blind overlay values; the minimum ribbon width | D7 |
-| Scenery clearing along track corridors (a default since earthworks-lite, 2026-09-27: 5 m, see [Trees and scenery](#trees-and-scenery); buildings still unhandled) | D3/D4 |
+| Scenery clearing along track corridors (a default since earthworks-lite, 2026-09-27: 5 m, see [Trees and scenery](#trees-and-scenery); buildings still unhandled; 2026-09-28: bridges clear the same 5 m, portals 9 m) | D3/D4 |
 | Moiré check on sleepers at Default (blocked until D3 track exists; the per-tree budget was set in D11a: 60–120 / 24–30) | D11a |
 | Chimney smoke and shore foam (deferred in D11a: smoke anchors exist, nothing is drawn yet) | D11b (proposed) |
 | The sun's screen direction: D1's sun casts shadows right and slightly up the screen, while this page says lower right | Look Gate A (owner) |
@@ -935,3 +955,307 @@ legibility; the mid laptop, real DPR 2 and the Low preset. The soft patch edges 
 look `b`; their contrast is low (8% and 7%), and the tufts and relief carry the crispness.
 Whether cut faces should show earth at all, and whether embankment tops should show a shoulder,
 are open to the owner.
+
+## Structures (D4 render, 2026-09-28)
+
+**Status (2026-09-28, agent):** the render half of D4
+([#68](https://github.com/Kminkjan/infrastructurio/issues/68)), built on branch
+`codex/d4-structures-render` from `81779af`, code at `b26dda5`. **Not judged:** the owner reads
+it, and nothing here is a Look Gate result. The [Structures](#structures) section above stays
+as written; this records how the code builds it. Code:
+[`render/structures/`](../src/render/structures/) (the rule in `layout.ts`, the forms in
+`assets.ts`, the plug in `plug.ts`, the view in `StructureView.ts`).
+
+**The choice rule** (render only: the core stores only that a piece is a bridge or a tunnel).
+A bridge run is a maximal chain of bridge pieces along a section. Along it the renderer samples
+the ground, the drawn water and the other tracks passing more than 2 m under the deck, then:
+- **Supports:** an abutment at each end (a tunnel's portal where the run enters one); piers
+  first where obstacles end (just outside each stretch where other tracks forbid them, on dry
+  ground at each bank, and where the deck crosses 20 m above the ground), then evenly between:
+  spans near 12 m (8–16 m) over land up to 20 m high, near 40 m above it, one truss over water
+  up to 80 m (else river piers with cutwaters), one clear span wherever tracks cross.
+- **Piers never stand on other tracks or in their clearance:** no point of a pier's footprint
+  (1.8 × 6.5 m, plus 1.3 m cutwaters in water) comes within 3 m in plan of another track's
+  centreline (a property test over 150 random crossings).
+- **Span type,** first match wins, as above: over water a steel Warren truss; a clear span over
+  30 m a truss; over another track a plate girder; **over land more than 20 m high a truss on
+  masonry piers (D4 settles this open item)**; otherwise a stone arch viaduct, semicircular where
+  it fits, segmental where the deck is low, a solid wall within about a metre of the ground. A
+  truss span under 25 m merges into a neighbouring truss while the result stays within 80 m, so
+  a river valley reads as viaduct approaches with one long truss.
+
+**Forms** (generic 1900 Russian-Empire Baltic railway types, simplified; nothing from another
+game): arches with a 0.55 m voussoir ring of alternating dressed and plain stones and a
+keystone, spandrel walls, coped parapets and a string course; a through Warren truss (depth
+span/6, 6.2–9 m) with inclined end posts, top struts, X bracing and portal struts; a through
+plate girder (1.9–2.6 m deep) with flanges and stiffeners; battered piers (1 : 24) with a
+plinth, an impost cap and string courses on tall ones; abutments with newel posts and quoins; a
+portal with an arched face, pilasters, cornice, parapet and keystone, wing walls whose coping
+falls at 1 : 1.5 until it meets the ground in front, and a dark bore 4.5 m deep with the rails
+running in. Each part is an `AssetRegistry` kind (`bridge-arch`, `bridge-truss`,
+`bridge-girder`, `bridge-pier`, `bridge-abutment`, `tunnel-portal`) with walls, trim and metal
+slots, a footprint and a budget; spans are bent along the run, so curved viaducts follow the
+track. One mesh per run in the shared `built` material.
+
+**Tunnels.** Track inside a tunnel is not drawn. Each end that meets daylight (ground, a bridge,
+or a buffer under less than 12 m of ground) gets a portal and a **hill plug**: ground in the
+terrain's own material behind the face that fills the approach cutting's rounded end up to a
+1 : 1.5 slope from the face top, raises a ridge-shaped mound over a shallow bore, and never lies
+below the drawn ground, so the hill reads as closed over the bore.
+
+**Occlusion aids and construction feedback.** H hides every bridge (structure and track) and
+draws dashed x-ray outlines of the hidden decks; U draws the tunnels through the ground as
+see-through x-ray ribbons with dashed bore outlines; C steps through the stacked picks under the
+pointer (the front level, what lies behind it, then the ground). A chip over the toolbar names
+the aids in effect. The ghost adds structure marks in its own colour (solid deck edges at ±3 m
+for a bridge, dashed bore edges at ±2.6 m for a tunnel), and the tooltip adds a structure line
+("Structure: bridge", or counts when a plan mixes). Rest views are unchanged.
+
+**Earthworks, skirts, scenery.** Bridges and tunnels are never conformed (tested). *Since the
+owner decision 2026-09-28 "M2" (a deck may sit 2 m into the bank near an abutment), a bridge
+the natural ground comes near takes a cut down to its deck, never a fill, and a portal's plug
+reaches as far as the relief around it needs, up to half-way to the other portal
+([ADR 0010 M2 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-thresholds-m2)).*
+Ground track
+gets **ballast skirts**: the shoulders run on at their own slope to 2.92 m out and 0.62 m under
+the track height, inside the 3 m formation, so they show only where the drawn ground falls away
+from the ballast (with `?earthworks=0`, on the natural leave-alone band, at the far LOD, at a
+structure's end). Trees and props clear within 5 m of a bridge's centreline and 9 m of a portal.
+
+**Agent observations** (headless Chrome through Playwright, 1280 × 800 at DPR 1, Apple M5 Pro,
+ANGLE Metal; `CAPTURE=1 npx playwright test --project=capture structures`, images in the
+gitignored `test-results/structures/after/`; the decks and the tunnel were laid through the dev
+hook's sim, since the D3 planner lays nodes on the ground; these are agent notes, not a look
+verdict):
+- **Viaduct** (`viaduct-close`, `-default`, `-region`, `-close-yaw1`): 21 arch spans of about
+  12 m across the valley by the lake (deck 27 m over a 10.7 m floor), piers with a mid-height
+  string course, a solid first span and flattened last spans near the ground, newel posts at the
+  ends. At Region it reads as a row of arches.
+- **Girder** (`girder-close`, `-default`): a 14.9 m plate girder where a valley-side track passes
+  under, on piers raised to the steel seat either side.
+- **Truss** (`truss-close`, `-default`, `-region`): the river valley bridge (deck 21.9 m over the
+  water) as three arches, one 65.5 m truss on bank piers, and two arches; its shadow reads on the
+  water.
+- **Portals** (`portal-west-close`, `-zoom`, `-close-yaw2`, `portal-east-close`, `-zoom`,
+  `-close-yaw3`): the arched face, wings and dark bore with the rails running in; the plug reads
+  as the hillside over the deep west portal and as a grassed ridge over the shallow east one.
+- **Aids and ghosts** (`aid-h-default`, `aid-u-mid`, `aid-u-default`, `ghost-bridge-default`,
+  `ghost-tunnel-default`): the dashed hidden-deck outline over the track below, the tunnel
+  ribbon through the hill, and the ghosts' deck and bore marks.
+- **Defects seen, not fixed:** the approach embankment's rounded end (the abutment cone) runs far
+  down a steep valley side at a bridge end (the river bridge's north end); seen from behind, a
+  shallow portal's plug still shows a faint ragged shading line where its flank meets the
+  approach cutting; the Warren truss's members alias to faint lines at Region.
+- No page errors or warnings.
+
+**Frame cost** (agent development readings on the machine above; never cite them against the
+[acceptance gates](evidence/m4/2026-09-26-acceptance-gates.md)). Mean ms per frame over 60
+back-to-back renders closed by a one-pixel `readPixels` after 120 warm-up renders, reduced
+motion, two runs each, the same scene with and without structures (`?structures=0`):
+
+| View | Without | With | Draw calls | Triangles |
+|---|---|---|---|---|
+| Viaduct, Default | 0.532–0.540 | 0.535–0.555 | 89 → 94 | 773k → 790k |
+| River bridge, Default | 0.677 | 0.672–0.673 | 78 → 80 | 1,165k → 1,171k |
+| Tunnel, Default | 0.623–0.633 | 0.622–0.625 | 80 → 87 | 905k → 924k |
+| Viaduct, Region | 0.725–0.733 | 0.730–0.743 | 133 → 142 | 644k → 664k |
+
+Rebuilds (Node, `StructureView.test.ts`, three runs, five builds per site): the 54-piece
+viaduct 2.9–3.6 ms median (12–13 ms cold), the 27-piece river bridge 1.1–1.3 ms, the 49-piece
+tunnel 6.8–7.2 ms (mostly its two plugs), a 10-piece bridge edit 0.5–0.6 ms median, p95
+0.8–1.6 ms. A run builds whole within one slice, so a cold long run can overrun the 8 ms slice.
+The initial JS is 308.02 kB gzip.
+
+**Open (not established here):** how the owner reads any of it (Look Gates A and B);
+legibility; the mid laptop, real DPR 2 and the Low preset; LOD1 forms for the far band (the
+registry returns LOD0's). Whether a mound over a shallow portal or a deeper portal should be the
+answer is the core lane's (auto structures keep tunnel ends near 4 m of cover).
+
+## Portals, plugs and approaches: feel-check fixes (2026-09-28)
+
+> Scope note (2026-09-28, the D4 tunnel and portal iteration): the plug and wing descriptions
+> below are superseded by
+> [the second feel-check fixes](#portals-plugs-and-approaches-second-feel-check-fixes-2026-09-28):
+> the plug now shows the hill the core retains behind the face plus a compact backfill, and the
+> wings are splayed. The approach cuttings' 45° end at the structure stands.
+
+**Status (2026-09-28, agent):** built on branch `codex/d4-structures` (draft PR
+[#84](https://github.com/Kminkjan/infrastructurio/pull/84)). **Not judged:** the owner reads it,
+and nothing here is a Look Gate result. The [Structures (D4 render)](#structures-d4-render-2026-09-28)
+section stays as written; this supersedes its plug and wing descriptions. The trigger was the
+owner's feel check of this build ("Not yet": "Too many red drags", "Structures look off"); the
+numbers and the root cause are in the
+[ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-feel-check-fixes).
+
+- **Approach cuttings and embankments end at the structure.** A ground chain's earthworks stop
+  at the plane through the node where a tunnel or bridge goes on, rising (a cut) or falling (a
+  fill) at 45° behind it: the cutting ends at the portal face and the embankment at the
+  abutment. Until then each piece's rounded end ran on under the bridge's first span (the
+  abutment cone) or cut a bowl into the hill behind the portal.
+- **The hill plug is only a mound over the bore.** It stands where the drawn ground behind the
+  face is lower than the face top, flat over the bore's drawn depth and falling at 1 : 1.5 to
+  1 : 2 at its sides and 1 : 3 behind, smooth-maxed with the drawn ground over 0.6 m. It fades
+  into the drawn ground at the edges of its region, so its outline meets the terrain within its
+  4 cm lift. It stays under every other track's cut envelope, so it never covers a neighbour's
+  formation or rails, and it never reads the natural hill: the D4 plug refilled a neighbour's
+  cutting from it, drawing a raised block with open, sawtoothed edges and a long shadow. A deep
+  portal, whose hill already stands over the face, draws no plug.
+- **Wing walls fit the portal's own cutting.** Each wing runs out until its 1 : 1.5 coping meets
+  the approach's section in front of the face (or higher drawn ground), never down into a lower
+  neighbour's cutting, and stops 0.5 m short of any other track's formation.
+- **Palette.** No token changed. The earthwork colours (grassed banks, earth only on the lower
+  batter of cuts deeper than about 1.5 m) are the render pass iteration's, unchanged in code
+  since `main` (checked); the deeper D4 cuttings show more of that lower batter.
+
+**Agent observations** (headless Chrome through Playwright, 1280 × 800, Apple M5 Pro, ANGLE
+Metal; `CAPTURE=1 npx playwright test --project=capture tests/e2e/d4fix.capture.ts`, images in
+the gitignored `test-results/d4-fix/after/`, the owner's scene before the fix in
+`test-results/d4-fix/before/`; notes, not a look verdict):
+- **The owner's scene** (`owner-*`): the drag beside the hill curve is a second cutting parallel
+  to the curve's, with no portal, no plug and the lattice lines continuous. Before, it showed a
+  portal on the curve's cutting floor, a plug block with open edges over the curve's track, a
+  long shadow and oversized wings at the far portal.
+- **A tunnel through the open hill east of the curve** (`straight-tunnel-*`, one Straight line
+  drag): each portal stands at the end of its cutting with the wings on the cutting walls and
+  a grassed mound rising behind to the hill. With a 2 : 1 headwall, tried first, the crest
+  behind the wings drew a sawtooth; at 45° a faint step remains at one wing's far end.
+- **A neighbour's cutting 10 m beside the portals** (`neighbour-*`): the neighbour's formation
+  stays clear, the wings on that side stop short of it, and the mound meets its cutting slope.
+- **The lake** (`straight-lake-*`, one Straight line drag from the north shore): a truss over
+  the water on a stone approach viaduct, ground beyond.
+- **The D4 scenes** (`test-results/d4/d4fix/`, `tests/e2e/d4.capture.ts`): unchanged apart
+  from the river bridge's north end, where the approach embankment's grassy spit under the
+  first span is gone.
+- No page errors or warnings.
+
+**Open (not established here):** how the owner reads any of it; Look Gates A and B; whether
+cut faces should show earth at all (open since the render pass iteration); a headwall that
+rounds its crest at any steepness.
+
+## Portals, plugs and approaches: second feel-check fixes (2026-09-28)
+
+> Scope note (2026-09-29): beyond the wing ends the approach cutting no longer ends in the 45°
+> headwall described here; see [the wedges rounded](#portals-the-wedges-rounded-2026-09-29).
+
+**Status (2026-09-29, agent):** built on branch `codex/d4-structures` (draft PR
+[#84](https://github.com/Kminkjan/infrastructurio/pull/84)), render code at `31917c8`, core at
+`ec9d225`. **Not judged:** the owner reads it, and nothing here is a Look Gate result. The
+trigger was the owner's second feel check of D4 ("Not yet": "Earthworks/terrain look off",
+"Straight line tool odd", and two screenshots, a thin portal wall seen edge-on and two portals
+facing each other under flat ground). The owner's four answers are quoted verbatim, and the
+diagnosis and numbers are recorded, in the [ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-tunnel-and-portal-iteration). The principle, the diagnosis': behind a portal
+the ground is the real hill, masonry holds it back, and nothing stands above the hill except
+what keeps the arch covered.
+
+- **Fewer, deeper tunnels** (answer "Needs 10 m somewhere"). A tunnel run must lie at least
+  10 m under the ground somewhere; shallower runs stay cuttings, up to 10 m deep. The two
+  screenshot scenes are one continuous cutting each now: no facing portals under a flat crest.
+- **The hill stays behind the face.** The core's effective ground keeps the natural hill behind
+  a portal (retained 0.25 m over the 7.4 m face top, falling 1 : 1.5 at the wings), where the
+  approach cutting's 45° headwall used to carve a 3–5 m pit. The terrain mesh keeps that
+  headwall as an underlay (a 1.25 m mesh cannot draw a 7.65 m step at the face without grass
+  wedges in front of it), but is shaded as the ground shown over it.
+- **The plug is the shown ground.** It draws the retained hill and the compact backfill over
+  the underlay, only where it rises, with no fade band and no rectangle, clipped to the face and
+  wing fronts; where it lies on the terrain it takes the terrain's own normals, colours and
+  facets, so it reads as the hillside. That removed the smooth dark slab (the "smudge"), the
+  crown ridge with its lit and dark wedges, and the bore lining showing on short tunnels.
+- **Compact backfill** (answer "Compact backfill"). Where the hill is lower than the face, the
+  fill reaches the face top across the face and 1 m behind it, keeps a 0.7 m ridge over the
+  bore so the arch stays covered, stands behind each wing at that wing's own coping, and falls
+  1 : 1.5 to the real hill; it never stands above its own wing's coping. Beyond a wing's end
+  pier, where no masonry holds it, it meets the ground as a 45° bank (an agent choice: at
+  1 : 1.5 the bank chased the falling ground on side slopes and needed a 15 m wing).
+- **Splayed wing walls** (answer "Splayed wing walls"). Each wing turns 30° toward the
+  approach, so a portal on an east–west line shows masonry at 4 of the 6 yaws instead of 2.
+  A wing stops where the hill it retains stands less than 0.3 m over the ground in front
+  (wings p50 6.5 m, p90 6.5 m, longest 9.3 m; before, up to 21.5 m); its foot never
+  rises within 2.5 m of its coping, so no panel is drawn inside out and the end pier is never
+  a post. Where a 1 : 1.5 wing could not back a low face on a downhill side, the wing is steep:
+  its coping falls at 45° until it meets the ground (an agent choice, not asked for). The face,
+  cornice and wings have back faces, so a wall standing proud of the ground behind reads solid.
+- **No buried buffer portals.** A dead end gets a portal only within the core's 8 m band of
+  cover; the renderer's 12 m rule, which opened portals under up to 12 m of hill, is gone.
+  Trees on the retained hill stay (scenery clearing reads the shown ground).
+- **Palette.** No token changed.
+
+**Agent observations** (headless Chrome through Playwright, 1280 × 800, Apple M5 Pro, ANGLE
+Metal; `CAPTURE=1 npx playwright test --project=capture tests/e2e/d4portals.capture.ts`,
+images in the gitignored `test-results/d4-iter3/`, `before/` from `41f6a4b`, `after6/` final,
+taken by the render lane on 2026-09-29; notes, not a look verdict):
+- **s208 and s231** (the screenshot scenes): one continuous cutting each, from the 10 m rule.
+- **The east–west portal at (267, 129):** at the edge-on yaws 0 and 3 a masonry panel shows
+  where there was a line or a post; the wings are 6.5 and 5.3 m; the hill behind is continuous
+  grass, with no brown patch or corner gap.
+- **A side-slope portal at (245, 132):** short splayed wings instead of a thin wall with a long
+  wing and a smudge.
+- **A low portal at (184, 149):** a steep 8 m downhill wing following its bank and a 6.5 m
+  uphill wing; no sawtooth at Detail, but a raised grassy bank remains at the downhill corner
+  (the bank the answer foresaw).
+- **A low portal at (203, 145):** a textured bank behind the face where there was a dark
+  smooth rectangle.
+- **The dead end (220, 140) → (236, 140):** one portal. **The Track curve (208, 146) →
+  (228, 152):** all ground now.
+- **The held end** (a scratch Playwright run, 2026-09-29, images in the gitignored
+  `test-results/d4-tools/`): on scene B the amber line runs from the buried end up to the snap
+  ring on the ground, and on the reverse drag down from the raised end, with the end tag
+  reading the tooltip's +11.2 m.
+
+**Open (not established here):** how the owner reads any of it; Look Gates A and B; the
+render-only fill (behind low faces and splayed wings) that the core does not see, so a drag
+can start up to about 4 m under it; the steep wings and the 45° bank beyond the end piers;
+wings longer than the answer's "~4–6 m"; a short two-portal tunnel in the browser (none is
+left under 40 m in the populations); the cut-off rest of the owner's message.
+
+## Portals: the wedges rounded (2026-09-29)
+
+**Status (2026-09-29, agent):** built on branch `codex/d4-structures` (draft PR
+[#84](https://github.com/Kminkjan/infrastructurio/pull/84)). **Not judged:** the owner reads it,
+and nothing here is a Look Gate result. The trigger was the owner's answer after the
+verification of the second feel-check fixes, "Round it off": "Continue the retained hill's gentle
+1:1.5 fall past the wing-wall ends and round the crease smoothly (core ground rule + plug), so
+the cutting blends into the hill with no lit wedge or teeth." The answer, the diagnosis, the
+variants tried and the numbers are in the
+[ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-29-d4-portal-wedges-rounded).
+
+- **The cutting's end is rounded.** Beyond a portal's wing ends the approach cutting used to end
+  in a planar 45° headwall: a parallelogram lit at some yaws and dark at others, meeting the
+  retained hill's 45° trim in a sharp V and the cutting's slope along the portal plane. It is now
+  a fan round the wing end: it leaves the cutting's side slope at the plane with the same slope,
+  rises 45° beside the retained hill, so no tongue of hill runs on past the wings, and rounds
+  between, like the rounded end of a cutting at a buffer. The V is a rounded valley, and where
+  the fan meets the natural hill the edge is rounded over about 4 m instead of about 1 m.
+- **The retained hill stays.** Behind the face and the wings the hill is kept as before: the
+  natural hill, trimmed 45° above the masonry's skyline where it stands higher. That trim is still
+  a steep slope, so where the hill stands high over the wings it still reads lit or dark at some
+  yaws, now as a rounded shoulder rather than a triangle.
+- **No teeth behind the masonry.** The sawtooth that ran down the hill side of a face and its
+  wings was the plug's shading: the first two rows of its 1.25 m triangles leaned up to 67°
+  toward the face, because their normals read the ground inside and in front of the wall, and
+  the edge of that band followed the lattice. Behind the masonry the plug's normals now read the
+  plug's own side only.
+- **Unchanged:** the masonry, the splayed wings, the compact backfill and its 45° bank beyond
+  the wing ends at low portals, the dark bore, and the palette (no token changed).
+
+**Agent observations** (headless Chrome through Playwright, 1280 × 800, Apple M5 Pro, ANGLE
+Metal; the scenes of the 2026-09-29 verification, laid with the real pointer and shot in Select;
+`CAPTURE=1 npx playwright test --project=capture tests/e2e/d4wedges.capture.ts`, images in the
+gitignored `test-results/d4-wedges/`, `before/` at `2ae19ab`, `after/` final; notes, not a look
+verdict):
+- **ew75 west, Close yaw 4** (the lit triangle left of the portal): a rounded lit shoulder where
+  the sharp triangle stood, and a soft shadow beside it instead of the dark parallelogram.
+- **ew75 east, Detail yaw 3** (the teeth): a smooth shade behind the face and the wing where
+  about eight teeth ran; two small steps at the top of the lit band remain, as before.
+- **short40, Close yaw 4** (the owner's facing-portal layout): at the south portal the lit
+  parallelogram over the face and the dark triangle beside its lower wing are soft shades now,
+  the one over the face darker than before (the retained trim there faces away from the sun);
+  at the north portal the thin crease from the face's corner is a soft fold.
+- **The dead end and ew75 west at the rest view (yaw 0):** the thin dark crease from the face's
+  hill-side top corner is a broad soft fold, with faint streaks in it.
+- **low2, low3 and xslope:** the same rounding; no pit, ridge, seam or grass in the bore seen.
+
+**Open (not established here):** how the owner reads any of it; Look Gates A and B; the retained
+45° trim behind the wings, which still shows lit or dark where the hill stands high; the faint
+streaks in the rest-view fold; the 45° bank beyond the end piers at low portals; the owner's
+words taken literally (the retained hill's fall continued past the wings), which the agents
+tried and did not build because it grew the lit trim into a tongue (see the ADR finding).

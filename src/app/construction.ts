@@ -1,6 +1,6 @@
 import { Vector3 } from "three";
 import type { Command, Diff, Drag, NodeRef, Result, Sim, Terrain, TrackPlan } from "../core/sim/api";
-import { groundMmAt, toWorld } from "../core/sim/api";
+import { toWorld, waterDeckMm } from "../core/sim/api";
 import type { CameraController } from "../render/camera/CameraController";
 import type { IsoCamera } from "../render/camera/IsoCamera";
 import { worldToScreen } from "../render/camera/isoMath";
@@ -12,8 +12,8 @@ import type { FlashView, GhostView, HighlightView } from "../render/track/GhostV
 import type { SnapRing } from "../render/track/SnapRing";
 import { type PreviewMemo, createPreviewMemo } from "../tools/previewMemo";
 import { type TrackToolState, initialTrackState, reduceTrackTool } from "../tools/trackTool";
-import type { ToolCtx, ToolEffect, ToolEvent, ToolSettings, TooltipModel } from "../tools/types";
-import type { HudStore, HudTool } from "../ui/store";
+import type { ToolCtx, ToolEffect, ToolEvent, ToolSettings, TooltipModel, TrackMode } from "../tools/types";
+import { type HudStore, type HudTool, isTrackTool } from "../ui/store";
 
 /**
  * The construction side of the composition root: the active tool's state,
@@ -32,6 +32,20 @@ const CURSOR_MARGIN_PX = 80;
 /** How long a toast stays in the store (its CSS fade lasts as long). */
 const TOAST_MS = 2600;
 const PREVIEW_SAMPLES = 512;
+
+/**
+ * How each track-family tool lays heights (architecture "Tools"; owner decision 2026-09-28, "One 'Straight line'
+ * tool", which replaced Bridge and Tunnel): Track follows the ground, Straight line lays one steady grade.
+ */
+export function trackModeOf(tool: "track" | "straight"): TrackMode {
+  return tool === "track" ? "follow" : "straight";
+}
+
+const ACTIVATION: Readonly<Record<"track" | "straight", string>> = {
+  track: "Track tool. Drag to lay track, or click to start and click again to lay it. Arrow keys move a cursor; Enter starts and lays. Esc steps back.",
+  straight:
+    "Straight line tool. Drag to lay one steady grade from start to end, whatever the ground does: bridges over valleys and water and tunnels through hills, as needed. [ ] raise or lower the end. H hides decks, U shows tunnels. Esc steps back.",
+};
 
 export interface ConstructionDeps {
   readonly sim: Sim;
@@ -112,10 +126,13 @@ export class Construction {
 
   /**
    * The ground the track tool starts, ends and measures heights from: the
-   * planner's own (`groundMmAt`, the terrain or the water surface over a
-   * lower bed), so a plan's ends agree with its ground-following inner nodes.
+   * planner's own, the sim's effective ground (`sim.groundMm`: the terrain as
+   * the track's earthworks shape it, or the water surface over a lower bed;
+   * D4 feel-check fixes, 2026-09-28), so a free node on a cutting's floor
+   * starts on that floor and a plan's ends agree with its inner nodes.
    */
-  groundZmm = (q: number, r: number): number | undefined => groundMmAt(this.d.terrain, { q, r });
+  groundZmm = (q: number, r: number): number | undefined => this.d.sim.groundMm(q, r);
+  waterDeckZmm = (q: number, r: number): number | undefined => waterDeckMm(this.d.terrain, { q, r });
 
   previewStats(): PreviewStats {
     const n = this.samples.copyTo(this.scratch);
@@ -136,25 +153,30 @@ export class Construction {
 
   selectTool(tool: HudTool): void {
     if (tool === this.tool) return;
-    // Deactivate while the track tool is still the active one, so its clearing effects apply.
-    if (this.tool === "track") this.dispatch({ type: "deactivate" });
+    // Deactivate while the old track-family tool is still the active one, so its clearing effects apply.
+    if (isTrackTool(this.tool)) this.dispatch({ type: "deactivate" });
     this.tool = tool;
     this.d.store.set({ tool });
-    this.d.lattice.setBuildMode(tool === "track");
-    this.d.canvas.style.cursor = tool === "track" ? "crosshair" : "";
-    if (tool === "track") {
-      this.dispatch({ type: "activate" });
+    this.d.lattice.setBuildMode(isTrackTool(tool));
+    this.d.canvas.style.cursor = isTrackTool(tool) ? "crosshair" : "";
+    if (isTrackTool(tool)) {
+      this.dispatch({ type: "activate", mode: trackModeOf(tool) });
       if (this.d.precisionHeld()) this.dispatch({ type: "precision", held: true });
-      this.announce("Track tool. Drag to lay track, or click to start and click again to lay it. Arrow keys move a cursor; Enter starts and lays. Esc steps back.");
+      this.announce(ACTIVATION[tool]);
     } else {
       this.announce("Select.");
     }
     this.d.requestFrame("overlay");
   }
 
+  /** Whether a track-family tool (Track, Straight line) is active. */
+  get trackToolActive(): boolean {
+    return isTrackTool(this.tool);
+  }
+
   /** Feeds one event to the active tool and interprets its effects; events raised meanwhile queue behind it. */
   dispatch(event: ToolEvent): void {
-    if (this.tool !== "track") return;
+    if (!isTrackTool(this.tool)) return;
     this.queue.push(event);
     if (this.dispatching) return;
     this.dispatching = true;
@@ -213,6 +235,7 @@ export class Construction {
       planTrack: this.timedPlan,
       preview: this.memo.preview,
       groundZmm: this.groundZmm,
+      waterDeckZmm: this.waterDeckZmm,
       settings: this.settings,
     };
   }
@@ -319,7 +342,8 @@ export class Construction {
     this.d.hud.style.setProperty("--hud-pointer-y", `${Math.round(rect.top + y)}px`);
   }
 
-  private announce(text: string): void {
+  /** Sets the aria-live status line (the app announces the occlusion aids through it too). */
+  announce(text: string): void {
     this.d.store.set({ status: text });
   }
 

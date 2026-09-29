@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { MeshLambertMaterial, ShaderLib } from "three";
+import { BufferAttribute, BufferGeometry, MeshLambertMaterial, ShaderLib } from "three";
+import { windingMismatches } from "../../../tests/support/geometry";
 import { type PieceSpec, resolvePiece } from "../../core/sim/api";
 import { createArtUniforms, createTrackMaterials } from "../art/materials";
 import type { ShaderSource } from "../art/shaderChunks/chunk";
@@ -15,6 +16,8 @@ import {
   SLEEPER_HEIGHT_M,
   SLEEPER_LENGTH_M,
   SLEEPER_WIDTH_M,
+  SKIRT_DEPTH_M,
+  SKIRT_HALF_M,
   TRACK_LIFT_M,
   TRACK_RAIL_TOP_M,
   type TrackCentreline,
@@ -232,5 +235,36 @@ describe("track LOD and materials", () => {
     expect(shader.fragmentShader).toContain("uTrackStripe * step( 0.5, vTrackStripe )");
     expect(m.all.every((x) => x instanceof MeshLambertMaterial && x.vertexColors)).toBe(true);
     m.dispose();
+  });
+});
+
+describe("ballast skirts", () => {
+  it("run the shoulders on at their own slope to 2.92 m out and 0.62 m under the track height, inside the 3 m formation", () => {
+    const c = { prims: [{ kind: "line", x0: 0, y0: 0, x1: 5, y1: 0 }] as const, z0M: 10, z1M: 10 };
+    const plain = buildTrackMeshes(c);
+    const skirted = buildTrackMeshes(c, { skirts: true });
+    // Two more strips of two triangles per chord: one chord on a straight.
+    expect(skirted.ballast.indexCount - plain.ballast.indexCount).toBe(2 * 2 * 3);
+    const p = skirted.ballast.positions;
+    let minY = Infinity;
+    let maxZ = -Infinity;
+    for (let i = 0; i < p.length; i += 3) {
+      minY = Math.min(minY, p[i + 1] ?? 0);
+      maxZ = Math.max(maxZ, Math.abs(p[i + 2] ?? 0));
+    }
+    expect(SKIRT_HALF_M).toBeCloseTo(2.92, 9);
+    expect(minY).toBeCloseTo(10 + TRACK_LIFT_M - SKIRT_DEPTH_M, 5);
+    expect(minY).toBeCloseTo(10 - 0.62, 5);
+    expect(maxZ).toBeCloseTo(SKIRT_HALF_M, 5);
+    expect(SKIRT_HALF_M).toBeLessThan(3);
+    // Winding still agrees with the normals, and the skirts face out and up.
+    const g = new BufferGeometry();
+    g.setAttribute("position", new BufferAttribute(skirted.ballast.positions, 3));
+    g.setAttribute("normal", new BufferAttribute(skirted.ballast.normals, 3));
+    g.setIndex(new BufferAttribute(skirted.ballast.indices, 1));
+    expect(windingMismatches(g)).toBe(0);
+    // Stripe flags still mark the centre band only.
+    const stripe = skirted.ballast.stripe ?? new Float32Array(0);
+    expect(Array.from(stripe).filter((v) => v === 1).length).toBe(Array.from(plain.ballast.stripe ?? []).filter((v) => v === 1).length);
   });
 });

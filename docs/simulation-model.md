@@ -9,7 +9,8 @@ terrain (§1, §7), all guarded by the boundary test in
 `main`): templates, pieces and keys (§5, §6), the validator for the D2-owned codes, clearance
 and history (§9, §14), a first `derive` (§10) and the first `Sim` commands (§2). From D3
 (2026-09-27, arriving with [PR #82](https://github.com/Kminkjan/infrastructurio/pull/82)): the
-planner (§8).
+planner (§8). From D4's core half (2026-09-28, branch `codex/d4-structures-core`, not yet on
+`main`): the grade, terrain/structure and vertical-clearance rules (§9) and auto-grade (§8).
 Everything else here is planned. Its numbers come from the owner-approved M4 plan
 (2026-09-26) and are proposed in
 ADRs [0010](decisions/0010-triangular-lattice-track-geometry.md),
@@ -54,8 +55,8 @@ Module paths are relative to `src/core/`. Tracking keys D1–D13 come from
 | Terrain | `terrain.ts` | S3 | D1 | **Implemented** in D1, 20 test cases, golden hash (§7); generator version 2 in D11a, 23 test cases |
 | Static diorama scenery | `scenarios/` | — | D11a | **Implemented** in D11a: seeded, integer-only layout for the lookdev spike (no sim behaviour), 21 test cases with a golden hash |
 | Pieces and templates | `geometry/templates.ts`, `piece.ts`, `sample.ts` | S2 | D2 | **Implemented** in D2: 12 straights, 720 oriented curves, 24 shifts; closure and reachability tested ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-26-d2-track-model)) |
-| Authored state, validation, clearance, history | `track/`, `geometry/clearance.ts` | S3 | D2, D4 | **Implemented** in D2 for the 11 D2-owned codes; grade and terrain/structure rules (D4) are ordered placeholders that pass |
-| Planner | `track/planner.ts` | S4 | D3 | **Implemented** in D3 (2026-09-27, PR #82): one-bend, shift and two-bend fits (into ports, and as the fallback for free drags), magnetism, precision, elevation (pinned to existing node heights); 80 test cases in three files (§8) |
+| Authored state, validation, clearance, history | `track/`, `geometry/clearance.ts` | S3 | D2, D4 | **Implemented** in D2 for the 11 D2-owned codes; D4's core half (2026-09-28, branch `codex/d4-structures-core`) adds the grade, terrain/structure (`track/structure.ts`) and vertical-clearance rules: 18 codes; the D4 thresholds of the owner decision "M2" (2026-09-28, branch `codex/d4-structures`): a ±8 m band, decks 2 m into the bank near abutments; the D4 tunnel and portal iteration (2026-09-28): a tunnel needs 10 m of cover somewhere, and portals retain the hill in the effective ground (`track/portal.ts`) |
+| Planner | `track/planner.ts` | S4 | D3, D4 | **Implemented** in D3 (2026-09-27, PR #82): one-bend, shift and two-bend fits (into ports, and as the fallback for free drags), magnetism, precision, elevation (pinned to existing node heights); 80 test cases in three files (§8). D4 (2026-09-28, same branch): heights within 35‰ and auto-grade (`Drag.heightMode`) |
 | Derived network, entity commands | `network/derive.ts`, `graph.ts` | S5 | D2, D5–D7 | **Partial**: D2's `derive` (through and buffer nodes, sections split at buffers); junctions and entities planned |
 | Pathfinding | `network/pathfind.ts` | S6 | D8 | Planned |
 | Trains and movement | `trains/` | S7 | D8 | Planned |
@@ -319,8 +320,40 @@ and its [version 2 note](decisions/0010-triangular-lattice-track-geometry.md#fin
 - **Save.** Only `{seed, generatorVersion}` is saved; heights are regenerated on load.
   Open (D12): while the size is parametrised, a save must also carry `{columns, rows}`, or
   each generator version must fix them.
-- **No terrain editing in M4.** Earthworks (embankments, cuttings, ballast skirts) are
-  render-only. They never change the simulation's h.
+- **No terrain editing in M4.** Earthworks (embankments, cuttings, ballast skirts) never
+  change the terrain's heights. Until 2026-09-28 they were render-only, and the rules judged
+  track against the natural terrain alone. **Since the D4 feel-check fixes (2026-09-28)** the
+  earthworks rule is the core's ([`track/earthworks.ts`](../src/core/track/earthworks.ts)).
+  The world keeps the earthworks of each revision as the **effective ground**
+  ([`track/ground.ts`](../src/core/track/ground.ts)): the terrain as the committed track's
+  cuttings and embankments shape it. Auto-grade (§8), rule 4 (§9) and the track tool read it,
+  and the renderer meshes the same pieces through `sim.ground()`, so a drag through an existing
+  cutting is judged against the cutting as drawn
+  ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-feel-check-fixes)).
+  Water stays the natural terrain's.
+- **Portals retain the hill (2026-09-28, the D4 tunnel and portal iteration).** Behind a
+  tunnel end the approach cutting's 45° headwall used to start at the track bed, so the
+  effective ground behind every portal face lay 3–5 m under the hill the player saw. Past a
+  tunnel end's clip plane the cut envelope now starts at the portal's retained skyline, the
+  face top + 0.25 m = 7.65 m above the track over the 8.4 m face, falling 1 : 1.5 beyond
+  ([`track/portal.ts`](../src/core/track/portal.ts)), then rises at 45°. So behind a face the
+  effective ground is the natural hill, trimmed at 45° above the parapet where the hill stands
+  higher; bridge, buffer and fill envelopes are unchanged. The renderer's terrain mesh keeps
+  the earlier headwall as an underlay and draws the retained hill as the portal's plug
+  ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-tunnel-and-portal-iteration)).
+- **Portal wedges rounded (2026-09-29, owner decision "Round it off").** Beyond the wing ends
+  the approach cutting no longer ends in a planar 45° headwall: past a tunnel end's plane the
+  cut is a fan round the point where the retained skyline meets the section at the plane (9.84 m
+  across, 3.89 m up on a level straight approach), the section at the plane and rising 45° along
+  that line, so it meets the cutting in front with the same slope and the retained skyline
+  without a tongue; a smooth maximum over a band growing from 0 at the plane to 3 m rounds the
+  valley where the two meet, and there the smooth clamp with the hill takes a band up to 2.5 m.
+  Behind the face and the wings the retained hill is as before, within the 0.15 m of the usual
+  clamp. The underlay takes the lower of the earlier headwall and this, so the terrain draws it
+  where the plug does not. No acceptance, reason or structure count moved; of the 7,466 lattice
+  nodes within 30 m of the Track population's 59 tunnel planes, 203 moved (173 down, 3.28 m at
+  most, and 30 up, 0.57 m at most)
+  ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-29-d4-portal-wedges-rounded)).
 
 ## 8. Planner
 
@@ -345,6 +378,13 @@ and the
 [D3 one-bend-a-node-off finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-d3-one-bend-a-node-off).
 Whether dragging feels right is not established: that is the owner's D3 feel check.
 
+**Status 2026-09-28 (automated, D4 core half, branch `codex/d4-structures-core`):** heights
+within 35‰ and auto-grade (owner decision 2026-09-28, "Auto-grade"), with their tests in
+[`planner.grade.test.ts`](../src/core/track/planner.grade.test.ts); the design, the
+alternatives measured and the numbers are in the
+[ADR 0010 D4 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-grades-and-structures).
+Whether auto-grade feels right is the owner's to judge.
+
 - **Single bend.** A drag becomes n straights + one curve or shift template + m straights.
   - For each of about 100 candidate templates on the start heading d0, the planner solves
     Δ = n·step(d0) + T + m·step(d1) as a 2×2 integer system for n, m ≥ 0.
@@ -368,16 +408,41 @@ Whether dragging feels right is not established: that is the owner's D3 feel che
   single bend to a neighbour is smoother than two bends onto the target (which were
   mostly a small kink); the end then sits up to about 5 m from the pointer.
 - **Magnetism.** The drag snaps to existing endpoints and ports within 3 nodes.
-- **Elevation: track follows the ground** (owner decision, 2026-09-27, for D3; D4 revisits
-  it with the 35‰ rule and earthworks). Each node sits on the ground (the terrain, or the
-  water surface over a lower bed) plus an offset. The offset, not the absolute height, is
-  spread over the nodes in proportion to cumulative length, using largest-remainder
-  rounding to integer mm, between the heights of existing nodes the drag passes ("As built"
-  below). The start z comes from the snapped node; the end z comes from the height keys,
-  as steps above the ground at the end node. With no height steps a drag lies on the
-  ground at every node. Until 2026-09-27 the absolute height change was spread instead,
-  so hills between the ends swallowed the track
-  ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-d3-ground-following)).
+- **Elevation: track follows the ground within 35‰** (owner decisions 2026-09-27 for D3,
+  and 2026-09-28 for D4: "Track follows the ground wherever it can within 35‰; the rest is
+  absorbed by cuttings/embankments (±4 m) and, beyond that, automatic bridges and tunnels.
+  The end may sit above or below the ground; the tooltip shows by how much."). The owner
+  decision 2026-09-28 "M2" widened the band to ±8 m (§9). The start z comes from the snapped
+  node; a free drag starting on water begins at the deck height, the water level + 4.0 m (M2;
+  the track tool's anchor). `Drag.heightMode` (D4, additive, default "fixed") sets the end:
+  - **"fixed"** (height steps pressed): the end z comes from the height keys, as steps above
+    the ground at the end node; inner nodes follow the D3 profile, the ground (the terrain,
+    or the water surface over a lower bed) plus an offset spread over the nodes by length
+    with largest-remainder rounding between the heights of existing nodes the drag passes,
+    fitted to 35‰ (below);
+  - **"auto"** (no height steps, the tool's default): the planner also chooses the end, the
+    ground there as far as 35‰ reaches from the start and the pins; inner nodes follow the
+    ground within 35‰;
+  - **"straight"** (the Straight line tool; owner decision 2026-09-28, "One 'Straight line'
+    tool", which replaced the Bridge and Tunnel tools): one steady grade from the start to
+    the end, apportioned by length with largest-remainder rounding, whatever the ground does.
+    The end is the drag's (the ground at the end node plus the height steps), moved to the
+    nearest height 35‰ reaches from the start, so a straight line is never too steep. A
+    snapped port keeps its height, and one out of reach gives a ramp that `preview` rejects
+    as `grade-too-steep`. There are no pins and no water floors: structure inference (§9)
+    makes the bridges and tunnels.
+
+  **Ground (since the D4 feel-check fixes, 2026-09-28):** "auto" and "straight" read the
+  effective ground (§7), with the earthworks of the committed nodes on the drag's path treated
+  as ending at their buffer ends' planes, so a chained drag sees what a single drag would.
+  "fixed" keeps D3's lift over the natural terrain: under existing track the effective ground
+  is that track's own formation, which would zero every pin's offset.
+
+  Until 2026-09-27 the absolute height change was spread instead, so hills between the ends
+  swallowed the track
+  ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-d3-ground-following));
+  until 2026-09-28 every node lay on the ground, about half the pieces of a diorama drag
+  above 35‰.
 - **Counter.** Keys already present count as reused, the rest as new. An all-reused drag is
   a no-op: `execute` changes nothing and records no history entry.
 - **Precision mode** (Ctrl, or ⌥ on macOS):
@@ -459,14 +524,40 @@ Whether dragging feels right is not established: that is the owner's D3 feel che
     ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-27-d3-ground-following)):
     only nodes follow the ground, so a curve or shift, one piece with one grade (shifts
     43.7 m, curves a median 68 m and up to 200 m there), can still pass under a hill or over
-    a hollow between its ends; and about half the pieces of a ground-following drag exceed
-    35‰, which nothing rejects until D4's grade rule.
+    a hollow between its ends; and about half the pieces of a ground-following drag exceeded
+    35‰, which D4's grade rule now rejects and its fit (next item) avoids.
+  - **Heights within 35‰** (D4, 2026-09-28; defaults to test,
+    [ADR 0010 D4 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-grades-and-structures)):
+    - fixed nodes: the start, the pins, and the end ("fixed", or a snapped port); a free
+      "auto" end takes the ground at the end node clamped to what 35‰ reaches from the last
+      fixed node (raised to clear water where reachable), or, with magnetism on, an existing
+      node's height there within that reach and 6.5 m;
+    - between consecutive fixed nodes: first the largest chain of nodes that lie exactly on
+      the target (the ground in "auto", the D3 profile in "fixed") with each consecutive pair
+      joinable within 35‰, then the least summed deviation Σ|z − t| in each gap, subject to
+      35‰ per piece and to decks at the water level + 4.0 m or more beside water, exactly in
+      integer mm (dynamic programming, a slope-trick pass);
+    - two fixed heights 35‰ cannot join get a uniform ramp, which `preview` rejects as
+      `grade-too-steep` with the length the climb needs;
+    - where the target stays within 35‰ the heights are the target: on gentle ground a plan
+      is the D3 profile exactly. On the diorama, 27.2% of auto-graded nodes lie on the ground
+      and 76.4% of pieces sit at 30–35‰ (the terrain is steep); curves and shifts over mixed
+      ground remain the main unbuildable case (§9).
   - **Malformed drags:** a non-integer start, non-finite pointer, or invalid heading or
     radius throws a `TypeError`. It is a programmer error, like a malformed command.
 
 ## 9. Validation
 
 `preview` and `execute` share one validator.
+
+**Status 2026-09-28 (automated, D4 core half, branch `codex/d4-structures-core`):** 18 codes
+implemented: D2's 11 plus `grade-too-steep`, the five rule-4 codes and `vertical-clearance`,
+each with a negative fixture in [`sim/fixtures.test.ts`](../src/core/sim/fixtures.test.ts);
+rule 4 is in [`track/structure.ts`](../src/core/track/structure.ts). Entities (rule 7, D6/D7)
+and the operational check (rule 8, D10) remain ordered placeholders that pass. **Since the
+owner decision 2026-09-28 "M2"** (D4 integration, branch `codex/d4-structures`): the ground
+band is ±8 m, and a bridge deck may sit up to 2 m below the terrain within 15 m of an abutment
+([ADR 0010 M2 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-thresholds-m2)).
 - **Fixed rule order.** Rules run 1 → 8. The first failing rule returns ONE reason
   (`{code, message, refs}`) plus highlights. Messages suggest a fix.
 - **Floats.** Clearance, and any arc sampling rule 4 needs, are the only float-based
@@ -486,9 +577,9 @@ tracks.
 | | `turn-too-sharp` | more than 90° in one bend | split into two bends |
 | | `no-fit` | no straights + template (or two-bend) combination closes on the lattice | move the end or change the end heading |
 | 3 Grade | `grade-too-steep` | a piece above 35‰ | the length needed at 35‰ (e.g. a 6.5 m climb needs ≥ 186 m) |
-| 4 Terrain and structure | `needs-bridge` | a ground piece more than 4 m above terrain, or over water | use a bridge or lower the track |
-| | `needs-tunnel` | a ground piece more than 4 m below terrain (h − z > 4 m) | use a tunnel or raise the track |
-| | `bridge-below-ground` | a bridge deck below terrain | raise the deck or build on ground |
+| 4 Terrain and structure | `needs-bridge` | a ground piece more than 8 m above terrain (4 m until M2), or over water | use a bridge or lower the track |
+| | `needs-tunnel` | a ground piece more than 8 m below terrain (h − z > 8 m; 4 m until M2; 10 m for a run the 10 m tunnel rule made ground, 2026-09-28) | use a tunnel or raise the track |
+| | `bridge-below-ground` | a bridge deck below terrain: more than 2 m, or at all farther than 15 m along the track from an abutment (M2; any dip until then) | raise the deck or build on ground |
 | | `bridge-too-low-over-water` | a deck below water level + 4.0 m | raise the deck |
 | | `tunnel-too-shallow` | cover h − z < 6 m, except within 10 m of a portal | go deeper or build a cutting |
 | 5 Node topology | `kinked-join` | pieces meet at a node without tangent continuity | adjust the end heading |
@@ -514,19 +605,86 @@ tracks.
 | | `redo-empty` | nothing to redo | — |
 | | `undo-blocked` | the undo/redo diff fails validation | clear the conflict first |
 
-- **Rule 4 under `auto`.** Inference picks the structure for each piece first:
-  - ground when −4 m ≤ z − h ≤ +4 m and dry;
-  - bridge when z − h > 4 m, or over water;
-  - tunnel when h − z > 4 m.
+- **Rule 4 under `auto`.** Inference picks the structure for each piece first (the band ±8 m
+  since the owner decision 2026-09-28 "M2", ±4 m until then):
+  - ground when −8 m ≤ z − h ≤ +8 m and dry;
+  - bridge when z − h > 8 m, or over water;
+  - tunnel when h − z > 8 m.
 
   Then that structure's own rule applies. `needs-bridge` and `needs-tunnel` arise when
   ground is forced.
+- **A tunnel needs 10 m somewhere** (owner decision 2026-09-28, "Needs 10 m somewhere (Recommended)":
+  "A tunnel must lie ≥10 m under the ground somewhere; shallower runs stay cuttings (up to 10 m
+  deep)"). After the per-piece inference, rule 4 takes each maximal run of added pieces
+  inferred as tunnel, joined node to node, so command order does not matter. A run whose
+  deepest cover stays under 10 m (`TUNNEL_MIN_PEAK_COVER_MM`) becomes ground, a cutting whose
+  ground rule allows 10 m. A run stays a tunnel when it joins a committed tunnel, runs under or
+  over water, or has a piece more than 8 m above the terrain. Forced structures and the band
+  are otherwise unchanged: a forced ground piece is a cutting to 8 m, a forced tunnel needs
+  only more than 8 m somewhere. No reason code changed
+  ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-tunnel-and-portal-iteration)).
+  - **Judged per command** (known behaviour, owner-accepted 2026-09-29, "Accept it"). The rule
+    groups the added pieces of one command, so a line split over two commands can come out
+    differently from the same line built in one: a piece with, say, 8.55 m of cover that one
+    drag makes part of a tunnel becomes a deep cutting ending at a portal when its half of the
+    line reaches 10 m nowhere (1–6 pieces in about 6% of the committed population's tunnel
+    drags split in two; the generated chains produced none). Committed pieces are never
+    reclassified, and both halves stay accepted
+    ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-29-d4-portal-wedges-rounded)).
+- **As built (D4, 2026-09-28; defaults to test,
+  [ADR 0010 D4 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-grades-and-structures)):**
+  - **Grade:** an added piece fails when |num| > 35 · den on its exact rational grade. The
+    message quotes the climb and the length it needs at 35‰, for the run of chained pieces
+    rising (or falling) with the first steep one when the run is too steep as a whole, else
+    for that piece.
+  - **Samples:** track z is linear in arc length between the nodes, terrain h linear over
+    each lattice triangle. Straights decide exactly at their nodes (and a secondary one also
+    at the edge midpoint it crosses); curves and shifts are sampled every 0.5 m of arc. Over
+    water, h is the bed; track at or above the bed is in or over the water, below it under
+    the water.
+  - **Effective ground (since the D4 feel-check fixes, 2026-09-28):** h is the effective
+    ground (§7) wherever a committed piece's earthworks reach the piece, and such a piece is
+    sampled every 0.5 m whatever its kind. Elsewhere it keeps the exact natural samples above.
+    Portals and abutments read the effective ground at their nodes, and water stays natural.
+    The earthworks of the committed pieces ending at nodes the command joins count as ending
+    at those nodes' planes.
+  - **Inference:** in or over water: bridge; under water: tunnel; above and below the band
+    both: the larger excess; else as the bullets above.
+  - **Rules per structure:** ground needs a bridge above the band or in or over water, and a
+    tunnel below the band or under water; a bridge's deck may not be below the terrain at any
+    sample, nor under the water level + 4.0 m over water; a tunnel must go deeper than the
+    band somewhere, and needs 6 m of cover beyond 10 m (along the track) of a portal, a
+    tunnel node within the band (≤ 8 m of cover since M2, so the cover rule binds only between
+    nodes).
+  - **Abutments (M2):** a bridge node on dry land within the band. A deck may dip up to 2 m
+    below the terrain within 15 m of one, measured along the track through the bridge's own
+    pieces; elsewhere not at all.
+  - Only added pieces are judged; a reused piece keeps its structure. The inferred
+    structures are in the result's `diff.added`.
+  - **Limits, measured** (1,682 auto-graded drags on the diorama, 72.8% accepted):
+    `tunnel-too-shallow` 199 (open point 4), `bridge-too-low-over-water` 146 (starts on or
+    near water), `bridge-below-ground` 74 (mostly single-grade curves over mixed ground).
+    **Under M2** (1,690 drags, the same generator): 88.7% accepted, 95.3% of the 1,000 free
+    drags; `bridge-too-low-over-water` 89 (mostly land too near the water to climb 4 m at
+    35‰), `out-of-bounds` 32, `bridge-below-ground` 29, `tunnel-too-shallow` 18. **With the
+    effective ground** (2026-09-28, the same drags): unchanged, 88.7% and 95.3%. The same
+    drags as straight lines: 82.8% accepted, 89.2% of the free drags, with
+    `bridge-too-low-over-water` 177 (lines leaving low banks) the main cause. **With portals
+    retaining the hill and the 10 m tunnel rule** (2026-09-28, the same drags): Track 1,503
+    of 1,690 accepted (88.9%), Straight line 1,406 (83.2%); `tunnel-too-shallow` 18 → 14 and
+    22 → 13; tunnel runs 77 → 54 and 84 → 52, none shorter than 20 m, and no through-tunnel
+    under 40 m is left; 27 Track and 41 Straight drags now have cuttings 8–9.9 m deep. The
+    retain rule alone moved no number. **With the portal wedges rounded** (2026-09-29, the
+    same drags): every number above unchanged.
 - **Rule 6 details.**
   - Exemptions: shared nodes, turnout fans and diamond arms.
   - Broadphase: an incremental spatial hash with 20 m cells.
   - Arcs are sampled with sagitta ≤ 0.05 m and distances padded by the same 0.05 m, so
     sampling error only ever makes the check stricter.
-  - `vertical-clearance` replaces `tracks-too-close` where the centrelines cross in plan.
+  - `vertical-clearance` replaces `tracks-too-close` where the centrelines cross in plan
+    (D4: the closest chords lie within the pieces' arc pads). Its message gives the height
+    missing to 6.5 m. A crossing or stacked track at 6.5 m or more passes, and a bridge over a
+    line derives two plain nodes at the crossing, never a junction.
 - **Trains and lines.** The 64-train and 16-line world limits are enforced by the operator
   (`capped-max`, `line-capped`). No command creates trains or lines.
 
@@ -947,6 +1105,27 @@ decide them.
    - Ground allows at most 4 m of cutting, and a tunnel needs 6 m of cover beyond 10 m from
      a portal. Track 4–6 m below terrain is therefore buildable only near portals.
    - Recommend D4 checks with a fixture that ordinary seeded hills still admit a tunnel.
+   - **Checked 2026-09-28 (automated, D4 core half):** they rarely do. Of 300 dry straight
+     lines on the diorama that only a tunnel can take, the planner builds 3.3% and the
+     deepest 35‰ profile 1.7%; the rest fail `tunnel-too-shallow`. From a portal at ≤ 4 m of
+     cover, 6 m within 10 m needs the terrain to rise about 16.5% along the track, and only
+     17.3% of the faces measured do. `tunnel-too-shallow` rejects 11.8% of auto-graded
+     diorama drags. The thresholds are #68's; changing them is the owner's call
+     ([ADR 0010 D4 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-grades-and-structures)).
+   - **Status 2026-09-28, after the owner decision "M2" (automated, D4 integration):** the owner
+     widened the band to ±8 m and kept the 6 m cover and 10 m portal zone. Ordinary seeded hills
+     now admit a tunnel: of 300 dry straight lines that only a tunnel can take at ±8 m, the
+     planner and the deepest 35‰ profile each build all 300, and `tunnel-too-shallow` rejects
+     1.1% of auto-graded diorama drags. With the band deeper than the cover, a node under less
+     than 6 m is a portal itself, so the cover rule binds only between nodes
+     ([ADR 0010 M2 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-thresholds-m2)).
+     #68's body still states ±4 m.
+   - **Status 2026-09-28, after the owner decision "Needs 10 m somewhere" (automated, the D4
+     tunnel and portal iteration):** the fixture now counts a line as needing a tunnel when its
+     highest 35‰ profile has a node at least 10 m under the ground (8–10 m is a cutting). The committed
+     fixture finds 250 such lines in 40,000 tries, and the planner and the deepest profile
+     build all of them
+     ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-tunnel-and-portal-iteration)).
 5. **Command gaps.**
    - `place-platform` carries no side, yet `no-room-for-platform` and island platforms
      imply one. Recommend adding `side: left | right | island`.
