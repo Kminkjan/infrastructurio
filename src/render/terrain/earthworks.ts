@@ -1,5 +1,6 @@
 import { centrelineIndex, nearestOnCentreline, sampleCentrelineEvery } from "../../core/geometry/sample";
 import {
+  type ClipPlane,
   DAYLIGHT_ROUND_M,
   EARTHWORK_MIN_M,
   type EarthworkLod,
@@ -271,6 +272,32 @@ const FAR_M = 99;
 const AFFECTED_DOWN = 1;
 const AFFECTED_UP = 2;
 
+/** The fixed clip plane a point lies farthest beyond, and how far (`farthestFixedPlane`). */
+interface PastPlane {
+  plane: ClipPlane | null;
+  t: number;
+}
+
+/**
+ * The fixed clip plane of `planes` that plan (x, y) lies farthest beyond, as `envelopeAt` picks it (the first of equal
+ * ones), written to `out`; false when it lies beyond none. `envelopeAt` treats a tunnel end past that plane only.
+ */
+export function farthestFixedPlane(planes: readonly ClipPlane[], x: number, y: number, out: PastPlane): boolean {
+  let t = 0;
+  let plane: ClipPlane | null = null;
+  for (let i = 0; i < planes.length; i++) {
+    const c = planes[i];
+    if (!c || !c.fixed) continue;
+    const tc = (x - c.x) * c.tx + (y - c.y) * c.ty;
+    if (tc <= t) continue;
+    t = tc;
+    plane = c;
+  }
+  out.plane = plane;
+  out.t = t;
+  return plane !== null;
+}
+
 /**
  * The earthworks pass for one terrain chunk at one LOD, over the chunk's
  * triangles plus a one-triangle ring around it (so fans along a seam agree with
@@ -333,6 +360,7 @@ export class ChunkPass {
   private readonly near = { d: 0, s: 0 };
   private readonly envelope: Envelope = { u: 0, l: 0, d: 0 };
   private readonly shownEnvelope: Envelope = { u: 0, l: 0, d: 0 };
+  private readonly past: PastPlane = { plane: null, t: 0 };
 
   /** Chunk box in plan metres, grown by one LOD cell (the ring), for picking candidate pieces. */
   static chunkBox(t: Pick<Terrain, "columns" | "rows">, lod: TerrainLod, chunkX: number, chunkY: number): { minX: number; minY: number; maxX: number; maxY: number } {
@@ -535,6 +563,7 @@ export class ChunkPass {
     const shown = this.shownEnvelope;
     // Only past a tunnel end's plane do the modes differ (`envelopeAt`).
     const portal = p.planes.some((plane) => plane.fixed && plane.tunnel);
+    const past = this.past;
     let evaluated = 0;
     for (let rs = rsA; rs <= rsB; rs++) {
       const parity = rs & 1;
@@ -553,7 +582,13 @@ export class ChunkPass {
         // at the face without grass wedges in front of it (D4 second feel-check fixes, 2026-09-28).
         evaluated += 1;
         if (!envelopeAt(p, r, x, y, null, this.near, env, "underlay")) continue;
-        const us = portal && envelopeAt(p, r, x, y, null, this.near, shown, "ground") ? shown.u : env.u;
+        let us = env.u;
+        const plane = portal && farthestFixedPlane(p.planes, x, y, past) ? past.plane : null;
+        if (plane?.tunnel) {
+          // Past a tunnel plane: the ground the core shows (the second evaluation runs only here: over the whole reach
+          // it cost a tunnel edit about 1.5 times the earthworks rebuild, verification finding 2026-09-29).
+          if (envelopeAt(p, r, x, y, null, this.near, shown, "ground")) us = shown.u;
+        }
         const g = rowBase + cs;
         if (this.stamp[g] !== this.gen) {
           this.stamp[g] = this.gen;

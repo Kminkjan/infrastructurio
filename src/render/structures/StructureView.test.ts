@@ -434,4 +434,81 @@ describe("structure rebuild cost on the diorama (a dev measurement, not a gate)"
     view.dispose();
     registry.dispose();
   });
+
+  it("times tunnel edits with their approach cuttings, the earthworks and structures wired as the app wires them", async ({ annotate }) => {
+    // Verification finding (2026-09-29): the forced 43-piece tunnel above wires no earthworks, so it hid what a tunnel
+    // edit costs in the app (the plugs read the earthworks' effective ground, cut envelopes and notch boxes, and the
+    // earthworks evaluate a second envelope behind tunnel planes). Straight lines as the tool plans them: the e2e hill
+    // (254, 129) → (302, 129) and scene B (220, 140) → (236, 140).
+    const { diorama, toolStartMm } = await import("../../../tests/support/groundPlans");
+    const { nearestNode } = await import("../../core/sim/api");
+    const { terrain: dio } = diorama();
+    const dshading = computeTerrainShading(dio);
+    const world = createWorld(dio);
+    const registry = new AssetRegistry();
+    registerStructureAssets(registry);
+    const clock = () => performance.now();
+    const earthworks = new EarthworksView({ terrain: dio, target: { shading: dshading, replaceChunk: () => true }, requestFrame: () => {}, now: clock, budgetMs: Infinity });
+    const view = new StructureView({
+      terrain: dio,
+      registry,
+      material,
+      plugMaterial: material,
+      shading: dshading,
+      water: waterPlane(dio, dshading.waterDistance),
+      requestFrame: () => undefined,
+      now: clock,
+      budgetMs: 1e9,
+      groundM: (x: number, y: number) => earthworks.heightfield.heightAtM(x, y),
+      effectiveIn: (box: { minX: number; minY: number; maxX: number; maxY: number }) => earthworks.effectiveIn(box),
+      cutEnvelopeIn: (box: { minX: number; minY: number; maxX: number; maxY: number }, except: readonly string[]) => earthworks.cutEnvelopeIn(box, except),
+      attributeIn: (box: { minX: number; minY: number; maxX: number; maxY: number }) => earthworks.attributeIn(box),
+      notchBox: (key: string) => earthworks.notchBox(key),
+      ground: earthworks.ground,
+    });
+    const sync = (): [number, number] => {
+      const network = world.network() as NetworkView;
+      const t0 = clock();
+      earthworks.sync(network, world.ground());
+      const t1 = clock();
+      view.sync(network);
+      return [t1 - t0, clock() - t1];
+    };
+    const results: string[] = [];
+    for (const [name, a, b] of [
+      ["hill", [254, 129], [302, 129]],
+      ["scene B", [220, 140], [236, 140]],
+    ] as const) {
+      // The Straight line tool's plan: the end asked at the ground there, planned once more at the plan's own end.
+      const w = toWorld({ q: b[0], r: b[1] });
+      const zMm = toolStartMm(dio, { q: a[0], r: a[1] });
+      const end = nearestNode({ x: w.x, y: w.y });
+      const drag = { from: { q: a[0], r: a[1], zMm }, to: { xMm: Math.round(w.x * 1000), yMm: Math.round(w.y * 1000) }, dzMm: (world.groundMm(end.q, end.r) ?? zMm) - zMm, magnetism: true, heightMode: "straight" } as const;
+      let plan = world.plan(drag);
+      if (plan.end && !plan.snapped) plan = world.plan({ ...drag, dzMm: (world.groundMm(plan.end.node.q, plan.end.node.r) ?? zMm) - zMm });
+      const ew: number[] = [];
+      const sv: number[] = [];
+      let kinds = "";
+      for (let i = 0; i < 7; i++) {
+        const result = world.run({ type: "build-track", pieces: plan.pieces, structure: "auto" }, true);
+        expect(result.ok).toBe(true);
+        if (result.ok) kinds = result.diff.added.map((r) => r.structure[0]).join("");
+        const [e, s] = sync();
+        if (i > 0) {
+          ew.push(e);
+          sv.push(s);
+        }
+        world.run({ type: "undo" }, true);
+        sync();
+      }
+      expect(kinds).toContain("t");
+      ew.sort((x, y) => x - y);
+      sv.sort((x, y) => x - y);
+      results.push(`${name} (${kinds.length} pieces, ${kinds.split("t").length - 1} tunnel): earthworks median ${ew[3]?.toFixed(2)} ms, max ${ew[5]?.toFixed(2)} ms; structures median ${sv[3]?.toFixed(2)} ms, max ${sv[5]?.toFixed(2)} ms`);
+    }
+    await annotate(results.join("; "));
+    console.log(`[tunnel edit cost, wired] ${results.join("; ")}`);
+    view.dispose();
+    registry.dispose();
+  });
 });
