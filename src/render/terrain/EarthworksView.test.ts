@@ -435,6 +435,41 @@ describe("earthworks view", () => {
     expect(pass.shownDepartureAt(qs, rs)).toBeGreaterThan(-0.2);
   });
 
+  it("keeps the underlay at the track bed inside the bore behind a portal, and its headwall beyond (verification fix 2026-09-29)", () => {
+    // The same ridge tunnel: the west portal at x = 280 m, the track at 15 m running east into the hill.
+    const s = ridgeSetup();
+    const pieces = s.run.map((p) => ({ ...p, from: { ...p.from, zMm: 15_000 }, z1Mm: 15_000 }));
+    expect(s.sim.execute(build(pieces)).ok).toBe(true);
+    const ground = [...s.sim.ground().pieces.values()];
+    const terrain = makeTerrain(130, 70, (_q, _r, col) => 200 + Math.max(0, 60 - Math.abs(col - 64) * 4));
+    const y0 = 30 * 2.5 * Math.sqrt(3);
+    const pass = new ChunkPass();
+    const cx = Math.floor(285 / (5 * CHUNK_NODES));
+    const cy = Math.floor(30 / CHUNK_NODES);
+    expect(pass.run(terrain, 0, cx, cy, piecesTouching(ground, ChunkPass.chunkBox(terrain, 0, cx, cy)))).toBe(true);
+    const sub = 5 / REFINE;
+    const row = sub * (Math.sqrt(3) / 2);
+    let inside = 0;
+    let worst = Number.NEGATIVE_INFINITY;
+    for (let rs = Math.ceil((y0 - 2.6) / row); rs <= Math.floor((y0 + 2.6) / row); rs++) {
+      for (let qs = Math.ceil(280 / sub - rs / 2); sub * (qs + rs / 2) <= 280 + 4.5; qs++) {
+        const x = sub * (qs + rs / 2);
+        if (!(x > 280)) continue;
+        inside += 1;
+        worst = Math.max(worst, pass.drawnAt(qs, rs) - 15);
+      }
+    }
+    // Before, the 45° headwall stood 1–5 m over the bed here, a sunlit slope filling the 4.5 m bore.
+    expect(inside).toBeGreaterThan(12);
+    expect(worst).toBeLessThanOrEqual(1e-6);
+    // Past the footprint (grown by a sub-lattice step) the underlay's headwall rises again, under the hill plug.
+    const rs = Math.round(y0 / row);
+    const qs = Math.round((280 + 8) / sub - rs / 2);
+    expect(pass.drawnAt(qs, rs)).toBeGreaterThan(15 + 5);
+    // The ground shown there is still the hill the core retains (the normals and the attribute read it).
+    expect(pass.shownDepartureAt(Math.round((282 / sub) - rs / 2), rs)).toBeGreaterThan(-0.2);
+  });
+
   it("cuts the ground down to a bridge deck set into the bank, and never raises it under a bridge (D4, M2)", () => {
     // A deck at 25 m along the ridge's run: 5 m over the 20 m land, 1 m under the 26 m crest (x = 320 m). Its nodes
     // on the ridge are abutments (within the ±8 m band), so the dip is allowed (owner decision 2026-09-28 "M2").

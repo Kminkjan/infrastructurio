@@ -185,20 +185,28 @@ describe("earthworks and terrain bake output (a byte pin)", () => {
     // reaches, the nearest points, the scenery and the bakes are byte-identical (checked: lod0 normals ef2655d1 →
     // 17c1cc93 and attribute 778ca5e3 → e8933918, lod1 normals e2453d1e → 0f96eea6 and attribute 4ed5d1ee →
     // 8dbbfbbb; nothing else moved).
+    // Re-recorded again 2026-09-29 (D4 verification fixes), deliberately, the drawn heights only: inside a bore's
+    // footprint behind a tunnel plane (4.5 m deep and 2.6 m each side of the track, grown by one sub-lattice step) the
+    // underlay stands no higher than the track bed (`boreBedAt`), where its 45° headwall had filled the arch with a
+    // sunlit slope. So the positions (1st hash of each LOD), the attribute's departure (4th), both heightfields, the
+    // sampled surfaces and the deepest drawn cut (8.00 → 9.97 m, under the plug over a bore) moved; the normals, the
+    // colours, the indices, the refined triangles (6,275), the scenery, the reaches, the nearest points and the bakes
+    // did not. Checked before re-recording: with only the clamp disabled, the chunk pass's other change (the "ground"
+    // envelope evaluated only past a tunnel plane, for the rebuild time) drew every hash of 4dd917a exactly.
     expect(hashes).toEqual({
       pieces: 327,
       refined: 6275,
       withEarthworks: 37,
       cleared: 294,
-      maxCutFill: [7.997250366210935, 7.86400032043457],
-      lod0: "50204995 17c1cc93 e3e3a27f e8933918 d942eb22",
-      lod1: "d31316ee 0f96eea6 196ab467 8dbbfbbb ccb98367",
-      heightfield0: "169bf062",
-      heightfield1: "2b01c99e",
+      maxCutFill: [9.966000366210938, 7.86400032043457],
+      lod0: "2b79cfce 17c1cc93 e3e3a27f 77b0441c d942eb22",
+      lod1: "5234f545 0f96eea6 196ab467 acb994f4 ccb98367",
+      heightfield0: "3dafd178",
+      heightfield1: "b816c1a3",
       reach: "10a1303f",
       nearest: "ccf44728",
       clearedFlags: "4e0c0685",
-      surfaces: "592fc26b",
+      surfaces: "3aa566b0",
       shadingD11a: "ab72930b",
       shadingB: "aed09c41",
       splat: "d14a2fa6",

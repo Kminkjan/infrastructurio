@@ -1,5 +1,6 @@
 import { centrelineIndex, nearestOnCentreline, sampleCentrelineEvery } from "../../core/geometry/sample";
 import {
+  BED_BELOW_TRACK_M,
   type ClipPlane,
   DAYLIGHT_ROUND_M,
   EARTHWORK_MIN_M,
@@ -16,6 +17,7 @@ import {
   networkAdjacency,
   reachAt,
 } from "../../core/sim/api";
+import { BORE_DEPTH_M, BORE_HALF_M } from "../structures/dimensions";
 import { lodGridSize, type TerrainLod } from "./offsetGrid";
 import { CHUNK_NODES, chunkCounts } from "./terrainGeometry";
 
@@ -299,6 +301,17 @@ export function farthestFixedPlane(planes: readonly ClipPlane[], x: number, y: n
 }
 
 /**
+ * The terrain mesh's cap behind a tunnel plane at plan (x, y), `t` past it: the track bed at the plane inside the bore's
+ * footprint (t ≤ `depth`, within `half` of the track across it), +Infinity elsewhere. Render only: the core's
+ * effective ground there is the hill the portal retains, which the hill plug draws over the bore.
+ */
+export function boreBedAt(plane: ClipPlane, t: number, x: number, y: number, depth: number, half: number): number {
+  if (!plane.tunnel || !(t > 0) || t > depth) return Number.POSITIVE_INFINITY;
+  const across = (x - plane.x) * -plane.ty + (y - plane.y) * plane.tx;
+  return Math.abs(across) <= half ? plane.zM - BED_BELOW_TRACK_M : Number.POSITIVE_INFINITY;
+}
+
+/**
  * The earthworks pass for one terrain chunk at one LOD, over the chunk's
  * triangles plus a one-triangle ring around it (so fans along a seam agree with
  * the neighbouring chunk). Holds its scratch between runs, so passes allocate
@@ -564,6 +577,10 @@ export class ChunkPass {
     // Only past a tunnel end's plane do the modes differ (`envelopeAt`).
     const portal = p.planes.some((plane) => plane.fixed && plane.tunnel);
     const past = this.past;
+    // The bore's footprint behind a tunnel plane, grown by one sub-lattice step so the terrain's rise out of it lies
+    // wholly behind the bore's walls and back (`boreBedAt`).
+    const boreS = BORE_DEPTH_M + sub;
+    const boreU = BORE_HALF_M + sub;
     let evaluated = 0;
     for (let rs = rsA; rs <= rsB; rs++) {
       const parity = rs & 1;
@@ -586,8 +603,13 @@ export class ChunkPass {
         const plane = portal && farthestFixedPlane(p.planes, x, y, past) ? past.plane : null;
         if (plane?.tunnel) {
           // Past a tunnel plane: the ground the core shows (the second evaluation runs only here: over the whole reach
-          // it cost a tunnel edit about 1.5 times the earthworks rebuild, verification finding 2026-09-29).
+          // it cost a tunnel edit about 1.5 times the earthworks rebuild, verification finding 2026-09-29)...
           if (envelopeAt(p, r, x, y, null, this.near, shown, "ground")) us = shown.u;
+          // ...and, inside the bore's footprint, the underlay no higher than the track bed: its 45° headwall rose
+          // 1–5 m inside the 4.5 m bore and filled the arch with a sunlit slope (verification finding 2026-09-29).
+          // The face, the bore's walls and back and the hill plug over it hide the step at the footprint's edges.
+          const bed = boreBedAt(plane, past.t, x, y, boreS, boreU);
+          if (bed < env.u) env.u = bed;
         }
         const g = rowBase + cs;
         if (this.stamp[g] !== this.gen) {
