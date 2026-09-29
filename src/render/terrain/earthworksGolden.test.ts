@@ -202,20 +202,28 @@ describe("earthworks and terrain bake output (a byte pin)", () => {
     // re-recording: with the old envelope restored in the new code path (the band folded, `conformRule`'s band
     // argument, the chunk pass's band array), every hash of 2ae19ab was drawn exactly; that check found the band first
     // kept in a Float32Array, whose 0.6000000238 moved every conformed height by float noise, now a Float64Array.
+    // Re-recorded again 2026-09-29 (verification of the D4 portal wedges), deliberately, LOD0's drawn heights only: the
+    // wider band past a tunnel plane gives way within a metre of any piece's reach edge whose cut or fill could change
+    // it (`reachEdgeWeight`), where another track's earthworks ending had stepped the ground by up to 0.175 m. So LOD0's
+    // positions, normals and attribute (1st, 2nd and 4th hash), its heightfield and the sampled surfaces moved (the
+    // pinned network's drawn LOD0 ground at 40 of its 0.625 m samples, by at most 0.022 m); LOD1, the colours, the
+    // indices, the refined triangles, the reaches, the scenery and the bakes did not. Checked before re-recording:
+    // with the weight held at 1, the code path (the foot shared with `envelopeAt`, the pieces a ring wider, the chunks
+    // queued a ring wider) drew every hash of 8c7dca9 exactly.
     expect(hashes).toEqual({
       pieces: 327,
       refined: 6296,
       withEarthworks: 37,
       cleared: 294,
       maxCutFill: [9.966000366210938, 7.86400032043457],
-      lod0: "5e8a550c 268431bf 971b9172 be6a55d4 c89f0516",
+      lod0: "4a1b903d 23b6e06b 971b9172 0806040a c89f0516",
       lod1: "1923d351 777d470c 0ac514e9 0f346ef9 0a7e2fa8",
-      heightfield0: "3ab42719",
+      heightfield0: "a9d5f737",
       heightfield1: "ac60058b",
       reach: "10a1303f",
       nearest: "ccf44728",
       clearedFlags: "4e0c0685",
-      surfaces: "e20a43c1",
+      surfaces: "110ddb0e",
       shadingD11a: "ab72930b",
       shadingB: "aed09c41",
       splat: "d14a2fa6",

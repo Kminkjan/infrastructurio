@@ -524,8 +524,10 @@ describe("structure rebuild cost on the diorama (a dev measurement, not a gate)"
     }
     expect(edges).toBeGreaterThan(200);
     // Measured 2026-09-29: 1.18 at 2ae19ab, the V along the valley at every depth; 0.74 since, where the smooth
-    // maximum's band is still narrow near the plane, and 0.63 from 2 m behind it.
-    expect(worst).toBeLessThan(0.85);
+    // maximum's band is still narrow near the plane, and 0.63 from 2 m behind it. (Tightened from 0.85 by the
+    // verification fixes: 0.744 with the band's reach-edge weight read only where a piece's envelopes can change the
+    // band, 0.805 had it given way near every piece's reach edge, the approach's own too.)
+    expect(worst).toBeLessThan(0.78);
     expect(worstBack).toBeLessThan(0.7);
     view.dispose();
     registry.dispose();

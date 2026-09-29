@@ -240,6 +240,73 @@ describe("the retain rule (\"ground\" mode) past a tunnel plane", () => {
     }
   });
 
+  it("gives the wider band way where another piece's earthworks end beside a portal: no step in the ground (verification 2026-09-29)", async () => {
+    // The verification's traced worst case (automated, at 8c7dca9): a Track drag through a hill on the diorama (the
+    // committed population's free drag 244, (243, 116) → (218, 91), 25 pieces, 16 tunnel), then a Track drag from
+    // node (228, 91) at 25.3 m along the tunnel's heading (7 ground pieces) beside its portal at (224, 97). Where a
+    // piece of the second track reached its earthworks' end (8.9 m from its centreline) the portal's 2.5 m band had
+    // read its fill envelope, and past it no longer: the ground stepped 0.175 m in 0.02 m, 2.75 m behind the plane and
+    // 16.1 m across, where the natural ground is smooth. The band now gives way within a metre of every piece's reach
+    // edge, either side (`reachEdgeWeight`), so the reach bound of DAYLIGHT_ROUND_M holds there again.
+    const { diorama } = await import("../../../tests/support/groundPlans");
+    const { toWorld } = await import("../lattice");
+    const { terrain } = diorama();
+    const sim = simOn(terrain);
+    const drag = (q0: number, r0: number, z0Mm: number, q1: number, r1: number, fromHeading?: 1) => {
+      const w = toWorld({ q: q1, r: r1 });
+      const plan = sim.planTrack({
+        from: { q: q0, r: r0, zMm: z0Mm },
+        ...(fromHeading === undefined ? {} : { fromHeading }),
+        to: { xMm: Math.round(w.x * 1000), yMm: Math.round(w.y * 1000) },
+        dzMm: (sim.groundMm(q1, r1) ?? z0Mm) - z0Mm,
+        magnetism: true,
+        heightMode: "auto",
+      });
+      return sim.execute({ type: "build-track", pieces: plan.pieces, structure: "auto" });
+    };
+    expect(drag(243, 116, 11_800, 218, 91).ok).toBe(true);
+    expect(sim.network().pieces.map((p) => p.structure[0]).join("")).toBe("ggggggttttttttttttttttggg");
+    expect(drag(228, 91, 25_300, 235, 98, 1).ok).toBe(true);
+    const all = [...sim.ground().pieces.values()];
+    // The portal plane at node (224, 97), square to heading 1 (into the tunnel); t behind it, a across it.
+    const o = toWorld({ q: 224, r: 97 });
+    const tx = Math.sqrt(3) / 2;
+    const ty = 0.5;
+    const at = (t: number, a: number) => ({ x: o.x + tx * t - ty * a, y: o.y + ty * t + tx * a });
+    let worst = 0;
+    let where = "";
+    for (let t = 0.5; t <= 12; t += 0.25) {
+      let prev = Number.NaN;
+      let prevN = Number.NaN;
+      for (let a = -24; a <= 24; a += 0.02) {
+        const p = at(t, a);
+        const n = naturalHeightAtM(terrain, p.x, p.y);
+        const g = conformedHeightM(all, p.x, p.y, n, 0, null, "ground");
+        if (!Number.isNaN(prev)) {
+          const step = Math.abs(g - prev - (n - prevN));
+          if (step > worst) {
+            worst = step;
+            where = `t ${t} a ${a.toFixed(2)}`;
+          }
+        }
+        prev = g;
+        prevN = n;
+      }
+    }
+    // Measured 2026-09-29 (these rows, 0.02 m steps, the change beyond the natural's): 0.175 m at t 2.75, a −16.08
+    // before; 0.017 m since, the rounded cutting's own curvature.
+    expect(worst, where).toBeLessThan(0.05);
+    // The effective ground the world keeps is the same surface (the node heights round it to mm).
+    for (const [q, r] of [
+      [226, 93],
+      [225, 95],
+      [227, 94],
+    ] as const) {
+      const w = toWorld({ q, r });
+      expect(sim.groundMm(q, r)).toBe(Math.round(conformedHeightM(all, w.x, w.y, naturalHeightAtM(terrain, w.x, w.y), 0, null, "ground") * 1000));
+    }
+  });
+
   it("keeps the hill behind the face and the wings within the smooth clamp's rounding, never above it, and the rails clear", () => {
     const { sim } = portalScene();
     const all = [...sim.ground().pieces.values()];

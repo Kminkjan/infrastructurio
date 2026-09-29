@@ -1,5 +1,5 @@
 import { type CentrelineIndex, centrelineIndex, nearestOnCentreline } from "../../core/geometry/sample";
-import { type GroundQuery, type GroundView, type NetworkView, type Terrain, conformedHeightM, earthworkPieces, groundMmAt, heightDmAt, networkAdjacency, toWorld } from "../../core/sim/api";
+import { BAND_EDGE_RING_M, type GroundQuery, type GroundView, type NetworkView, type Terrain, conformedHeightM, earthworkPieces, groundMmAt, heightDmAt, networkAdjacency, toWorld } from "../../core/sim/api";
 import type { SceneryClearance } from "../scenery/clearance";
 import { type PortalFrame, frameLocal } from "../structures/plug";
 import { BACKFILL_REACH_U_M, backfillV, behindFront } from "../structures/portalOutline";
@@ -325,7 +325,7 @@ export class EarthworksView {
       const h = this.ground.heightM(w.x, w.y);
       return Number.isNaN(h) ? dm * 100 : Math.round(h * 1000);
     },
-    meets: (minX, minY, maxX, maxY) => piecesTouching(this.pieces.values(), { minX, minY, maxX, maxY }).length > 0,
+    meets: (minX, minY, maxX, maxY) => piecesTouching(this.pieces.values(), { minX, minY, maxX, maxY }, 0, 0).length > 0,
   };
 
   /** A ground piece's current reach at LOD0 and LOD1 (settled beside its neighbours), or undefined (tests, checks). */
@@ -461,14 +461,18 @@ export class EarthworksView {
     this.queue.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   }
 
-  /** Queues the chunks (and their scenery) a piece's reach meets, at each LOD's reach. */
+  /**
+   * Queues the chunks (and their scenery) a piece's reach meets, at each LOD's reach, grown by BAND_EDGE_RING_M: a
+   * portal's wider band reads every piece within that of its reach (`reachEdgeWeight`), so an edit there can move
+   * ground the piece's own earthworks do not reach.
+   */
   private enqueueBox(piece: EarthworkPiece): void {
     const t = this.options.terrain;
-    chunksTouching(t, 0, piece, (x, y) => {
+    chunksTouching(t, 0, ringed(piece), (x, y) => {
       this.enqueue(`${STEP_LOD0}:${x}:${y}`);
       if (this.scenery) this.enqueue(`${STEP_SCENERY}:${x}:${y}`);
     });
-    chunksTouching(t, 1, piece.lod1, (x, y) => this.enqueue(`${STEP_LOD1}:${x}:${y}`));
+    chunksTouching(t, 1, ringed(piece.lod1), (x, y) => this.enqueue(`${STEP_LOD1}:${x}:${y}`));
   }
 
   private enqueue(key: string): void {
@@ -521,6 +525,11 @@ export class EarthworksView {
 }
 
 /** Whether two preparations of one piece draw the same: equal reaches, cap rises and clip planes (a tunnel plane's too). */
+/** A reach box grown by BAND_EDGE_RING_M. */
+function ringed(r: { readonly minX: number; readonly minY: number; readonly maxX: number; readonly maxY: number }): { minX: number; minY: number; maxX: number; maxY: number } {
+  return { minX: r.minX - BAND_EDGE_RING_M, minY: r.minY - BAND_EDGE_RING_M, maxX: r.maxX + BAND_EDGE_RING_M, maxY: r.maxY + BAND_EDGE_RING_M };
+}
+
 function sameSettled(a: EarthworkPiece, b: EarthworkPiece): boolean {
   if (a.reachM !== b.reachM || a.lod1.reachM !== b.lod1.reachM || a.capRiseM !== b.capRiseM || a.lod1.capRiseM !== b.lod1.capRiseM) return false;
   if (a.planes.length !== b.planes.length) return false;

@@ -2,20 +2,24 @@ import { type NodeRef, type Piece, type PieceKey, nodeKey } from "../geometry/pi
 import { toWorld } from "../lattice";
 import { type Terrain, groundMmAt, offsetOfNode } from "../terrain";
 import {
+  BAND_EDGE_RING_M,
   type ChainAdjacency,
   DAYLIGHT_ROUND_M,
   type EarthworkPiece,
   type Envelope,
   MAX_REACH_M,
   type PieceInput,
+  bandAt,
   chainPlanes,
   conformRule,
   conforms,
   cutsUnderDeck,
   earthworkPiece,
   envelopeAt,
+  inEdgeRing,
   mayNeighbour,
   naturalHeightAtM,
+  reachEdgeWeight,
   settleReaches,
   settledPiece,
   withPlanes,
@@ -205,10 +209,22 @@ export class EffectiveGround implements GroundQuery {
     let band = DAYLIGHT_ROUND_M;
     const e = this.envelope;
     for (const p of near) {
+      // (The candidates reach BAND_EDGE_RING_M past their reach boxes, for the band's weight below.)
+      if (x < p.minX || x > p.maxX || y < p.minY || y > p.maxY) continue;
       if (!envelopeAt(p, p, x, y, clip, this.near, e, "ground")) continue;
       if (e.u < u) u = e.u;
       if (e.l > l) l = e.l;
       if (e.band > band) band = e.band;
+    }
+    // A portal's wider smooth clamp gives way near any piece's reach edge, as `conformedHeightM` folds it.
+    if (band > DAYLIGHT_ROUND_M) {
+      let w = 1;
+      for (let i = 0; i < near.length && w > 0; i++) {
+        const p = near[i] as EarthworkPiece;
+        const k = reachEdgeWeight(p, p, x, y, natural, u, l, "ground", this.near);
+        if (k < w) w = k;
+      }
+      band = bandAt(band, w);
     }
     return conformRule(natural, u, l, band);
   }
@@ -261,7 +277,10 @@ export class EffectiveGround implements GroundQuery {
     return false;
   }
 
-  /** The pieces whose LOD0 reach box holds (x, y), in a reused array. */
+  /**
+   * The pieces whose LOD0 reach box grown by BAND_EDGE_RING_M holds (x, y), in a reused array: the reach box for the
+   * envelopes, the ring for the band's weight (`reachEdgeWeight`).
+   */
   private candidates(x: number, y: number): readonly EarthworkPiece[] {
     const out = this.found;
     out.length = 0;
@@ -269,17 +288,17 @@ export class EffectiveGround implements GroundQuery {
     if (!set) return out;
     for (const key of set) {
       const p = this.pieces.get(key);
-      if (p && x >= p.minX && x <= p.maxX && y >= p.minY && y <= p.maxY) out.push(p);
+      if (p && inEdgeRing(p, x, y)) out.push(p);
     }
     return out;
   }
 
   private index(p: EarthworkPiece): void {
     const cells: number[] = [];
-    const cx0 = Math.floor(p.minX / CELL_M);
-    const cx1 = Math.floor(p.maxX / CELL_M);
-    const cy0 = Math.floor(p.minY / CELL_M);
-    const cy1 = Math.floor(p.maxY / CELL_M);
+    const cx0 = Math.floor((p.minX - BAND_EDGE_RING_M) / CELL_M);
+    const cx1 = Math.floor((p.maxX + BAND_EDGE_RING_M) / CELL_M);
+    const cy0 = Math.floor((p.minY - BAND_EDGE_RING_M) / CELL_M);
+    const cy1 = Math.floor((p.maxY + BAND_EDGE_RING_M) / CELL_M);
     for (let cy = cy0; cy <= cy1; cy++) {
       for (let cx = cx0; cx <= cx1; cx++) {
         const k = cellKey(cx, cy);

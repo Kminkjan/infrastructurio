@@ -114,7 +114,10 @@ import {
  * headwall, U), so the terrain mesh draws the new ground wherever the plug does
  * not cover it. And beyond the wing ends the smooth clamp where the fan meets
  * the hill takes a band up to PORTAL_DAYLIGHT_ROUND_M (`Envelope.band`, folded
- * as the widest; `portal.ts`). Tried first (agent captures, the owner's words
+ * as the widest; `portal.ts`), which gives way to DAYLIGHT_ROUND_M within a
+ * metre of any piece's reach edge whose envelopes could change it
+ * (`reachEdgeWeight`, folded as the least; verification fixes, 2026-09-29), so
+ * the reach and neighbour bounds, sized for DAYLIGHT_ROUND_M, hold. Tried first (agent captures, the owner's words
  * taken literally): the retained skyline R + t continued past the wing ends to
  * meet the section without a headwall (the prism S) or the cone at the point:
  * both grew the retained hill's lit 45° facet into a tongue running up to about
@@ -836,7 +839,9 @@ export const HEADWALL_RISE = 1;
  * ("Portals retain the hill", "Portal wedges rounded"; in `"underlay"` mode no higher than the earlier headwall), and
  * beyond the wing ends `out.band` widens. Past a buffer end's plane that `clipKeys` names (a query for a
  * command continuing from that end, `ground.ts`), the piece moves nothing at all: the command is judged as if the
- * chain ended at the plane, whatever it continues with. `near` is scratch for the nearest centreline point.
+ * chain ended at the plane, whatever it continues with. `near` is scratch for the nearest centreline point (left
+ * holding the foot's). `pastReach` reads the envelopes beyond the reach too, as the formula continues them there
+ * (`reachEdgeWeight`); nothing folds them into the ground.
  */
 export function envelopeAt(
   p: EarthworkPiece,
@@ -847,30 +852,18 @@ export function envelopeAt(
   near: { d: number; s: number },
   out: Envelope,
   mode: EnvelopeMode = "underlay",
+  pastReach = false,
 ): boolean {
-  let t = 0;
-  let px = x;
-  let py = y;
-  let plane: ClipPlane | null = null;
-  const planes = p.planes;
-  for (let i = 0; i < planes.length; i++) {
-    const c = planes[i];
-    if (!c) continue;
-    if (!c.fixed) {
-      if (clipKeys !== null && clipKeys.has(c.key) && (x - c.x) * c.tx + (y - c.y) * c.ty > 0) return false;
-      continue;
-    }
-    const tc = (x - c.x) * c.tx + (y - c.y) * c.ty;
-    if (tc <= t) continue;
-    t = tc;
-    px = x - tc * c.tx;
-    py = y - tc * c.ty;
-    plane = c;
-  }
+  if (!footOnPlanes(p, x, y, clipKeys, foot)) return false;
+  const t = foot.t;
+  const px = foot.x;
+  const py = foot.y;
+  const plane = foot.plane;
   const n = nearestOnCentreline(p, px, py, near);
-  if (n.d >= r.reachM) return false;
+  const beyond = n.d >= r.reachM;
+  if (beyond && !pastReach) return false;
   const bed = bedAt(p, n.s);
-  const section = r.capRiseM === 0 ? slopeRiseM(n.d) : riseAt(r, n.d);
+  const section = r.capRiseM === 0 ? slopeRiseM(n.d) : beyond ? slopeRiseM(n.d) + r.capRiseM : riseAt(r, n.d);
   const rise = section + (t > 0 ? HEADWALL_RISE * t : 0);
   out.d = t > 0 ? n.d + t : n.d;
   out.band = DAYLIGHT_ROUND_M;
@@ -901,6 +894,107 @@ export function envelopeAt(
     if (w > 0) out.band = DAYLIGHT_ROUND_M + (PORTAL_DAYLIGHT_ROUND_M - DAYLIGHT_ROUND_M) * w;
   }
   return true;
+}
+
+/** The point's foot on a piece's farthest fixed clip plane (`envelopeAt`): how far past it, the foot, and the plane. */
+interface Foot {
+  t: number;
+  x: number;
+  y: number;
+  plane: ClipPlane | null;
+}
+
+const foot: Foot = { t: 0, x: 0, y: 0, plane: null };
+const edgeFoot: Foot = { t: 0, x: 0, y: 0, plane: null };
+
+/**
+ * Writes to `out` the foot of plan (x, y) on piece `p`'s farthest fixed clip plane it lies past (the point itself, t 0,
+ * when none); false when a buffer end's query plane that `clipKeys` names drops the piece there (`envelopeAt`).
+ */
+function footOnPlanes(p: EarthworkPiece, x: number, y: number, clipKeys: ReadonlySet<string> | null, out: Foot): boolean {
+  let t = 0;
+  let px = x;
+  let py = y;
+  let plane: ClipPlane | null = null;
+  const planes = p.planes;
+  for (let i = 0; i < planes.length; i++) {
+    const c = planes[i];
+    if (!c) continue;
+    if (!c.fixed) {
+      if (clipKeys !== null && clipKeys.has(c.key) && (x - c.x) * c.tx + (y - c.y) * c.ty > 0) return false;
+      continue;
+    }
+    const tc = (x - c.x) * c.tx + (y - c.y) * c.ty;
+    if (tc <= t) continue;
+    t = tc;
+    px = x - tc * c.tx;
+    py = y - tc * c.ty;
+    plane = c;
+  }
+  out.t = t;
+  out.x = px;
+  out.y = py;
+  out.plane = plane;
+  return true;
+}
+
+/**
+ * Pieces whose earthworks end within this of a point (either side of their reach) switch a tunnel portal's wider
+ * smooth clamp off there (`reachEdgeWeight`), m.
+ */
+export const BAND_EDGE_RING_M = 4;
+
+/**
+ * How much of a portal's wider smooth clamp (`Envelope.band`) piece `p`, at reach `r`, lets through at plan (x, y),
+ * given the natural height there and the envelopes folded over the pieces that reach it (`u`, `l`; `mode` as theirs):
+ * 0 within a metre of where its earthworks end (the plan distance `envelopeAt` tests against its reach, either side)
+ * if its envelopes can change the wider clamp there, 1 from BAND_EDGE_RING_M on or where they cannot, smoothly
+ * between. The reach bound (the envelopes clear the natural ground by DAYLIGHT_ROUND_M and a margin where a piece's
+ * earthworks end) holds only for DAYLIGHT_ROUND_M: with the wider band a piece's fill envelope up to twice the band
+ * under the ground narrows the clamp (`conformRule`), and its cut up to the band over it rounds, so where that piece's
+ * earthworks ended the ground stepped, by up to 0.175 m beside a portal (verification of the D4 portal wedges,
+ * 2026-09-29). Such a piece: its cut the lowest (within 0.5 m) and at most PORTAL_DAYLIGHT_ROUND_M (+1 m) over the
+ * ground, or its fill the highest and at most twice that (+1 m) under it, read as its envelope formula continues past
+ * its reach. The approach's own pieces behind a portal plane are neither (a cut higher than the nearest piece's, a
+ * fill metres under the cutting), so the rounded wedges keep their band. Folded as the least over every piece within
+ * BAND_EDGE_RING_M of its reach box (`bandAt`); where the relevance jumps (another piece's earthworks ending) that
+ * piece's own weight holds the band at DAYLIGHT_ROUND_M, or the band cannot move the result. `near` is scratch.
+ */
+export function reachEdgeWeight(
+  p: EarthworkPiece,
+  r: PieceReach,
+  x: number,
+  y: number,
+  natural: number,
+  u: number,
+  l: number,
+  mode: EnvelopeMode,
+  near: { d: number; s: number },
+): number {
+  // Where the piece's earthworks end: the foot's distance, as `envelopeAt` tests it (most pieces are far from it).
+  footOnPlanes(p, x, y, null, edgeFoot);
+  const off = nearestOnCentreline(p, edgeFoot.x, edgeFoot.y, near).d - r.reachM;
+  const edge = smooth01(1, BAND_EDGE_RING_M, off < 0 ? -off : off);
+  if (edge >= 1) return 1;
+  if (!envelopeAt(p, r, x, y, null, near, edgeEnvelope, mode, true)) return 1;
+  const k = PORTAL_DAYLIGHT_ROUND_M;
+  const eu = edgeEnvelope.u;
+  const el = edgeEnvelope.l;
+  const cut = (1 - smooth01(0, 0.5, eu - u)) * (1 - smooth01(k, k + 1, eu - natural));
+  const fill = el === Number.NEGATIVE_INFINITY ? 0 : (1 - smooth01(0, 0.5, l - el)) * (1 - smooth01(2 * k, 2 * k + 1, natural - el));
+  return 1 - (1 - edge) * (cut > fill ? cut : fill);
+}
+
+const edgeEnvelope: Envelope = { u: 0, l: 0, d: 0, band: 0 };
+
+/** The smooth clamp's band from the widest a piece asks for (`band`) and the least `reachEdgeWeight` there (`w`). */
+export function bandAt(band: number, w: number): number {
+  return band > DAYLIGHT_ROUND_M ? DAYLIGHT_ROUND_M + (band - DAYLIGHT_ROUND_M) * w : band;
+}
+
+/** Whether plan (x, y) lies in a reach box `r` grown by BAND_EDGE_RING_M (the pieces `reachEdgeWeight` reads). */
+export function inEdgeRing(r: PieceReach, x: number, y: number): boolean {
+  return x >= r.minX - BAND_EDGE_RING_M && x <= r.maxX + BAND_EDGE_RING_M && y >= r.minY - BAND_EDGE_RING_M && y <= r.maxY + BAND_EDGE_RING_M;
 }
 
 /** Smoothstep of v from e0 to e1 (0 below, 1 above). */
@@ -943,18 +1037,33 @@ export function conformedHeightM(
   let l = -Infinity;
   let band = DAYLIGHT_ROUND_M;
   const e = scratchEnvelope;
+  const ring = scratchRing;
+  ring.length = 0;
   for (const p of pieces) {
     const r = reachAt(p, lod);
+    if (!inEdgeRing(r, x, y)) continue;
+    ring.push(p);
     if (x < r.minX || x > r.maxX || y < r.minY || y > r.maxY) continue;
     if (!envelopeAt(p, r, x, y, clipKeys, scratchNear, e, mode)) continue;
     if (e.u < u) u = e.u;
     if (e.l > l) l = e.l;
     if (e.band > band) band = e.band;
   }
+  if (band > DAYLIGHT_ROUND_M) {
+    let w = 1;
+    for (let i = 0; i < ring.length && w > 0; i++) {
+      const p = ring[i] as EarthworkPiece;
+      const k = reachEdgeWeight(p, reachAt(p, lod), x, y, natural, u, l, mode, scratchNear);
+      if (k < w) w = k;
+    }
+    band = bandAt(band, w);
+  }
+  ring.length = 0;
   return conformRule(natural, u, l, band);
 }
 
 const scratchNear = { d: 0, s: 0 };
+const scratchRing: EarthworkPiece[] = [];
 const scratchEnvelope: Envelope = { u: 0, l: 0, d: 0, band: 0 };
 
 /**

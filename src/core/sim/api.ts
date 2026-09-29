@@ -33,6 +33,7 @@ export { HISTORY_DEPTH } from "../track/history";
 export type { GroundQuery, GroundView } from "../track/ground";
 export type { ChainAdjacency, ChainStep, ChainTopology, ClipPlane, EarthworkLod, EarthworkPiece, Envelope, EnvelopeMode, PieceInput, PieceReach } from "../track/earthworks";
 export {
+  BAND_EDGE_RING_M,
   BED_BELOW_TRACK_M,
   CAP_FADE_M,
   CREST_ROUND_M,
@@ -46,6 +47,7 @@ export {
   NO_PLANES,
   REACH_STEP_M,
   SIDE_SLOPE_RUN,
+  bandAt,
   bedAt,
   chainPlanes,
   conformRule,
@@ -55,12 +57,14 @@ export {
   earthworkPiece,
   earthworkPieces,
   envelopeAt,
+  inEdgeRing,
   mayNeighbour,
   naturalHeightAtM,
   networkAdjacency,
   nearestOnPiece,
   pointCutReachM,
   reachAt,
+  reachEdgeWeight,
   riseAt,
   settleReaches,
   settledPiece,

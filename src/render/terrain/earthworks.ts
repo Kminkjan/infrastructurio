@@ -11,11 +11,15 @@ import {
   LATTICE_SPACING_M,
   SQRT3,
   type Terrain,
+  BAND_EDGE_RING_M,
+  bandAt,
   conformRule,
   earthworkPieces,
   envelopeAt,
+  inEdgeRing,
   networkAdjacency,
   reachAt,
+  reachEdgeWeight,
 } from "../../core/sim/api";
 import { BORE_DEPTH_M, BORE_HALF_M } from "../structures/dimensions";
 import { lodGridSize, type TerrainLod } from "./offsetGrid";
@@ -430,7 +434,7 @@ export class ChunkPass {
       evaluated += this.accumulate(p);
       yield;
     }
-    yield* this.resolve();
+    yield* this.resolve(pieces);
     yield* this.collect();
     this.stats = { ...this.stats, evaluated };
   }
@@ -641,9 +645,14 @@ export class ChunkPass {
     return evaluated;
   }
 
-  /** Applies the conform rule at every touched sub-vertex and flags the triangles it modifies. */
-  private *resolve(): Generator<void, void, void> {
+  /**
+   * Applies the conform rule at every touched sub-vertex and flags the triangles it modifies. `pieces` are the pass's
+   * (their reach boxes grown by BAND_EDGE_RING_M meet the chunk): a portal's wider band gives way near any of their
+   * reach edges (`reachEdgeWeight`), as the core folds it.
+   */
+  private *resolve(pieces: readonly EarthworkPiece[]): Generator<void, void, void> {
     const k = REFINE;
+    const sub = this.lat.spacingM / k;
     let maxCut = 0;
     let maxFill = 0;
     for (let t = 0; t < this.touchedCount; t++) {
@@ -654,8 +663,35 @@ export class ChunkPass {
       const qs = cs - Math.floor(rs / 2);
       const nat = naturalAtSub(this.terrain, this.lat, qs, rs);
       this.natural[g] = nat;
-      const band = this.band[g] ?? DAYLIGHT_ROUND_M;
-      const c = conformRule(nat, this.upper[g] ?? Infinity, this.lower[g] ?? -Infinity, band);
+      const upper = this.upper[g] ?? Infinity;
+      const upperShown = this.upperShown[g] ?? Infinity;
+      const lower = this.lower[g] ?? -Infinity;
+      let band = this.band[g] ?? DAYLIGHT_ROUND_M;
+      let bandShown = band;
+      if (band > DAYLIGHT_ROUND_M && !Number.isNaN(nat)) {
+        // (The sub-vertex's plan position as `accumulate` computes it.) Per mode: the drawn underlay and the shown
+        // ground fold their own cut envelopes.
+        const x = sub * (cs + (rs & 1) / 2);
+        const y = sub * rs * HALF_SQRT3;
+        let w = 1;
+        let ws = 1;
+        for (let i = 0; i < pieces.length && (w > 0 || ws > 0); i++) {
+          const p = pieces[i] as EarthworkPiece;
+          const r = reachAt(p, this.lat.lod);
+          if (!inEdgeRing(r, x, y)) continue;
+          if (w > 0) {
+            const e = reachEdgeWeight(p, r, x, y, nat, upper, lower, "underlay", this.near);
+            if (e < w) w = e;
+          }
+          if (ws > 0) {
+            const e = reachEdgeWeight(p, r, x, y, nat, upperShown, lower, "ground", this.near);
+            if (e < ws) ws = e;
+          }
+        }
+        bandShown = bandAt(band, ws);
+        band = bandAt(band, w);
+      }
+      const c = conformRule(nat, upper, lower, band);
       if (Number.isNaN(nat) || c === nat) {
         this.modified[g] = 0;
         this.drawn[g] = nat;
@@ -665,7 +701,7 @@ export class ChunkPass {
       this.modified[g] = 1;
       this.drawn[g] = c;
       // The ground as the core shows it: the underlay's own height except past a tunnel plane (`upperShown`).
-      this.shown[g] = (this.upperShown[g] ?? Infinity) === (this.upper[g] ?? Infinity) ? c : conformRule(nat, this.upperShown[g] ?? Infinity, this.lower[g] ?? -Infinity, band);
+      this.shown[g] = upperShown === upper && bandShown === band ? c : conformRule(nat, upperShown, lower, bandShown);
       if (nat - c > maxCut) maxCut = nat - c;
       if (c - nat > maxFill) maxFill = c - nat;
       // Flag every LOD triangle whose closure holds this sub-vertex.
@@ -940,12 +976,20 @@ export function chunksTouching(t: Pick<Terrain, "columns" | "rows">, lod: Terrai
   }
 }
 
-/** Pieces whose reach box at `lod` meets a plan box. */
-export function piecesTouching(pieces: Iterable<EarthworkPiece>, box: { minX: number; minY: number; maxX: number; maxY: number }, lod: TerrainLod = 0): EarthworkPiece[] {
+/**
+ * Pieces whose reach box at `lod`, grown by `grow`, meets a plan box: by default BAND_EDGE_RING_M, the pieces a point
+ * reads (their envelopes within the reach box, a portal's band weight within the ring; `reachEdgeWeight`).
+ */
+export function piecesTouching(
+  pieces: Iterable<EarthworkPiece>,
+  box: { minX: number; minY: number; maxX: number; maxY: number },
+  lod: TerrainLod = 0,
+  grow: number = BAND_EDGE_RING_M,
+): EarthworkPiece[] {
   const out: EarthworkPiece[] = [];
   for (const p of pieces) {
     const r = reachAt(p, lod);
-    if (!(r.maxX < box.minX || r.minX > box.maxX || r.maxY < box.minY || r.minY > box.maxY)) out.push(p);
+    if (!(r.maxX + grow < box.minX || r.minX - grow > box.maxX || r.maxY + grow < box.minY || r.minY - grow > box.maxY)) out.push(p);
   }
   return out;
 }
