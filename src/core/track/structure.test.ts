@@ -329,4 +329,72 @@ describe('a tunnel needs 10 m somewhere (owner decision 2026-09-28, "Needs 10 m 
     expect(kinds(specs, forward)).toBe("gggtttttgggggggggggg");
     expect(new Map(backward.diff.added.map((a) => [a.key, a.structure]))).toEqual(new Map(forward.diff.added.map((a) => [a.key, a.structure])));
   });
+
+  it("undoes and redoes a cutting the rule made from a shallow tunnel run, and undoes its demolition", () => {
+    // The 9.9 m crest above. A history apply carries no structure choice, and until 2026-09-29 it judged the
+    // cutting's pieces against the 8 m band ("needs-tunnel", reported as undo-blocked), although the build had
+    // allowed them 10 m (verification of the D4 portal wedges, automated and agent browser run).
+    const crest = hill([50, 99, 99, 99, 99, 50]);
+    const specs = east(8, 12);
+    const sim = simOn(crest);
+    expect(kinds(specs, sim.execute(auto(specs)))).toBe("gggggggggggg");
+    const after = sim.network().pieces;
+    expect(sim.execute({ type: "undo" }).ok).toBe(true);
+    expect(sim.network().pieces).toHaveLength(0);
+    const redo = sim.execute({ type: "redo" });
+    expect(redo.ok ? "ok" : redo.reason.message).toBe("ok");
+    expect(sim.network().pieces).toEqual(after);
+    // Demolished, and the demolition undone: the same cutting, back.
+    expect(sim.execute({ type: "demolish", pieces: after.map((p) => p.key) }).ok).toBe(true);
+    const back = sim.execute({ type: "undo" });
+    expect(back.ok ? "ok" : back.reason.message).toBe("ok");
+    expect(sim.network().pieces).toEqual(after);
+    // Forced ground, a command's own band, is still 8 m.
+    const forced = simOn(crest).preview({ type: "build-track", pieces: specs, structure: "ground" });
+    expect(!forced.ok && forced.reason.code).toBe("needs-tunnel");
+  });
+
+  it("undoes the demolition of such a cutting after a tunnel was built on from its end", () => {
+    // 9 m of cover over columns 22–29, then 12 m over columns 30–35: a 9 m cutting to (19, 20) first, then a tunnel
+    // on from its end. The cutting's pieces would have stayed a tunnel had the tunnel been there first, so a history
+    // apply must not ask whether the run joins a committed tunnel: the state before the demolition was valid.
+    const terrain = hill([50, 90, 90, 90, 90, 90, 90, 90, 90, 120, 120, 120, 120, 120, 120, 50]);
+    const sim = simOn(terrain);
+    const cut = east(8, 11);
+    expect(kinds(cut, sim.execute(auto(cut)))).toBe("ggggggggggg");
+    const on = east(19, 9);
+    expect(kinds(on, sim.execute(auto(on)))).toBe("tttttttgg");
+    const before = sim.network().pieces;
+    expect(sim.execute({ type: "demolish", pieces: cut.map((s) => piece(s).key) }).ok).toBe(true);
+    const back = sim.execute({ type: "undo" });
+    expect(back.ok ? "ok" : back.reason.message).toBe("ok");
+    expect(sim.network().pieces).toEqual(before);
+  });
+
+  it("redoes the verification's Track drag on the diorama, a cutting the rule allowed deeper than 8 m", () => {
+    // Agent browser run at 8c7dca9: Track, a free start at node (181, 151), the pointer on node (191, 166); after
+    // Ctrl+Z, Ctrl+Shift+Z was refused: "Piece C:188,158,25821:1:1:90:0:27566 runs 8.7 m below the terrain, deeper
+    // than the 8 m a cutting takes".
+    const terrain = generateTerrain({ seed: "baltic-diorama", columns: 400, rows: 346 });
+    const sim = simOn(terrain);
+    const from = { q: 181, r: 151, zMm: sim.groundMm(181, 151) ?? 0 };
+    const to = toWorld({ q: 191, r: 166 });
+    const plan = sim.planTrack({
+      from,
+      to: { xMm: Math.round(to.x * 1000), yMm: Math.round(to.y * 1000) },
+      dzMm: (sim.groundMm(191, 166) ?? 0) - from.zMm,
+      magnetism: true,
+      heightMode: "auto",
+    });
+    expect(plan.pieces).toHaveLength(8);
+    // Forced ground (the ±8 m band) fails: only the 10 m rule makes this drag a cutting.
+    const forced = simOn(terrain).preview({ type: "build-track", pieces: [...plan.pieces], structure: "ground" });
+    expect(!forced.ok && forced.reason.code).toBe("needs-tunnel");
+    expect(kinds(plan.pieces, sim.execute(auto([...plan.pieces])))).toBe("gggggggg");
+    const after = sim.network().pieces;
+    expect(sim.execute({ type: "undo" }).ok).toBe(true);
+    const redo = sim.execute({ type: "redo" });
+    expect(redo.ok ? "ok" : redo.reason.message).toBe("ok");
+    expect(sim.network().pieces).toEqual(after);
+  });
 });

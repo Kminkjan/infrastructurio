@@ -641,6 +641,7 @@ function shallowTunnelRuns(ctx: TrackContext, p: Prepared, extents: readonly (Cl
  * and make the tunnel runs that never reach 10 m of cover ground
  * (`shallowTunnelRuns`); then check each added piece against its structure's
  * rules (`structure.ts`): codes in catalogue order, pieces in command order.
+ * A history apply keeps the pieces' structures and allows ground pieces 10 m.
  */
 function terrainStructure(ctx: TrackContext, p: Prepared): Rejection | null {
   if (p.added.length === 0) return null;
@@ -676,6 +677,13 @@ function terrainStructure(ctx: TrackContext, p: Prepared): Rejection | null {
     });
   }
   const deepCuts = choice === "auto" ? shallowTunnelRuns(ctx, p, extents) : NO_INDICES;
+  // A history apply (undo, redo; `choice` null) re-adds pieces a command committed, with their structures. A ground
+  // piece deeper than the band came from a shallow tunnel run under `auto`, which the build allowed 10 m, so the
+  // apply allows every ground piece 10 m too. It cannot re-derive the runs: the pieces around them may have changed
+  // since (a tunnel built on from a cutting's end would have kept the run a tunnel), and a state restored by undo or
+  // redo was valid. The other ground rules (water, 8 m above) are the runs' own exclusions and still apply.
+  const cutBandOf = (i: number, structure: Structure): number =>
+    deepCuts.has(i) || (choice === null && structure === "ground") ? TUNNEL_MIN_PEAK_COVER_MM : GROUND_BAND_MM;
   const removed = new Set(p.removed.map((r) => r.key));
   // The added pieces by node, built only when a portal or abutment walk first needs them.
   let addedAt: Map<string, Piece[]> | null = null;
@@ -732,7 +740,7 @@ function terrainStructure(ctx: TrackContext, p: Prepared): Rejection | null {
       piece.structure,
       waterMm,
       (end) => reachFrom(piece.ends[end].node, piece, 0),
-      deepCuts.has(i) ? TUNNEL_MIN_PEAK_COVER_MM : GROUND_BAND_MM,
+      cutBandOf(i, piece.structure),
     );
   });
   for (const code of STRUCTURE_CODES) {
