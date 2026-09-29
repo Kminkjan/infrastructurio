@@ -29,7 +29,7 @@ import {
 import { BORE_HALF_M, BORE_SPRING_V, DECK_HALF_M, FOOT_SINK_M, PARAPET_TOP_V, PORTAL_HALF_WIDTH_M, PORTAL_MAX_WING_M, PORTAL_WING_SPLAY_SIN } from "./dimensions";
 import { type BridgeLayout, type LayoutEnv, layoutBridge } from "./layout";
 import { GeometrySink, bend, place } from "./place";
-import { HillPlug, PlugSurface, type PortalApproach, type PortalFrame, portalWings } from "./plug";
+import { HillPlug, type PlugRegion, PlugSurface, type PortalApproach, type PortalFrame, portalWings } from "./plug";
 import { BACKFILL_REACH_S_M, BACKFILL_REACH_U_M, type PortalWings, WING_PIER_ALONG_M, wingAcross } from "./portalOutline";
 import { type PathPoint, RunPath } from "./runPath";
 import { type StructureRun, isPortalEnd, structureRuns } from "./runs";
@@ -644,22 +644,16 @@ export class StructureView {
         const drawnWings = unpackPortal(variant);
         return { portal: p, wings: { left: drawnWings.wingLeftM, right: drawnWings.wingRightM, steepLeft: drawnWings.steepLeft, steepRight: drawnWings.steepRight } };
       });
-      const surface = new PlugSurface(
-        terrain,
-        members.map((m) => ({ frame: m.portal.frame, wings: m.wings })),
-        { ...(drawn ? { drawnM: drawn } : {}), ...(effectiveM ? { effectiveM } : {}), ...(cutM ? { cutM } : {}), ...(attributeM ? { attributeM } : {}) },
-      );
       // A two-portal run's plugs meet at its middle, square to the track there (one surface, so the seam is exact).
       let split: { x: number; y: number; tx: number; ty: number } | undefined;
       if (members.length === 2) {
         path.at(path.lengthM / 2, P);
         split = { x: P.x, y: P.y, tx: P.tx, ty: P.ty };
       }
-      members.forEach((m, i) => {
-        const f = m.portal.frame;
+      const regions: PlugRegion[] = members.map((m, i) => {
         const longest = Math.max(m.wings.left, m.wings.right);
         const across = wingAcross(longest + (WING_PIER_ALONG_M[1] ?? 0)) + 1;
-        const region = {
+        return {
           portal: i,
           // In front of the face: the fill behind the splayed wings and the bank beyond their ends.
           sMin: -(PORTAL_WING_SPLAY_SIN * (longest + 1) + BACKFILL_REACH_U_M * PORTAL_WING_SPLAY_SIN + 1),
@@ -668,6 +662,17 @@ export class StructureView {
           // The end 0 portal keeps the side before the middle, the end 1 portal the side after it.
           ...(split ? { split: m.portal.end === 0 ? split : { x: split.x, y: split.y, tx: -split.tx, ty: -split.ty } } : {}),
         };
+      });
+      // The surface comes down to the drawn ground toward the regions' edges, so no plug is cut off at its box.
+      const surface = new PlugSurface(
+        terrain,
+        members.map((m) => ({ frame: m.portal.frame, wings: m.wings })),
+        { ...(drawn ? { drawnM: drawn } : {}), ...(effectiveM ? { effectiveM } : {}), ...(cutM ? { cutM } : {}), ...(attributeM ? { attributeM } : {}) },
+        regions,
+      );
+      members.forEach((m, i) => {
+        const f = m.portal.frame;
+        const region = regions[i] as PlugRegion;
         const plug = new HillPlug(terrain, this.shading, surface, region);
         plugs.push(plug);
         const pm = this.plugMesh(plug);

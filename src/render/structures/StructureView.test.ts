@@ -531,6 +531,133 @@ describe("structure rebuild cost on the diorama (a dev measurement, not a gate)"
     registry.dispose();
   });
 
+  it("ends every diorama plug on the drawn terrain along its open outline, and its bank soon past the end piers, wired as the app wires them", async () => {
+    // Verification of the D4 portal wedges (2026-09-29, automated probe and agent captures): at 8c7dca9 the open
+    // outline stood off the drawn terrain about 9 m behind the plane beyond the wing ends (ew75 west 0.182 m, xslope
+    // 0.061 m, ewhill west 0.174 m: a seam vertex on the effective ground as the core computes it, over a terrain mesh
+    // that sags under the rounded end by its linear error), and the bank beyond a wing's end pier was cut off at the
+    // plug's region box (ew75 west 0.468 m, the dead end 0.663 m). The outline's edges (those one plug triangle uses),
+    // sampled at their ends and quarter points, away from the masonry (within 0.7 m of a wall's line), against the
+    // terrain mesh.
+    const { diorama, toolStartMm } = await import("../../../tests/support/groundPlans");
+    const { nearestNode } = await import("../../core/sim/api");
+    const { behindFront, openFrontOrigin, underMasonry } = await import("./portalOutline");
+    const { PORTAL_WING_SPLAY_COS, PORTAL_WING_SPLAY_SIN } = await import("./dimensions");
+    const { terrain: dio } = diorama();
+    const dshading = computeTerrainShading(dio);
+    const registry = new AssetRegistry();
+    registerStructureAssets(registry);
+    const worstBy: Record<string, number> = {};
+    const pastBy: Record<string, number> = {};
+    for (const [name, from, to] of [
+      ["ew75", [227, 138], [259, 138]],
+      ["xslope", [247, 130], [223, 142]],
+      ["ewhill", [254, 129], [302, 129]],
+      ["deadend", [220, 140], [236, 140]],
+    ] as const) {
+      const world = createWorld(dio);
+      const earthworks = new EarthworksView({ terrain: dio, target: { shading: dshading, replaceChunk: () => true }, requestFrame: () => {}, now: () => 0, budgetMs: Infinity });
+      const view = new StructureView({
+        terrain: dio,
+        registry,
+        material,
+        plugMaterial: material,
+        shading: dshading,
+        water: waterPlane(dio, dshading.waterDistance),
+        requestFrame: () => undefined,
+        now: () => 0,
+        budgetMs: 1e9,
+        groundM: (x: number, y: number) => earthworks.heightfield.heightAtM(x, y),
+        effectiveIn: (box: { minX: number; minY: number; maxX: number; maxY: number }) => earthworks.effectiveIn(box),
+        cutEnvelopeIn: (box: { minX: number; minY: number; maxX: number; maxY: number }, except: readonly string[]) => earthworks.cutEnvelopeIn(box, except),
+        attributeIn: (box: { minX: number; minY: number; maxX: number; maxY: number }) => earthworks.attributeIn(box),
+        notchBox: (key: string) => earthworks.notchBox(key),
+        ground: earthworks.ground,
+      });
+      // The Straight line as the tool plans it (planned once more for the ground at the plan's end node).
+      const w = toWorld({ q: to[0], r: to[1] });
+      const zMm = toolStartMm(dio, { q: from[0], r: from[1] });
+      const end = nearestNode({ x: w.x, y: w.y });
+      const drag = { from: { q: from[0], r: from[1], zMm }, to: { xMm: Math.round(w.x * 1000), yMm: Math.round(w.y * 1000) }, dzMm: (world.groundMm(end.q, end.r) ?? zMm) - zMm, magnetism: true, heightMode: "straight" } as const;
+      let plan = world.plan(drag);
+      if (plan.end && !plan.snapped) plan = world.plan({ ...drag, dzMm: (world.groundMm(plan.end.node.q, plan.end.node.r) ?? zMm) - zMm });
+      expect(world.run({ type: "build-track", pieces: plan.pieces, structure: "auto" }, true).ok).toBe(true);
+      for (let i = 0; i < 100 && (earthworks.sync(world.network() as NetworkView, world.ground()) || earthworks.busy); i++);
+      for (let i = 0; i < 100 && (view.sync(world.network() as NetworkView) || view.busy); i++);
+      const outlines = view.portalOutlines;
+      expect(outlines.length, name).toBeGreaterThan(0);
+      const nearMasonry = (x: number, y: number): boolean =>
+        outlines.some(({ frame: f, wings }) => {
+          const s = (x - f.x) * f.tx + (y - f.y) * f.ty;
+          const u = (x - f.x) * f.ty - (y - f.y) * f.tx;
+          for (let ds = -0.7; ds <= 0.701; ds += 0.1) {
+            for (let du = -0.7; du <= 0.701; du += 0.1) {
+              if (Math.hypot(ds, du) <= 0.7 && Math.abs(behindFront(s + ds, u + du)) < 0.05 && underMasonry(s + ds, u + du, wings)) return true;
+            }
+          }
+          return false;
+        });
+      let worst = 0;
+      let samples = 0;
+      view.group.traverse((o) => {
+        const mesh = o as Mesh;
+        if (!mesh.isMesh || mesh.name !== "hill plug") return;
+        const pos = mesh.geometry.getAttribute("position");
+        const key = (i: number) => `${Math.round(pos.getX(i) * 1e4)},${Math.round(pos.getZ(i) * 1e4)}`;
+        const edges = new Map<string, { n: number; a: number; b: number }>();
+        for (let t = 0; t < pos.count / 3; t++) {
+          for (let e = 0; e < 3; e++) {
+            const a = 3 * t + e;
+            const b = 3 * t + ((e + 1) % 3);
+            const k = [key(a), key(b)].sort().join("|");
+            const g = edges.get(k);
+            if (g) g.n += 1;
+            else edges.set(k, { n: 1, a, b });
+          }
+        }
+        for (const e of edges.values()) {
+          if (e.n !== 1) continue;
+          for (const f of [0, 0.25, 0.5, 0.75, 1]) {
+            const x = pos.getX(e.a) + (pos.getX(e.b) - pos.getX(e.a)) * f;
+            const y = -(pos.getZ(e.a) + (pos.getZ(e.b) - pos.getZ(e.a)) * f);
+            const z = pos.getY(e.a) + (pos.getY(e.b) - pos.getY(e.a)) * f;
+            if (nearMasonry(x, y)) continue;
+            samples += 1;
+            worst = Math.max(worst, z - earthworks.heightfield.heightAtM(x, y));
+          }
+        }
+      });
+      expect(samples, name).toBeGreaterThan(200);
+      worstBy[name] = Math.round(worst * 1000) / 1000;
+      // Past each wing's end pier the backfill's bank comes down to the ground within a few metres along the wing line:
+      // at 8c7dca9 it stood more than 0.1 m over the terrain 7.0–7.8 m past a pier at these four portals, a lit sliver
+      // down the approach's embankment at yaws 4 and 5 (ew75 west, the dead end).
+      let past = 0;
+      for (const { frame: f, wings } of outlines) {
+        for (const side of [1, -1] as const) {
+          const o = openFrontOrigin(side, side === 1 ? wings.right : wings.left, { s: 0, u: 0 });
+          for (let along = 0; along <= 14; along += 0.1) {
+            for (let off = 0; off <= 3; off += 0.1) {
+              const s = o.s - PORTAL_WING_SPLAY_SIN * along + PORTAL_WING_SPLAY_COS * off;
+              const u = o.u + side * (PORTAL_WING_SPLAY_COS * along + PORTAL_WING_SPLAY_SIN * off);
+              const x = f.x + f.tx * s + f.ty * u;
+              const y = f.y + f.ty * s - f.tx * u;
+              const h = view.plugHeightAt(x, y);
+              if (!Number.isNaN(h) && h - earthworks.heightfield.heightAtM(x, y) > 0.1) past = Math.max(past, along);
+            }
+          }
+        }
+      }
+      pastBy[name] = Math.round(past * 10) / 10;
+      view.dispose();
+    }
+    // Measured 2026-09-29 (automated): 0.009, 0.011, 0.002 and 0.000 m (ew75, xslope, ewhill, dead end); at 8c7dca9
+    // 0.468, 0.194, 0.268 and 0.663 m. The bank past the piers: 0.5, 0.7, 2.4 and 0.8 m (7.8, 7.3, 7.5 and 7.0 m).
+    for (const [name, worst] of Object.entries(worstBy)) expect(worst, name).toBeLessThan(0.02);
+    for (const [name, past] of Object.entries(pastBy)) expect(past, name).toBeLessThan(3);
+    registry.dispose();
+  });
+
   it("times tunnel edits with their approach cuttings, the earthworks and structures wired as the app wires them", async ({ annotate }) => {
     // Verification finding (2026-09-29): the forced 43-piece tunnel above wires no earthworks, so it hid what a tunnel
     // edit costs in the app (the plugs read the earthworks' effective ground, cut envelopes and notch boxes, and the

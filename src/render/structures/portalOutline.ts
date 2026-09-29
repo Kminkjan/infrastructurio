@@ -255,6 +255,17 @@ export function openFrontDistance(side: 1 | -1, wingM: number, s: number, u: num
 }
 
 /**
+ * The origin of the open front's ray beyond the wing on `side` of length `wingM` (`openFrontDistance`): the outer end
+ * of its end pier, PLUG_START_M behind the wing line (the face's edge where no wing stands), written to `out`.
+ */
+export function openFrontOrigin(side: 1 | -1, wingM: number, out: FramePoint): FramePoint {
+  const t = wingM > 0.05 ? wingM + (WING_PIER_ALONG_M[1] ?? 0) : 0;
+  out.s = -PORTAL_WING_SPLAY_SIN * t + PLUG_START_M * PORTAL_WING_SPLAY_COS;
+  out.u = side * (PORTAL_HALF_WIDTH_M + PORTAL_WING_SPLAY_COS * t + PLUG_START_M * PORTAL_WING_SPLAY_SIN);
+  return out;
+}
+
+/**
  * The compact backfill's height over the track height at (s, u) behind the outline (see the module comment): the
  * berm at the retained skyline falling 1 : 1.5 behind the face, the ridge over the bore, and, given the wings'
  * lengths, a berm behind each wing at the retained skyline of its nearest point (its own coping, less the coping's

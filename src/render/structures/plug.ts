@@ -13,6 +13,7 @@ import {
   behindFront,
   masonryCapV,
   openFrontDistance,
+  openFrontOrigin,
   retainV,
   underMasonry,
   wingAcross,
@@ -95,6 +96,8 @@ export const PLUG_BLEND_RISE_M = 0.3;
 const FRONT_SLACK_M = 0.3;
 /** The effective ground is read only where the underlay lies this far under the natural ground (its notch). */
 const NOTCH_MIN_M = 1e-4;
+/** A clip vertex this close behind the plug's front line lies on its outline (`HillPlug`'s `exact`), m. */
+const ON_OUTLINE_M = 1e-3;
 /** The plug's sub-lattice step: the refined earthworks' 1.25 m. */
 const SUB = 4;
 const HALF_SQRT3 = SQRT3 / 2;
@@ -284,17 +287,48 @@ export class PlugSurface {
   private readonly foot = { s: 0, u: 0 };
   private readonly footRight = { s: 0, u: 0 };
   private readonly footLeft = { s: 0, u: 0 };
+  private readonly origin = { s: 0, u: 0 };
 
   constructor(
     private readonly terrain: Terrain,
     readonly portals: readonly PlugPortal[],
     private readonly ground: PlugGround = {},
+    /**
+     * The regions its plugs draw in (`PlugRegion`; the split is ignored): the surface comes down to the drawn ground
+     * at 45° toward their edges (the largest allowance of any), so a plug ends on the ground inside its region rather
+     * than being cut off at the box. None: no taper.
+     */
+    private readonly regions: readonly PlugRegion[] = [],
   ) {
     this.lat = lodLattice(terrain, 0);
   }
 
-  /** The surface at sim plan (x, y), with natural height `natural` (NaN off the map), written to `out`. */
-  sample(x: number, y: number, natural: number, out: PlugSample): PlugSample {
+  /**
+   * How far plan (x, y) lies inside the regions (the largest over them, ≥ 0 inside one; +Infinity with none): the
+   * distance to the nearest side of each region's box, in its portal's frame.
+   */
+  private insideRegions(x: number, y: number): number {
+    if (this.regions.length === 0) return Number.POSITIVE_INFINITY;
+    let best = Number.NEGATIVE_INFINITY;
+    for (const r of this.regions) {
+      const p = this.portals[r.portal];
+      if (!p) continue;
+      const l = frameLocal(p.frame, x, y, this.local);
+      const au = l.u < 0 ? -l.u : l.u;
+      let inside = l.s - r.sMin;
+      if (r.sMax - l.s < inside) inside = r.sMax - l.s;
+      if (r.uMax - au < inside) inside = r.uMax - au;
+      if (inside > best) best = inside;
+    }
+    return best;
+  }
+
+  /**
+   * The surface at sim plan (x, y), with natural height `natural` (NaN off the map), written to `out`. `effectiveM`,
+   * when given, is the core's effective ground there (instead of reading it): a clip vertex inside the plug takes it
+   * interpolated on the lattice, as the terrain mesh draws the ground (`HillPlug`).
+   */
+  sample(x: number, y: number, natural: number, out: PlugSample, effectiveM?: number): PlugSample {
     const g = this.ground;
     const drawn = g.drawnM ? g.drawnM(x, y) : Number.NaN;
     const first = this.portals[0]?.frame.z ?? 0;
@@ -305,6 +339,8 @@ export class PlugSurface {
     let fill = Number.NEGATIVE_INFINITY;
     let open = Number.POSITIVE_INFINITY;
     let openFrame: PortalFrame | undefined;
+    let openSide: 1 | -1 = 1;
+    let openWing = 0;
     let masonry = Number.POSITIVE_INFINITY;
     for (const p of this.portals) {
       const l = frameLocal(p.frame, x, y, this.local);
@@ -329,11 +365,14 @@ export class PlugSurface {
         const f = oR < oL ? this.footRight : this.footLeft;
         this.foot.s = f.s;
         this.foot.u = f.u;
+        openSide = oR < oL ? 1 : -1;
+        openWing = oR < oL ? p.wings.right : p.wings.left;
       }
     }
     // The effective ground differs from the underlay only in its notch behind a portal plane.
     let e = d;
-    if (behindAny && g.effectiveM && d < out.n - NOTCH_MIN_M) {
+    if (effectiveM !== undefined) e = effectiveM > d ? effectiveM : d;
+    else if (behindAny && g.effectiveM && d < out.n - NOTCH_MIN_M) {
       const h = g.effectiveM(x, y);
       if (!Number.isNaN(h) && h > e) e = h;
     }
@@ -355,13 +394,41 @@ export class PlugSurface {
       const fy = openFrame.y + openFrame.ty * this.foot.s - openFrame.tx * this.foot.u;
       const fd = g.drawnM ? g.drawnM(fx, fy) : Number.NaN;
       const base = Number.isNaN(fd) ? this.naturalAt(fx, fy) : fd;
-      const cap = (Number.isNaN(base) ? d : base) + OPEN_FRONT_RISE * open;
-      if (cap < top) top = cap;
-      if (cap < out.f) out.f = cap;
+      const ground = Number.isNaN(base) ? d : base;
+      const cap = ground + OPEN_FRONT_RISE * open;
+      // Past a wing's end pier the backfill falls 1 : 1.5 from the wing's coping; where the ground along the open front
+      // falls away as fast (a low portal's downhill side, down its approach's embankment) it ran on as a 0.4 m ridge
+      // metres long, a lit sliver from the end pier (verification of the D4 portal wedges, 2026-09-29: ew75 west and
+      // the dead end, yaws 4 and 5). So it falls as far again as that ground falls under the ground at the pier: it
+      // ends within a metre or two of it. Where the ground rises (a cutting's slope toward the hill) nothing changes,
+      // so the bank still ramps up to the hill a portal retains beyond a short wing.
+      let fall = 0;
+      if (out.f > Number.NEGATIVE_INFINITY) {
+        const o = openFrontOrigin(openSide, openWing, this.origin);
+        const ox = openFrame.x + openFrame.tx * o.s + openFrame.ty * o.u;
+        const oy = openFrame.y + openFrame.ty * o.s - openFrame.tx * o.u;
+        const od = g.drawnM ? g.drawnM(ox, oy) : Number.NaN;
+        const atPier = Number.isNaN(od) ? this.naturalAt(ox, oy) : od;
+        if (!Number.isNaN(atPier) && ground < atPier) fall = atPier - ground;
+      }
+      top = e < cap ? e : cap;
+      let f = out.f - fall;
+      if (cap < f) f = cap;
+      if (f > top) top = f;
+      out.f = f;
     }
     // Never over the masonry it abuts (`masonryCapV`), so its front edge never floats over a coping.
     if (masonry < top) top = masonry;
     if (masonry < out.f) out.f = masonry;
+    // Down to the drawn ground at 45° toward the regions' edges: the backfill's bank past a wing's end pier ran on over
+    // falling ground past the box, which cut it off 0.2–0.7 m over the terrain (verification of the D4 portal wedges,
+    // 2026-09-29). It binds only there: the regions reach well past the fill and the notch.
+    const inside = this.insideRegions(x, y);
+    if (inside !== Number.POSITIVE_INFINITY) {
+      const cap = d + OPEN_FRONT_RISE * inside;
+      if (cap < top) top = cap;
+      if (cap < out.f) out.f = cap;
+    }
     out.t = top;
     out.v = top > d ? top : d;
     return out;
@@ -410,6 +477,8 @@ interface BuildVertex {
   d: number;
   over: number;
   rise: number;
+  /** The surface's effective ground (PlugSample.e: the drawn ground, or the core's over its notch), linear between lattice vertices. */
+  effective: number;
   /** The terrain's own look there (`t…`: normal, linear colour, earthwork attribute) and the plug's (`p…`). */
   tnx: number;
   tny: number;
@@ -746,6 +815,7 @@ export class HillPlug {
         d: dv,
         over: v - dv,
         rise: contourRise(fv, dv, notchNear(qs, rs)),
+        effective: ev,
         tnx: terrainNormal.x,
         tny: terrainNormal.y,
         tnz: terrainNormal.z,
@@ -797,9 +867,16 @@ export class HillPlug {
     // float over the drawn ground along the open front (the drawn ground is linear along the edge, the plug is not).
     // (The drawn ground and the contour value stay interpolated: every clip vertex lies in its lattice triangle, where
     // the terrain mesh is linear, so it is the mesh's own height there; and the contour clip then splits every edge
-    // where its neighbour does.)
+    // where its neighbour does.) Off the outline (a seam inside the region: a line's extension behind the face, the
+    // box, a split) the core's effective ground is taken as the mesh would draw it, interpolated from the lattice
+    // vertices (`effective`): read exactly, it stood over the drawn ground by the mesh's own linear error where the ground
+    // is curved (up to 0.18 m on the rounded cutting's end beyond the wing ends), and where such a seam vertex lay on
+    // an edge shared with the terrain the outline showed a see-through crack (verification of the D4 portal wedges,
+    // 2026-09-29). On the outline (under the masonry, the open front) it stays exact, so the plug meets the copings.
     const exact = (p: BuildVertex): void => {
-      const e = this.surface.sample(p.x, p.y, this.surface.naturalAt(p.x, p.y), sample);
+      const l = frameLocal(this.frame, p.x, p.y, this.local);
+      const seam = behindFront(l.s, l.u) > ON_OUTLINE_M;
+      const e = this.surface.sample(p.x, p.y, this.surface.naturalAt(p.x, p.y), sample, seam ? p.effective : undefined);
       p.z = e.t > p.d ? e.t : p.d;
       p.over = p.z - p.d;
     };
@@ -919,6 +996,7 @@ function lerpVertex(a: BuildVertex, b: BuildVertex, t: number): BuildVertex {
     d: m(a.d, b.d),
     over: m(a.over, b.over),
     rise: m(a.rise, b.rise),
+    effective: m(a.effective, b.effective),
     tnx,
     tny,
     tnz,
