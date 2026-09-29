@@ -181,6 +181,44 @@ describe("hill plug", () => {
     for (let t = 0; t < d.triangleCount; t++) expect(faceUp(d.positions, t)).toBeGreaterThan(0);
   });
 
+  it("keeps its normals steady along the face behind the masonry, where its neighbours lie on the cutting: no sawtooth (D4 portal wedges)", () => {
+    // A flat hill 8.5 m over the track (the ew75 east portal's): the approach's cutting in front of the face, the
+    // underlay's notch behind it, and the core's retained hill (natural here, trimmed 45° above the retained skyline).
+    // Along the face the surface is the same at every u, so the plug's normals must be too; they alternated with the
+    // lattice where a vertex's six neighbours reached across the face into the cutting 8 m below (verification finding
+    // 2026-09-29, the "ew75 east teeth").
+    const s = site(245);
+    const n = 24.5;
+    const z = s.frame.z;
+    const cut = (u: number) => Math.min(n, z + Math.max(0, Math.abs(u) - 3) / 1.5);
+    const drawnM = (x: number, y: number) => {
+      const ss = x - s.frame.x;
+      const u = s.frame.y - y;
+      return ss <= 0 ? cut(u) : Math.abs(u) < 10 ? Math.min(n, z + Math.max(0, Math.abs(u) - 3) / 1.5 + ss) : n;
+    };
+    const effectiveM = (x: number, y: number) => {
+      const ss = x - s.frame.x;
+      const u = s.frame.y - y;
+      return ss <= 0 ? cut(u) : Math.min(n, z + retainV(Math.abs(u)) + ss);
+    };
+    const plug = plugOf(s, { drawnM, effectiveM });
+    const d = plug.data;
+    // Behind the wall's back (1.2–2.4 m behind the face plane) the surface is the flat hill (the cap under the coping
+    // meets it 0.92 m behind): the plug's normals there stand near vertical, the same along the face at every u.
+    let worst = 0;
+    let count = 0;
+    for (let v = 0; v < 3 * d.triangleCount; v++) {
+      const ss = (d.positions[3 * v] ?? 0) - s.frame.x;
+      const u = s.frame.y + (d.positions[3 * v + 2] ?? 0);
+      if (ss < 1.2 || ss > 2.4 || Math.abs(u) > 3) continue;
+      count += 1;
+      worst = Math.max(worst, Math.hypot(d.normals[3 * v] ?? 0, d.normals[3 * v + 2] ?? 0));
+    }
+    expect(count).toBeGreaterThan(10);
+    // (With the whole six-neighbour stencil the first two rows leaned up to 0.92, toward the cutting.)
+    expect(worst).toBeLessThan(0.2);
+  });
+
   it("closes a low portal with the compact backfill: the face top over the face and the bore, then 1 : 1.5 down to the hill", () => {
     // The hill stands only 4 m over the track (20 m); no notch.
     const s = site(200);

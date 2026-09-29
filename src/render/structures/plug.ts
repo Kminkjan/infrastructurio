@@ -58,7 +58,10 @@ export { PLUG_START_M } from "./portalOutline";
  * own potential, as on an embankment. Where the plug lies on the terrain (its outline) it takes the terrain mesh's
  * own normal and attribute, so shading and colours run on across the outline; where it is the natural hill (δ = 0)
  * it has the terrain's normals, colours and facets. The old plug's tilted normals and switched-off facets over a slab
- * were the owner's dark smudge. Presentation only.
+ * were the owner's dark smudge. Behind the masonry the plug's gradient is one-sided (`acrossMasonry`): a vertex's
+ * neighbours inside or in front of a wall lie on its cap or on the cutting metres below, which tilted the first two
+ * rows' normals up to 67° toward the face, and the edge of that band followed the lattice's zigzag (the "ew75 east teeth", D4 portal wedges,
+ * 2026-09-29). Presentation only.
  *
  * **What the core does not see** (the diagnosis judge's risk, checked 2026-09-29). The backfill (behind a low face)
  * and the fill behind a splayed wing (in front of the face plane, where the core keeps the approach cutting's batter)
@@ -481,6 +484,15 @@ export class HillPlug {
     return PORTAL_WING_SPLAY_COS * l.s + PORTAL_WING_SPLAY_SIN * (u - PORTAL_HALF_WIDTH_M) - PLUG_START_M;
   }
 
+  /**
+   * Whether sub-lattice vertex (qs, rs) lies in front of the plug's front line where masonry stands over it: inside a
+   * wall or in front of it, where the surface is the wall's cap or the cutting, not the plug.
+   */
+  private acrossMasonry(qs: number, rs: number, sub: number): boolean {
+    const l = frameLocal(this.frame, sub * (qs + rs / 2), sub * rs * HALF_SQRT3, this.local);
+    return behindFront(l.s, l.u) < -1e-9 && underMasonry(l.s, l.u, this.wings);
+  }
+
   /** How many convex constraints bound the region (the box's four sides, and a split). */
   private get convexCount(): number {
     return this.region.split ? 5 : 4;
@@ -658,7 +670,11 @@ export class HillPlug {
       const n0 = Math.hypot(n0x, n0y, n0z) || 1;
       // The natural normal tilted by a departure's least-squares gradient over the six neighbours, exactly as the
       // terrain mesh tilts a moved vertex (zero where the departure is flat, so the terrain's own normal there).
-      const tilted = (depart: (qs: number, rs: number) => number, out: { x: number; y: number; z: number }): void => {
+      // Behind the masonry the six neighbours of a vertex can lie across it, inside or in front of a wall (its cap, or
+      // the cutting metres lower): there the plug's gradient is one-sided, the opposite neighbour's difference mirrored
+      // (0 when both lie across). Which neighbour fell across varied along the face and the wings with the lattice, so
+      // the first rows' normals alternated: the "ew75 east teeth" (D4 portal wedges, 2026-09-29).
+      const tilted = (depart: (qs: number, rs: number) => number, out: { x: number; y: number; z: number }, oneSided = false): void => {
         let nx = n0x / n0;
         let ny = n0y / n0;
         let nz = n0z / n0;
@@ -666,7 +682,15 @@ export class HillPlug {
         let gx = 0;
         let gy = 0;
         for (let i = 0; i < 24; i += 4) {
-          const dd = depart(qs + (NEIGHBOURS[i] ?? 0), rs + (NEIGHBOURS[i + 1] ?? 0)) - d0;
+          const nq = qs + (NEIGHBOURS[i] ?? 0);
+          const nr = rs + (NEIGHBOURS[i + 1] ?? 0);
+          let dd: number;
+          if (oneSided && this.acrossMasonry(nq, nr, sub)) {
+            const j = (i + 12) % 24;
+            const oq = qs + (NEIGHBOURS[j] ?? 0);
+            const or = rs + (NEIGHBOURS[j + 1] ?? 0);
+            dd = this.acrossMasonry(oq, or, sub) ? 0 : d0 - depart(oq, or);
+          } else dd = depart(nq, nr) - d0;
           gx += (NEIGHBOURS[i + 2] ?? 0) * dd;
           gy += (NEIGHBOURS[i + 3] ?? 0) * dd;
         }
@@ -685,7 +709,7 @@ export class HillPlug {
         out.z = nz;
       };
       tilted(shownDeparture, terrainNormal);
-      tilted(departure, plugNormal);
+      tilted(departure, plugNormal, true);
       // Made ground blends toward the dry recipe as it moves: the terrain by its drawn departure, the plug by its own.
       const dryT = smoothstep(EARTHWORK_MIN_M, DRY_FULL_M, Math.abs(dv - nv));
       const dryP = smoothstep(EARTHWORK_MIN_M, DRY_FULL_M, Math.abs(v - nv));
