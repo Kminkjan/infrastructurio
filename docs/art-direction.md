@@ -1134,6 +1134,9 @@ rounds its crest at any steepness.
 
 ## Portals, plugs and approaches: second feel-check fixes (2026-09-28)
 
+> Scope note (2026-09-29): beyond the wing ends the approach cutting no longer ends in the 45°
+> headwall described here; see [the wedges rounded](#portals-the-wedges-rounded-2026-09-29).
+
 **Status (2026-09-29, agent):** built on branch `codex/d4-structures` (draft PR
 [#84](https://github.com/Kminkjan/infrastructurio/pull/84)), render code at `31917c8`, core at
 `ec9d225`. **Not judged:** the owner reads it, and nothing here is a Look Gate result. The
@@ -1203,3 +1206,56 @@ render-only fill (behind low faces and splayed wings) that the core does not see
 can start up to about 4 m under it; the steep wings and the 45° bank beyond the end piers;
 wings longer than the answer's "~4–6 m"; a short two-portal tunnel in the browser (none is
 left under 40 m in the populations); the cut-off rest of the owner's message.
+
+## Portals: the wedges rounded (2026-09-29)
+
+**Status (2026-09-29, agent):** built on branch `codex/d4-structures` (draft PR
+[#84](https://github.com/Kminkjan/infrastructurio/pull/84)). **Not judged:** the owner reads it,
+and nothing here is a Look Gate result. The trigger was the owner's answer after the
+verification of the second feel-check fixes, "Round it off": "Continue the retained hill's gentle
+1:1.5 fall past the wing-wall ends and round the crease smoothly (core ground rule + plug), so
+the cutting blends into the hill with no lit wedge or teeth." The answer, the diagnosis, the
+variants tried and the numbers are in the
+[ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-29-d4-portal-wedges-rounded).
+
+- **The cutting's end is rounded.** Beyond a portal's wing ends the approach cutting used to end
+  in a planar 45° headwall: a parallelogram lit at some yaws and dark at others, meeting the
+  retained hill's 45° trim in a sharp V and the cutting's slope along the portal plane. It is now
+  a fan round the wing end: it leaves the cutting's side slope at the plane with the same slope,
+  rises 45° beside the retained hill, so no tongue of hill runs on past the wings, and rounds
+  between, like the rounded end of a cutting at a buffer. The V is a rounded valley, and where
+  the fan meets the natural hill the edge is rounded over about 4 m instead of about 1 m.
+- **The retained hill stays.** Behind the face and the wings the hill is kept as before: the
+  natural hill, trimmed 45° above the masonry's skyline where it stands higher. That trim is still
+  a steep slope, so where the hill stands high over the wings it still reads lit or dark at some
+  yaws, now as a rounded shoulder rather than a triangle.
+- **No teeth behind the masonry.** The sawtooth that ran down the hill side of a face and its
+  wings was the plug's shading: the first two rows of its 1.25 m triangles leaned up to 67°
+  toward the face, because their normals read the ground inside and in front of the wall, and
+  the edge of that band followed the lattice. Behind the masonry the plug's normals now read the
+  plug's own side only.
+- **Unchanged:** the masonry, the splayed wings, the compact backfill and its 45° bank beyond
+  the wing ends at low portals, the dark bore, and the palette (no token changed).
+
+**Agent observations** (headless Chrome through Playwright, 1280 × 800, Apple M5 Pro, ANGLE
+Metal; the scenes of the 2026-09-29 verification, laid with the real pointer and shot in Select;
+`CAPTURE=1 npx playwright test --project=capture tests/e2e/d4wedges.capture.ts`, images in the
+gitignored `test-results/d4-wedges/`, `before/` at `2ae19ab`, `after/` final; notes, not a look
+verdict):
+- **ew75 west, Close yaw 4** (the lit triangle left of the portal): a rounded lit shoulder where
+  the sharp triangle stood, and a soft shadow beside it instead of the dark parallelogram.
+- **ew75 east, Detail yaw 3** (the teeth): a smooth shade behind the face and the wing where
+  about eight teeth ran; two small steps at the top of the lit band remain, as before.
+- **short40, Close yaw 4** (the owner's facing-portal layout): at the south portal the lit
+  parallelogram over the face and the dark triangle beside its lower wing are soft shades now,
+  the one over the face darker than before (the retained trim there faces away from the sun);
+  at the north portal the thin crease from the face's corner is a soft fold.
+- **The dead end and ew75 west at the rest view (yaw 0):** the thin dark crease from the face's
+  hill-side top corner is a broad soft fold, with faint streaks in it.
+- **low2, low3 and xslope:** the same rounding; no pit, ridge, seam or grass in the bore seen.
+
+**Open (not established here):** how the owner reads any of it; Look Gates A and B; the retained
+45° trim behind the wings, which still shows lit or dark where the hill stands high; the faint
+streaks in the rest-view fold; the 45° bank beyond the end piers at low portals; the owner's
+words taken literally (the retained hill's fall continued past the wings), which the agents
+tried and did not build because it grew the lit trim into a tongue (see the ADR finding).

@@ -2078,6 +2078,145 @@ Straight line's feedback, and accept no ADR. Nothing here is human evidence.
   - **Not established:** how any of it looks to the owner; whether the corner dip, the remaining teeth and low2's
     bank read wrong; the xslope back view; the two owner questions above; timings on the gate hardware.
 
+## Findings (2026-09-29, D4 portal wedges rounded)
+
+Recorded 2026-09-29 on branch `codex/d4-structures` (draft PR [#84](https://github.com/Kminkjan/infrastructurio/pull/84)),
+from `2ae19ab`, code at `219f52a` (core, with the terrain chunk pass and the byte pin), `1eac9e3` (the hill plug) and
+`494825f` (the captures and a drawn-crease test), [#68](https://github.com/Kminkjan/infrastructurio/issues/68).
+Measurements are automated (Vitest 4.1.10, Node 26.7.0, macOS 26.6.2, Apple M5 Pro) unless labelled agent (Playwright
+1.63.0, headless system Chrome, same machine). The status of this ADR stays Proposed: the owner's answers below change
+D4's ground rule behind tunnel portals and record a known behaviour of the 10 m rule, and accept no ADR. Nothing here is
+human evidence.
+- **Owner answers (2026-09-29, in conversation via the question tool, after the verification of the tunnel and portal
+  iteration; option labels and descriptions verbatim):**
+  5. Wedges. Question: "Beside some portals a sunlit triangular wedge remains (plus a sawtooth crease), where the
+     approach cutting's 45° end meets the hill beyond the wing walls — the same kind of wedge you disliked. Fix it?"
+     Answer: "Round it off (Recommended)": "Continue the retained hill's gentle 1:1.5 fall past the wing-wall ends and
+     round the crease smoothly (core ground rule + plug), so the cutting blends into the hill with no lit wedge or
+     teeth."
+  6. Split drags. Question: "Edge case: the 10 m tunnel rule is judged per drag, so the same line built as one drag vs.
+     split into two drags can come out slightly differently (e.g. an 8.55 m-deep piece becomes a cutting ending at a
+     portal instead of tunnel). Happens in ~6% of split tunnel drags; normal chains produced none. What should happen?"
+     Answer: "Accept it (Recommended)": "Keep drags green; the result is a deep cutting that ends at a portal, which
+     looks plausible. Documented as known behaviour."
+- **Diagnosis** (agent captures of the verification's scenes, re-shot at `2ae19ab` in Select, with the core's creases
+  projected onto them through the camera; plan-view hillshades of dumps of the core ground, the drawn terrain and the
+  plug's triangles; automated). Behind a tunnel plane the cut was max(S, R) + 45° · t, with S the approach's section at
+  the foot on the plane and R the retained skyline: two planar 45° facets, the retained trim R + t behind the wings and
+  the headwall S + t beyond them, meeting in a V along the line where S and R meet at the plane (9.84 m across, 3.89 m
+  up, on a level straight approach, just past the wing ends).
+  - The lit triangle left of the ew75 west portal at yaw 4 is the retained trim behind the north wing, not the
+    headwall; the dark shape beside it is the headwall and, in front of the plane, the cutting's own north slope. At
+    yaw 0 the headwall is the lit facet. So which facet reads as the wedge depends on the yaw.
+  - The headwall met the cutting's slope in a crease along the plane (its slope into the hill 0 in front, 1 behind),
+    and both facets met the hill with the 0.6 m smooth clamp: creases the 1.25 m terrain drew in steps.
+  - The ew75 east teeth are not a crease of the core's ground (rounding it left them unchanged; agent). They are the
+    plug's shading: the first two rows of its triangles behind the face and the wings took normals from the
+    departure's gradient over six 1.25 m neighbours that reached inside the wall and onto the cutting in front, 8 m
+    lower, and leaned up to 0.92 (67°) toward the face; the edge of that band followed the lattice (a stub of that
+    portal, automated; a flat-shaded raster of the plug's triangles).
+- **Tried and not built** (automated probes of the scenes and the population, agent captures):
+  - **The owner's words taken literally:** the retained trim continued past the wing ends until it meets the section,
+    with no headwall (U = smax(S, R + t), the prism), or the approach's own rounded end at the point (the cone). Both
+    grew the lit trim into a tongue running up to about 20 m back (ew75 west and the dead end at yaw 4: longer and
+    brighter than the triangle), and cut far more hill beside a portal: up to 8.38 m (prism) and 7.18 m (cone) more
+    at xslope, 1,509 and 1,130 m³ there.
+  - **The old rule with its V rounded** (smax(S + t, R + t)): both facets stayed (agent: close to the baseline).
+  - **A wider clamp over the retained trim too** (2.5 m beyond the face half width): it softened the fold at the rest
+    view, but the clamp lies under the ground it rounds, so at the trim's upper edge the ground stood up to 0.49 m
+    under a hill just inside the retained skyline, on 467 m² of the Track population's 59 tunnel planes (0.15 m
+    before; bands of 1.8 and 1.2 m: 0.34 and 0.23 m). Once the plug's normals were fixed it was not needed for the
+    teeth (agent: none either way), so the band widens beyond the wing ends only.
+  - **A one-sided rounding** (the cut lifted toward the hill by a cubic, never under either): it must steepen the cut
+    below it (the core's steepest slope 1.20 → 1.98), and read crisper (agent).
+  - **Strips along the masonry in the plug** (its triangles split parallel to the walls): softer teeth, three times the
+    plug's triangles (912 → 3,357 at ew75); reverted when the cause was found in the normals.
+- **As built, core** ([`track/earthworks.ts`](../../src/core/track/earthworks.ts), [`track/portal.ts`](../../src/core/track/portal.ts),
+  [`track/ground.ts`](../../src/core/track/ground.ts)). Past a tunnel plane, in both modes,
+  U = smax_k(max(fan, cone), z + R(u) + 45° · t), k = min(t, 3 m) (`portalRoundBandM`), with the fan
+  z + H + √(t² + max(0, S − z − H)²) round the V (H = 3.89 m, `PORTAL_V_BOTTOM_V`, from the constants): the section at
+  the plane, so it leaves the cutting with the cutting's own slope (no crease along the plane); 45° along the V's line,
+  as the retained trim rises, so no tongue runs past the wings; a rounded cone between, the cutting's end. `cone` is
+  the piece's own envelope at the point with no clip plane, so clipping still only raises U and the reach and
+  neighbour bounds hold. The polynomial smooth maximum (`smoothMax`) is 0 at the plane (a rounded maximum would step
+  over the section in front). The underlay takes min(the earlier headwall, U), so the terrain mesh draws the new ground
+  wherever the plug does not cover it. Beyond the wing ends (from 0.5 m inside the V, faded out 12 m behind and 16 m
+  across and before the piece's reach) the smooth clamp with the hill takes a band up to 2.5 m (`Envelope.band`,
+  `conformRule`'s band, folded as the widest by `conformedHeightM`, `ground.ts` and the chunk pass); behind the face
+  and the wings it stays 0.6 m. Bridge and buffer planes and the fill envelope are unchanged; so is rule 4.
+- **As built, render** ([`terrain/earthworks.ts`](../../src/render/terrain/earthworks.ts),
+  [`structures/plug.ts`](../../src/render/structures/plug.ts)): the chunk pass folds the band per sub-vertex (a
+  Float64Array: kept in a Float32Array, 0.6 became 0.6000000238 and moved every conformed height by float noise, which
+  the byte pin's refactor check found). The plug takes the core's new ground as its effective ground, unchanged, and
+  its normals behind the masonry are one-sided: a neighbour in front of its front line under masonry counts as the
+  mirror of the opposite one. The masonry cap, the compact backfill (answer 2), its 45° bank beyond the end piers, the
+  splayed wings (answer 3) and the dark bore are unchanged.
+- **Answer 6, recorded:** the 10 m rule stays judged per command. A line split over two commands can leave a deep
+  cutting ending at a portal where one command would have made a tunnel (the verification's counts: 1–6 pieces changed
+  in 20 of 320 Track and 19 of 313 Straight tunnel drags split in two, both halves accepted; the generated chains none).
+  Known behaviour, owner-accepted 2026-09-29; documented in the [simulation model](../simulation-model.md) (rule 4). Not
+  re-measured: rule 4 did not change.
+- **Re-measured** (automated; the committed generator [`tests/support/autoGrade.ts`](../../tests/support/autoGrade.ts),
+  seed "auto-grade-probe", 1,000 free drags and 150 chains per tool; before is `2ae19ab`; uncommitted probes):
+  - Acceptance, reasons and structures: every count unchanged (Track 1,503 of 1,690, Straight line 1,406).
+  - Behind every tunnel plane of the accepted free drags (59 Track, 57 Straight), over t in (0, 20] m and 26 m across:
+    the effective ground never stands above the natural (max 0.0000 m); within 9.8 m across it is never more than
+    0.150 m under min(natural, retained skyline + t), as before.
+  - Node grounds within 30 m of those planes: Track 203 of 7,466 moved (173 down, at most 3.28 m; 30 up, at most
+    0.57 m; 75 by more than 1 m), Straight 201 of 7,214 (170 down, 31 up, the same extremes).
+  - The scenes (the core ground on a 0.25 m grid behind the plane beyond the face; the drawn surface sampled at the
+    1.25 m sub-lattice, the plug where it draws, away from the 5 m lattice lines and the masonry), before → after:
+
+    | Portal | Core crease (per 0.5 m) | Drawn crease behind | Area over 42° | Ground moved (max, over 0.1 m, volume) |
+    |---|---|---|---|---|
+    | ew75 west | 0.87 → 0.66 | 1.14 → 1.00 | 97 → 53 m² | 2.82 m, 148 m², 152 m³ cut, 8 m³ raised |
+    | ew75 east | 0.87 → 0.66 | 1.14 → 0.96 | 25 → 16 m² | 1.43 m, 51 m², 26 / 3 m³ |
+    | short40 south | 0.87 → 0.66 | 1.14 → 0.75 | 30 → 18 m² | 1.23 m, 69 m², 29 / 4 m³ |
+    | short40 north | 0.87 → 0.66 | 1.14 → 0.69 | 42 → 25 m² | 1.62 m, 85 m², 42 / 6 m³ |
+    | dead end | 0.87 → 0.66 | 1.15 → 1.01 | 118 → 66 m² | 3.18 m, 182 m², 217 / 9 m³ |
+    | low2 | 0.87 → 0.66 | 1.24 → 1.24 | 59 → 31 m² | 2.19 m, 134 m², 112 / 4 m³ |
+    | low3 (221, 175) | 0.87 → 0.66 | 0.96 → 0.67 | 37 → 23 m² | 1.65 m, 79 m², 42 / 4 m³ |
+    | low3 (242, 133) | 0 → 0 | 0.91 → 0.91 | 8 → 9 m² | 0.49 m, 27 m², 7 / 0 m³ |
+    | xslope | 0.87 → 0.66 | 1.18 → 0.89 | 165 → 96 m² | 4.19 m, 248 m², 434 / 10 m³ |
+
+    The core's remaining crease lies where the valley starts at the plane, whose band is still narrow there (0.5 m at
+    0.5 m behind); its steepest slope rose 1.20 → 1.30 there, where the band's growth adds to the rise. The drawn
+    crease is the largest over the region, the upper edge of the retained trim included (its clamp is unchanged). The
+    ground is raised (less cut) by at most 0.72 m, the smooth maximum's k/4.
+  - The committed tests' measures: the synthetic portal's cut envelope 1–12 m behind the plane, 1.13 (the old rule)
+    → 0.19; the ew75 portals' drawn surface beyond the wing ends 1.18 → 0.74, and 0.63 from 2 m behind the plane.
+- **Agent captures** (`CAPTURE=1 npx playwright test --project=capture tests/e2e/d4wedges.capture.ts`, images in the
+  gitignored `test-results/d4-wedges/`, `before/` at `2ae19ab` from a scratch detached worktree, `after/` at
+  `494825f`, 31 views each, no page errors or warnings; notes, not a look verdict): ew75 west at yaw 4, the lit
+  triangle is a rounded lit shoulder and the dark shape beside it a soft shade; ew75 east at Detail yaw 3, the teeth
+  are gone (a smooth shade behind the face; two small steps at the top of the lit band remain, as before); short40 at
+  yaw 4, the south portal's lit parallelogram and dark triangle are soft shades (the one over the face darker than
+  before), the north portal's crease a soft fold; the dead end at yaw 4 as ew75 west; at the rest view (yaw 0) the thin
+  crease from a face's hill-side top corner is a broad soft fold with faint streaks in it; low2, low3 and xslope round
+  the same way. No pit, ridge, seam or grass in a bore seen.
+- **Performance** (dev readings on a loaded shared machine, five interleaved rounds, each the median of six rebuilds;
+  not gates): the StructureView timing test wired as the app wires the views, the e2e hill (48 pieces, 23 tunnel),
+  earthworks 8.03–9.79 ms (one round 18.50) → 9.00–10.37 ms, structures 8.33–8.47 ms (one round 15.14) → 7.40–9.11 ms;
+  scene B earthworks 3.12–4.38 → 3.50–4.02 ms, structures 3.71–5.66 → 3.80–4.36 ms. The earthworks cost is the second
+  nearest-point query behind tunnel planes. Gates are authoritative only in the
+  [acceptance gates](../evidence/m4/2026-09-26-acceptance-gates.md).
+- **Tests** (automated at `494825f`, 2026-09-29): 812 in 91 files, all passing; Playwright 17 of 17 (agent). New: the
+  fan beyond the wing ends, no crease along the plane, the V rounded (with the old rule as a negative case), never
+  under the approach's own envelope, the band beyond the wing ends only, the hill kept behind the face and the wings
+  within the clamp's 0.15 m and never above natural, the ground round two portals built in steps equal to a fresh
+  sim's, the plug's normals behind the masonry (which fails without the one-sided gradient), the drawn crease at the
+  ew75 portals. Changed expectations, each for the behaviour change above: the retain test's underlay is now the lower
+  of the earlier headwall and the ground mode's, and beyond the wing ends the modes are no longer bit-identical; the
+  byte pin's drawn heights, normals, colours, attribute, indices, heightfields and surfaces, and 21 more refined
+  triangles (6,275 → 6,296), with the old envelope in the new code path checked to draw every old hash.
+- **Not established:** how any of it reads to the owner (the next feel check), and the Look Gates; that the fan is
+  what the owner meant by "continue the retained hill's gentle 1:1.5 fall" (the literal reading was tried and grew the
+  lit trim, above); the retained 45° trim behind the wings, which the rule keeps and which still reads lit or dark where
+  the hill stands high (a rounded shoulder at ew75 west and the dead end at yaw 4); the faint streaks in the rest-view
+  fold; the valley's first 1–2 m behind the plane, where the smooth maximum's band is still narrow; curved or graded
+  approaches, whose V the fan takes from the level straight one (not probed apart); the plug's 45° bank beyond the end
+  piers at low portals (unchanged); timings on the gate hardware.
+
 ## Revisit when
 
 - The D3 feel check finds construction unsatisfying for reasons that planner tuning, chained
@@ -2172,3 +2311,7 @@ Straight line's feedback, and accept no ADR. Nothing here is human evidence.
   later cutting, the dark bore, the plug under the masonry and along its toe, the ground envelope's rebuild time; the
   10 m rule across commands and the wedges beyond the wing ends left for the owner; the scene B correction, the
   per-portal shares and the tunnel-edit timings); status unchanged, still Proposed.
+- 2026-09-29: D4 portal wedges rounded findings added (the owner's answers 5 and 6 verbatim, the diagnosis of the wedges
+  and the teeth, the variants tried, the fan beyond the wing ends with its smooth maximum and wider clamp in the core,
+  the plug's one-sided normals, answer 6 recorded as known behaviour, re-measured numbers, captures, timings and tests);
+  status unchanged, still Proposed.

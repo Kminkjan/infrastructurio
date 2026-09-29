@@ -341,6 +341,19 @@ and its [version 2 note](decisions/0010-triangular-lattice-track-geometry.md#fin
   higher; bridge, buffer and fill envelopes are unchanged. The renderer's terrain mesh keeps
   the earlier headwall as an underlay and draws the retained hill as the portal's plug
   ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-tunnel-and-portal-iteration)).
+- **Portal wedges rounded (2026-09-29, owner decision "Round it off").** Beyond the wing ends
+  the approach cutting no longer ends in a planar 45° headwall: past a tunnel end's plane the
+  cut is a fan round the point where the retained skyline meets the section at the plane (9.84 m
+  across, 3.89 m up on a level straight approach), the section at the plane and rising 45° along
+  that line, so it meets the cutting in front with the same slope and the retained skyline
+  without a tongue; a smooth maximum over a band growing from 0 at the plane to 3 m rounds the
+  valley where the two meet, and there the smooth clamp with the hill takes a band up to 2.5 m.
+  Behind the face and the wings the retained hill is as before, within the 0.15 m of the usual
+  clamp. The underlay takes the lower of the earlier headwall and this, so the terrain draws it
+  where the plug does not. No acceptance, reason or structure count moved; of the 7,466 lattice
+  nodes within 30 m of the Track population's 59 tunnel planes, 203 moved (173 down, 3.28 m at
+  most, and 30 up, 0.57 m at most)
+  ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-29-d4-portal-wedges-rounded)).
 
 ## 8. Planner
 
@@ -610,6 +623,14 @@ tracks.
   are otherwise unchanged: a forced ground piece is a cutting to 8 m, a forced tunnel needs
   only more than 8 m somewhere. No reason code changed
   ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-tunnel-and-portal-iteration)).
+  - **Judged per command** (known behaviour, owner-accepted 2026-09-29, "Accept it"). The rule
+    groups the added pieces of one command, so a line split over two commands can come out
+    differently from the same line built in one: a piece with, say, 8.55 m of cover that one
+    drag makes part of a tunnel becomes a deep cutting ending at a portal when its half of the
+    line reaches 10 m nowhere (1–6 pieces in about 6% of the committed population's tunnel
+    drags split in two; the generated chains produced none). Committed pieces are never
+    reclassified, and both halves stay accepted
+    ([ADR 0010 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-29-d4-portal-wedges-rounded)).
 - **As built (D4, 2026-09-28; defaults to test,
   [ADR 0010 D4 finding](decisions/0010-triangular-lattice-track-geometry.md#findings-2026-09-28-d4-grades-and-structures)):**
   - **Grade:** an added piece fails when |num| > 35 · den on its exact rational grade. The
@@ -653,7 +674,8 @@ tracks.
     of 1,690 accepted (88.9%), Straight line 1,406 (83.2%); `tunnel-too-shallow` 18 → 14 and
     22 → 13; tunnel runs 77 → 54 and 84 → 52, none shorter than 20 m, and no through-tunnel
     under 40 m is left; 27 Track and 41 Straight drags now have cuttings 8–9.9 m deep. The
-    retain rule alone moved no number.
+    retain rule alone moved no number. **With the portal wedges rounded** (2026-09-29, the
+    same drags): every number above unchanged.
 - **Rule 6 details.**
   - Exemptions: shared nodes, turnout fans and diamond arms.
   - Broadphase: an incremental spatial hash with 20 m cells.
