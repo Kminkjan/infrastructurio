@@ -435,6 +435,102 @@ describe("structure rebuild cost on the diorama (a dev measurement, not a gate)"
     registry.dispose();
   });
 
+  it("draws no crease beyond the wing ends of a diorama portal, the terrain and plugs wired as the app wires them (D4 portal wedges)", async () => {
+    // The shortest east–west two-portal tunnel (the 2026-09-29 verification's "ew75"), Straight (227, 138) → (259, 138),
+    // where the old rule's 45° headwall beyond the wing ends drew a lit parallelogram, a dark triangle and teeth. On
+    // the drawn surface (the plug where it draws, else the terrain mesh), sampled at the 1.25 m sub-lattice's vertices,
+    // the largest change of gradient across an edge inside a 5 m lattice triangle (where the natural ground is planar)
+    // behind the portal plane and beyond the wing ends (9.5–17 m across).
+    const { diorama, toolStartMm } = await import("../../../tests/support/groundPlans");
+    const { nearestNode } = await import("../../core/sim/api");
+    const { terrain: dio } = diorama();
+    const dshading = computeTerrainShading(dio);
+    const world = createWorld(dio);
+    const registry = new AssetRegistry();
+    registerStructureAssets(registry);
+    const earthworks = new EarthworksView({ terrain: dio, target: { shading: dshading, replaceChunk: () => true }, requestFrame: () => {}, now: () => 0, budgetMs: Infinity });
+    const view = new StructureView({
+      terrain: dio,
+      registry,
+      material,
+      plugMaterial: material,
+      shading: dshading,
+      water: waterPlane(dio, dshading.waterDistance),
+      requestFrame: () => undefined,
+      now: () => 0,
+      budgetMs: 1e9,
+      groundM: (x: number, y: number) => earthworks.heightfield.heightAtM(x, y),
+      effectiveIn: (box: { minX: number; minY: number; maxX: number; maxY: number }) => earthworks.effectiveIn(box),
+      cutEnvelopeIn: (box: { minX: number; minY: number; maxX: number; maxY: number }, except: readonly string[]) => earthworks.cutEnvelopeIn(box, except),
+      attributeIn: (box: { minX: number; minY: number; maxX: number; maxY: number }) => earthworks.attributeIn(box),
+      notchBox: (key: string) => earthworks.notchBox(key),
+      ground: earthworks.ground,
+    });
+    const w = toWorld({ q: 259, r: 138 });
+    const zMm = toolStartMm(dio, { q: 227, r: 138 });
+    const end = nearestNode({ x: w.x, y: w.y });
+    const drag = { from: { q: 227, r: 138, zMm }, to: { xMm: Math.round(w.x * 1000), yMm: Math.round(w.y * 1000) }, dzMm: (world.groundMm(end.q, end.r) ?? zMm) - zMm, magnetism: true, heightMode: "straight" } as const;
+    let plan = world.plan(drag);
+    if (plan.end && !plan.snapped) plan = world.plan({ ...drag, dzMm: (world.groundMm(plan.end.node.q, plan.end.node.r) ?? zMm) - zMm });
+    expect(world.run({ type: "build-track", pieces: plan.pieces, structure: "auto" }, true).ok).toBe(true);
+    for (let i = 0; i < 100 && (earthworks.sync(world.network() as NetworkView, world.ground()) || earthworks.busy); i++);
+    for (let i = 0; i < 100 && (view.sync(world.network() as NetworkView) || view.busy); i++);
+    const outlines = view.portalOutlines;
+    expect(outlines).toHaveLength(2);
+    const sub = 1.25;
+    const row = sub * (Math.sqrt(3) / 2);
+    const shown = (qs: number, rs: number): number => {
+      const x = sub * (qs + rs / 2);
+      const y = row * rs;
+      const p = view.plugHeightAt(x, y);
+      return Number.isNaN(p) ? earthworks.heightfield.heightAtM(x, y) : p;
+    };
+    const gradient = (tri: readonly (readonly [number, number])[]): [number, number] => {
+      const [a, b, c] = tri.map(([qs, rs]) => [sub * (qs + rs / 2), row * rs, shown(qs, rs)] as const);
+      if (!a || !b || !c) return [0, 0];
+      const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+      const det = ux * vy - uy * vx;
+      return [(uz * vy - uy * vz) / det, (ux * vz - uz * vx) / det];
+    };
+    const mod4 = (v: number) => ((v % 4) + 4) % 4;
+    let worst = 0;
+    let worstBack = 0;
+    let edges = 0;
+    for (const { frame: f } of outlines) {
+      for (let rs = Math.floor((f.y - 20) / row); rs <= Math.ceil((f.y + 20) / row); rs++) {
+        for (let qs = Math.floor((f.x - 20) / sub - rs / 2); qs <= Math.ceil((f.x + 20) / sub - rs / 2); qs++) {
+          const cx = sub * (qs + 1 / 3 + (rs + 1 / 3) / 2);
+          const cy = row * (rs + 1 / 3);
+          const ss = (cx - f.x) * f.tx + (cy - f.y) * f.ty;
+          const u = Math.abs((cx - f.x) * f.ty - (cy - f.y) * f.tx);
+          if (ss < 0.05 || ss > 9 || u < 9.5 || u > 17) continue;
+          // A down triangle and its three neighbours across edges inside the lattice triangle.
+          const g = gradient([[qs, rs], [qs + 1, rs], [qs, rs + 1]]);
+          const across: [readonly (readonly [number, number])[], boolean][] = [
+            [[[qs + 1, rs], [qs + 1, rs + 1], [qs, rs + 1]], mod4(qs + rs + 1) !== 0],
+            [[[qs + 1, rs - 1], [qs + 1, rs], [qs, rs]], mod4(rs) !== 0],
+            [[[qs, rs], [qs, rs + 1], [qs - 1, rs + 1]], mod4(qs) !== 0],
+          ];
+          for (const [tri, inside] of across) {
+            if (!inside) continue;
+            const h = gradient(tri);
+            edges += 1;
+            const j = Math.hypot(g[0] - h[0], g[1] - h[1]);
+            if (j > worst) worst = j;
+            if (ss >= 2 && j > worstBack) worstBack = j;
+          }
+        }
+      }
+    }
+    expect(edges).toBeGreaterThan(200);
+    // Measured 2026-09-29: 1.18 at 2ae19ab, the V along the valley at every depth; 0.74 since, where the smooth
+    // maximum's band is still narrow near the plane, and 0.63 from 2 m behind it.
+    expect(worst).toBeLessThan(0.85);
+    expect(worstBack).toBeLessThan(0.7);
+    view.dispose();
+    registry.dispose();
+  });
+
   it("times tunnel edits with their approach cuttings, the earthworks and structures wired as the app wires them", async ({ annotate }) => {
     // Verification finding (2026-09-29): the forced 43-piece tunnel above wires no earthworks, so it hid what a tunnel
     // edit costs in the app (the plugs read the earthworks' effective ground, cut envelopes and notch boxes, and the
