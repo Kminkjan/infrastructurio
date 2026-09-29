@@ -1989,6 +1989,94 @@ Straight line's feedback, and accept no ADR. Nothing here is human evidence.
   repeats an identical announcement (the HUD store publishes only a changed status, so a run of equal limit
   presses may be read once); a cue for Track's auto-graded end, which the limit can hold too; a dead-end cutting
   8–10 m deep continued later as a tunnel (not probed); timings on the gate hardware.
+- **Verification fixes (2026-09-29).** An adversarial verification of this iteration at `4dd917a` (automated
+  probes, agent browser runs) reported eleven findings. Fixed at `add616a`, `23c6683`, `9edfddc`, `71f3069`,
+  `5c94045` and `3dedd89` (tools, render); no core change. Automated unless labelled agent; the agent captures
+  (before at `23c6683` with the render code of `4dd917a`, after at `3dedd89`) are in the gitignored
+  `test-results/d4-iter3-fix/`, agent evidence only.
+  - **Held end on a track end** (fixed). On the track end the pointer is on, the tool asks for that end's
+    height, but the held check measured against the ground plus the steps: aimed at a 10 m raised buffer end the
+    line ended at 2.33 m, and the first `]` jumped the steps 0 → 3 unannounced, carried into the chained drag. Now
+    the check reads the height the tool asked for; on a track end no key can move it, so both keys keep the steps and
+    announce "Height unchanged: end held 7.7 m below the track end at (30, 10) by the 3.5 % limit." The verifier's
+    scan around that buffer end: 122 of 161 starts held there, the steps unchanged after `]` in all of them.
+  - **Buffer-end portals after a later cutting** (fixed): a run's signature now holds each end's portal decision,
+    and `refreshGround` re-checks buffer ends, so a cutting 13 m away that lowers a dead end's ground under 8 m draws
+    its portal as a fresh view does (1 → 2 portals, the verifier's scene, tested).
+  - **The bore** (fixed): inside a bore's footprint (4.5 m deep, 2.6 m each side, grown by one sub-lattice step) the
+    terrain mesh keeps the underlay no higher than the track bed; its 45° headwall stood 4.375 m over the bed inside
+    the footprint in the committed test scene. The byte pin was re-recorded for the drawn heights only (normals,
+    colours, indices, refined triangles, scenery and bakes unchanged). Agent: the arch now shows the dark bore and the
+    rails at every face-on view captured (dead end yaw 4, low3 yaw 0, xslope yaw 1, ew75 west yaw 4, short40 north
+    yaw 2).
+  - **The cornice sliver and the corner notch** (fixed): the core's retained hill rises 45° behind the face plane, so
+    the plug's front edge floated 0.17 m over the parapet coping and up to 0.8 m over the wing coping at the face's
+    corners, and rays passed under it to the bore's back (a diagnostic recolour showed the sliver was the back cap).
+    The plug now stays 2 cm under the masonry it abuts and rises 2 : 1 behind its back edge (`masonryCapV`). CPU
+    raycasts of the real meshes along the six view directions over each portal (a grid of rays aimed 7.5 m over the
+    track, 0.15 m apart): rays reaching the bore away from its arch 10 → 0 (dead end),
+    17 → 0 (ew75), 10 → 0 (short40), 1 → 0 (low3), 18 → 0 (ewhill). xslope keeps 101 → 100, all from behind the
+    hill at yaw 3, where the arch stands out of the side-slope hill: not among the findings, not fixed. Left: a
+    V-shaped dip up to about 0.6 m deep and 1 m wide at the face/wing corner (agent), and the plug up to 0.24 m under
+    the core's ground right behind the face coping.
+  - **The outline staircase and the low-portal mound** (partly fixed). The plug now ends along the toe of its fill
+    (clipped on the interpolated contour, not kept in whole sub-triangles), each vertex blends the terrain's normal,
+    colour and attribute into its own over its first 0.3 m of rise, the fill's potential reaches the toe (so the
+    relief's facets fade along it), and the 4 cm lift fades out there (it drew a dark line along the toe). On flat
+    ground under a low portal the outline lies on the toe to a median 0.000003 m, p90 0.09 m, max 0.22 m (before 0.43,
+    0.90 and 1.09 m short of the ground), with the terrain's own normal. In the eight probed scenes the open outline
+    lies on the drawn ground within 2 cm except two vertices in each of four scenes, 0.08–0.22 m over it: the same
+    vertices and gaps as before (not among the findings, not fixed). Agent: the low mound's edge is soft and the
+    lift's line gone; low2's dark bank keeps its lumpy body.
+    Not fixed: the ew75 east teeth (and similar at other portals). They are not the plug's outline but a crease of
+    the core's effective ground, U = max(bed + section, skyline) + 45° · t, where the retained skyline meets the
+    approach cutting beyond a wing's end, drawn on the 1.25 m lattice. A smooth maximum there would round it, but it
+    changes the core's ground near those creases, so it goes to the owner with the next point.
+  - **Facing-portal wedges** (the verifier's "plausible"; confirmed, not changed): at short40 the 45° headwall
+    beyond the wing ends still leaves the lit parallelogram and the dark triangle (agent capture unchanged), and a
+    crease runs from each face's hill-side top corner. This is the core rule as built ("beyond the wing ends nothing
+    changes"). For the owner's feel check: keep it, or continue the retained skyline's 1 : 1.5 fall past the end
+    piers in the core's ground mode and the plug, rounding its crease.
+  - **The 10 m rule across commands** (recorded, not changed). The rule groups the added pieces of one command,
+    so where a line splits into commands decides its structures: splitting each accepted tunnel drag of the
+    committed population in two changed 1–6 pieces from tunnel to ground in 20 of 320 (Track) and 19 of 313
+    (Straight) cases, both halves accepted (the verifier's counts). Reproduced at `3dedd89`: the drag from (278,
+    101, 20.4 m) builds tunnels of 10.19 and 8.55 m of cover in one drag; built as six pieces then one, the 8.55 m
+    piece is ground and its ground–tunnel transition lies under 8.55 m of natural cover, where the core counts no
+    portal but render draws one at every ground end. The generated chains produced none. For the owner: accept
+    this, or reject a continuation that would leave a portal under more than 8 m of cover (committed pieces are
+    never reclassified).
+  - **Correction to "Not established" above** (the plug-area targets): scene B still has its tunnel (9 ground and 7
+    tunnel pieces, as recorded above), and its plug target was met. The plug stands more than 1 m over the natural
+    ground on 16 m² at `4dd917a` and at `3dedd89` (166 m² at `41f6a4b`), against the predeclared T-plug target of
+    ≤ 40 m². Only s231 and the Track curve, now all ground, cannot be measured.
+  - **Per-portal protrusion** (not reported above; the verifier's probe, the natural LOD0 surface on a 0.25 m grid).
+    Portals whose plug stands more than 0.5 / 1 / 2 m over the natural ground somewhere, Track: 50 / 38 / 20 of 90
+    (55.6 / 42.2 / 22.2%) at `ec9d225` → 50 / 39 / 24 of 70 (71.4 / 55.7 / 34.3%) at `4dd917a` → 50 / 39 / 23 of 70
+    (71.4 / 55.7 / 32.9%) at `3dedd89`. Straight line: 47 / 36 / 18 of 86 (54.7 / 41.9 / 20.9%) → 47 / 37 / 21 of 67
+    (70.1 / 55.2 / 31.3%) → 47 / 37 / 20 of 67 (70.1 / 55.2 / 29.9%). The most 5.94 → 6.00 → 5.96 m (Track) and
+    5.94 → 5.98 → 5.93 m. At `4dd917a` the new fill in front of the face plane, behind the splayed wings, stood
+    more than 2 m proud at 16 (Track) and 14 portals, up to 5.27 m (verifier). Every sample stayed within 0.333 m
+    of the unsplayed retained skyline, so this follows answers 2 and 3: fewer square metres of raised ground (881
+    and 852 m² more than 1 m over at `3dedd89`), more portals with a proud bank. The owner's feel check weighs them.
+  - **Tunnel-edit rebuild time** (dev readings on the machine above, three rounds each, one edit re-built seven
+    times; not gates). The earthworks evaluated their second ("ground") envelope over every piece's whole reach,
+    not only past its tunnel plane; it now runs only there, which kept every byte of the pin. Wired as the app wires
+    the views (new timing test), the e2e hill tunnel with its approach cuttings (48 pieces, 23 tunnel): earthworks
+    median 9.37–9.69 ms at `4dd917a` → 7.45–8.11 ms (with no second envelope at all 6.55–8.34 ms), structures
+    5.46–5.84 → 6.76–7.06 ms. Scene B: earthworks 3.44–3.50 → 2.78–2.85 ms (one round 4.30), structures 2.43–2.58
+    → 2.93–3.37 ms. The plug rewrite costs the hill's two plugs 4.06 → 4.76 ms (median of 15 builds), so a tunnel
+    edit stays about 15 ms render-side. The "10-piece edits" figure above (4.15 → 4.14 ms) has a tunnel in 1 of its
+    38 edits and hides this.
+  - **Tests** (automated at `3dedd89`, 2026-09-29): 803 in 91 files, all passing; Playwright 17 of 17 (agent). New:
+    the held end on a raised track end and its line, two buffer-end portal cases, the bore at the bed, the masonry
+    cap, the outline on the toe with the terrain's look, the wired tunnel timing. Changed expectations, each for the
+    behaviour change above: the byte pin's drawn heights; a plug test's stub hill (a 12 m cliff at the face plane)
+    now capped under the coping near the face; outlines compared with the drawn ground as the mesh draws it (linear
+    in each sub-triangle), with no lift there; a 20 m two-portal plug no longer reaches the middle line; the low
+    portal's outline potential that of the daylight line, not 0.
+  - **Not established:** how any of it looks to the owner; whether the corner dip, the remaining teeth and low2's
+    bank read wrong; the xslope back view; the two owner questions above; timings on the gate hardware.
 
 ## Revisit when
 
@@ -2080,3 +2168,7 @@ Straight line's feedback, and accept no ADR. Nothing here is human evidence.
   and the 10 m tunnel rule in the core, the underlay and shown ground, the compact backfill and splayed wings in
   render, the Straight line's held end, the ghost's end marks in travel order, re-measured numbers, changed tests);
   status unchanged, still Proposed.
+- 2026-09-29: verification fixes added to that section (the held end on a track end, buffer-end portals after a
+  later cutting, the dark bore, the plug under the masonry and along its toe, the ground envelope's rebuild time; the
+  10 m rule across commands and the wedges beyond the wing ends left for the owner; the scene B correction, the
+  per-portal shares and the tunnel-edit timings); status unchanged, still Proposed.
